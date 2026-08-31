@@ -21,7 +21,7 @@ import {
   normalizeCaption,
   validatePhotoEdit,
 } from '../../src/shared/validation.ts';
-import { makeCatalog, makePhoto, testPhotoId } from '../support/photos.ts';
+import { makeCatalog, makePhoto, testPhotoId } from '../../fixtures/photos.ts';
 
 describe('emptyCatalog', () => {
   it('starts at schema version 1 with no photos and no batches', () => {

@@ -32,6 +32,20 @@ export const ACCEPTED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.heic', '.heif'] a
 export const RENDITIONS = ['full', 'thumb', 'display-1280', 'display-2560'] as const;
 export type Rendition = (typeof RENDITIONS)[number];
 
+/**
+ * Renditions the asset Worker will serve at an unsigned capability URL.
+ *
+ * `full` is deliberately excluded: the full-resolution JPEG is reachable only
+ * through a short-lived HMAC-signed download URL, so it cannot be fetched by
+ * knowing the photo ID alone.
+ */
+export const DISPLAY_RENDITIONS = [
+  'thumb',
+  'display-1280',
+  'display-2560',
+] as const satisfies readonly Rendition[];
+export type DisplayRendition = (typeof DISPLAY_RENDITIONS)[number];
+
 export interface RenditionSpec {
   /** Longest-edge target in pixels, or null for full resolution. */
   maxEdge: number | null;

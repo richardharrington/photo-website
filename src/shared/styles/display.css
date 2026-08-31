@@ -1,0 +1,288 @@
+/*
+ * Viewer styles. Photo-first: neutral surfaces, system type, generous
+ * spacing, and nothing decorative competing with the images.
+ */
+
+.layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.layout__header {
+  padding: var(--space) calc(var(--space) * 1.5);
+  border-bottom: 1px solid var(--border);
+}
+
+.layout__site-title {
+  margin: 0;
+  color: var(--fg);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 1rem;
+  letter-spacing: 0.01em;
+}
+
+.layout__main {
+  flex: 1;
+  width: 100%;
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: calc(var(--space) * 1.5);
+}
+
+.layout__title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0 0 calc(var(--space) * 1.5);
+}
+
+.layout__subtitle {
+  color: var(--fg-muted);
+  margin: -0.75rem 0 var(--space);
+}
+
+.breadcrumbs ol {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0;
+  margin: 0 0 var(--space);
+  font-size: 0.875rem;
+  color: var(--fg-muted);
+}
+
+.breadcrumbs li + li::before {
+  content: '/';
+  margin-right: 0.5rem;
+  color: var(--fg-muted);
+}
+
+.breadcrumbs a {
+  color: var(--fg-muted);
+  text-decoration: none;
+}
+
+.breadcrumbs a:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+/* Group indexes ---------------------------------------------------------- */
+
+.group-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  border-top: 1px solid var(--border);
+}
+
+.group-list__link {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space);
+  padding: 0.875rem 0.25rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.group-list__link:hover {
+  background: var(--bg-raised);
+}
+
+.group-list__label {
+  font-size: 1.0625rem;
+}
+
+.group-list__count {
+  color: var(--fg-muted);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Day grid --------------------------------------------------------------- */
+
+.photo-grid {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.5rem;
+}
+
+.photo-grid__link {
+  display: block;
+  /* Square tiles keep rows aligned and reserve their space before any image
+     loads, so the grid never reflows. */
+  aspect-ratio: 1;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--bg-raised);
+}
+
+.photo-grid__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+@media (min-width: 40rem) {
+  .photo-grid {
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  }
+}
+
+/* States ----------------------------------------------------------------- */
+
+.state {
+  color: var(--fg-muted);
+  padding: calc(var(--space) * 2) 0;
+}
+
+.state h1 {
+  color: var(--fg);
+  font-size: 1.25rem;
+  margin: 0 0 0.5rem;
+}
+
+/* Lightbox --------------------------------------------------------------- */
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.lightbox__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+  padding: 0.75rem var(--space);
+  border-bottom: 1px solid var(--border);
+}
+
+.lightbox__close {
+  color: var(--fg);
+  text-decoration: none;
+  font-size: 0.9375rem;
+}
+
+.lightbox__close:hover {
+  text-decoration: underline;
+}
+
+.lightbox__position {
+  color: var(--fg-muted);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.lightbox__stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: var(--space);
+}
+
+.lightbox__image {
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+.lightbox__nav {
+  flex: none;
+  width: 2.75rem;
+  height: 2.75rem;
+  font-size: 1.5rem;
+  line-height: 1;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-raised);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.lightbox__nav:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.lightbox__details {
+  padding: var(--space);
+  border-top: 1px solid var(--border);
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.lightbox__caption {
+  margin: 0 0 0.5rem;
+  /* Captions are plain text with line breaks; preserve them without
+     interpreting any markup. */
+  white-space: pre-wrap;
+}
+
+.lightbox__capture {
+  margin: 0 0 0.75rem;
+  color: var(--fg-muted);
+  font-size: 0.9375rem;
+}
+
+.lightbox__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.lightbox__actions button {
+  font: inherit;
+  font-size: 0.9375rem;
+  padding: 0.5rem 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.lightbox__actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.lightbox__error {
+  margin: 0.75rem 0 0;
+  color: var(--fg);
+}
+
+.photo-info {
+  margin: var(--space) 0 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 1rem;
+  font-size: 0.875rem;
+}
+
+.photo-info dt {
+  color: var(--fg-muted);
+}
+
+.photo-info dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

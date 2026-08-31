@@ -4,5 +4,6 @@
     "lib": ["ES2022"],
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["worker/**/*", "src/shared/**/*"]
+  "include": ["worker/**/*", "src/shared/**/*"],
+  "exclude": ["src/shared/ui/**", "src/shared/styles/**", "**/*.tsx"]
 }

@@ -4,5 +4,6 @@
     "lib": ["ES2022", "DOM"],
     "types": ["node"]
   },
-  "include": ["netlify/**/*", "src/shared/**/*"]
+  "include": ["netlify/**/*", "src/shared/**/*"],
+  "exclude": ["src/shared/ui/**", "src/shared/styles/**", "**/*.tsx"]
 }

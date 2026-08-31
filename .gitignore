@@ -15,3 +15,5 @@ dist/
 
 # macOS
 .DS_Store
+test-results/
+playwright-report/

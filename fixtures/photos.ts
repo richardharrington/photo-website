@@ -1,19 +1,19 @@
 /**
- * Test fixtures for catalog records.
+ * Catalog record factories.
  *
- * Kept in one place so ordering, API, and UI tests all reason about the same
- * shape, and so adding a field to PhotoRecord fails to compile here once
- * rather than in every test.
+ * Shared by the unit tests and by the local development fixture server, so
+ * both reason about the same shape and adding a field to PhotoRecord fails to
+ * compile here once rather than in every consumer.
  */
 
-import { RENDITION_SPECS, RENDITIONS } from '../../src/shared/constants.ts';
-import type { Rendition } from '../../src/shared/constants.ts';
-import { CATALOG_SCHEMA_VERSION } from '../../src/shared/catalog.ts';
+import { RENDITION_SPECS, RENDITIONS } from '../src/shared/constants.ts';
+import type { Rendition } from '../src/shared/constants.ts';
+import { CATALOG_SCHEMA_VERSION } from '../src/shared/catalog.ts';
 import type {
   Catalog,
   DerivativeDescriptor,
   PhotoRecord,
-} from '../../src/shared/catalog.ts';
+} from '../src/shared/catalog.ts';
 
 let counter = 0;
 
@@ -42,8 +42,18 @@ function derivativesFor(width: number, height: number) {
   return out;
 }
 
-export function makePhoto(overrides: Partial<PhotoRecord> = {}): PhotoRecord {
-  const id = overrides.id ?? testPhotoId();
+/**
+ * `width`/`height` describe the full-resolution source; the four derivative
+ * descriptors are scaled from them so aspect ratios stay self-consistent.
+ */
+export interface MakePhotoOptions extends Partial<PhotoRecord> {
+  width?: number;
+  height?: number;
+}
+
+export function makePhoto(overrides: MakePhotoOptions = {}): PhotoRecord {
+  const { width = 4032, height = 3024, ...rest } = overrides;
+  const id = rest.id ?? testPhotoId();
   return {
     id,
     contentHash: `hash-${id}`,
@@ -60,10 +70,10 @@ export function makePhoto(overrides: Partial<PhotoRecord> = {}): PhotoRecord {
     createdAt: '2026-08-03T10:00:00.000Z',
     updatedAt: '2026-08-03T10:00:00.000Z',
     trashedAt: null,
-    derivatives: derivativesFor(4032, 3024),
+    derivatives: derivativesFor(width, height),
     createdAuditId: 'audit000',
     updatedAuditId: 'audit000',
-    ...overrides,
+    ...rest,
   };
 }
 

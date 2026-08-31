@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import '../shared/styles/base.css';
+import '../shared/styles/display.css';
 
 document.title = __SITE_TITLE__;
 

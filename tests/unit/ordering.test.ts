@@ -8,7 +8,7 @@ import {
   findYear,
   siblingsWithinGroup,
 } from '../../src/shared/ordering.ts';
-import { makePhoto, testPhotoId } from '../support/photos.ts';
+import { makePhoto, testPhotoId } from '../../fixtures/photos.ts';
 
 describe('comparePhotosWithinDay', () => {
   it('orders timed photos chronologically', () => {

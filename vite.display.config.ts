@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolveBuildEnv, clientDefines } from './config/build-env.ts';
+import { fixtureServer } from './config/fixture-server.ts';
 
 const env = resolveBuildEnv('display');
 
@@ -12,7 +13,7 @@ export default defineConfig({
   base: `${env.appBase}/`,
   publicDir: false,
   define: clientDefines(env),
-  plugins: [react()],
+  plugins: [react(), fixtureServer()],
   build: {
     outDir: `../../dist${env.appBase}`,
     emptyOutDir: true,

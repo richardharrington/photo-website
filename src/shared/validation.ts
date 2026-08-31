@@ -8,8 +8,7 @@
  */
 
 import { validateCaptureMoment, formatCaptureDate } from './datetime.ts';
-import type { CaptureMoment, ValidationResult } from './datetime.ts';
-import type { PhotoRecord } from './catalog.ts';
+import type { CaptureDate, CaptureMoment, ValidationResult } from './datetime.ts';
 
 export const MAX_CAPTION_LENGTH = 2000;
 
@@ -62,8 +61,14 @@ export function validatePhotoEdit(input: PhotoEditInput): ValidationResult<Photo
  * Accessible image text. The caption is the real alt text when there is one;
  * otherwise a concise description of what the viewer is looking at, which is
  * more useful to a screen reader than a filename or an empty string.
+ *
+ * Takes the two fields it actually reads rather than a whole PhotoRecord, so
+ * the public projection the viewer receives satisfies it without a cast.
  */
-export function altTextFor(photo: PhotoRecord): string {
+export function altTextFor(photo: {
+  caption: string | null;
+  captureDate: CaptureDate | null;
+}): string {
   if (photo.caption) return photo.caption;
   if (photo.captureDate) return `Photo from ${formatCaptureDate(photo.captureDate)}`;
   return 'Undated photo';

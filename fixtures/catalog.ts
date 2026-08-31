@@ -1,0 +1,196 @@
+/**
+ * A development and test catalog.
+ *
+ * Deliberately awkward rather than tidy: it mixes timed and date-only photos
+ * on the same day, spans a year boundary, includes captions with line breaks,
+ * an undated group, and a trashed record that must be invisible to every
+ * display route. Building the viewer against a well-behaved fixture would hide
+ * exactly the cases the ordering and trash rules exist for.
+ */
+
+import { makeCatalog, makePhoto, testPhotoId } from './photos.ts';
+import type { Catalog, PhotoRecord } from '../src/shared/catalog.ts';
+
+interface Spec {
+  seed: string;
+  date: string | null;
+  time: string | null;
+  caption?: string | null;
+  filename: string;
+  batch: number;
+  index: number;
+  landscape?: boolean;
+  trashed?: string | null;
+  source?: PhotoRecord['timestampSource'];
+}
+
+const SPECS: Spec[] = [
+  // A busy day, out of chronological order in the source list on purpose.
+  {
+    seed: 'beach-late',
+    date: '2026-08-02',
+    time: '17:48:50.943',
+    caption: 'Low tide, everyone finally out of the water.',
+    filename: 'IMG_20260802_174850943_HDR.HEIC',
+    batch: 1,
+    index: 2,
+  },
+  {
+    seed: 'beach-early',
+    date: '2026-08-02',
+    time: '08:15:02',
+    caption: 'First one down to the beach.',
+    filename: 'IMG_20260802_081502.HEIC',
+    batch: 1,
+    index: 0,
+  },
+  {
+    seed: 'beach-burst-a',
+    date: '2026-08-02',
+    time: '12:30:11.100',
+    filename: 'IMG_20260802_123011100.HEIC',
+    batch: 1,
+    index: 3,
+    landscape: true,
+  },
+  {
+    seed: 'beach-burst-b',
+    date: '2026-08-02',
+    // Same second as the previous photo: only the fraction orders them.
+    time: '12:30:11.850',
+    filename: 'IMG_20260802_123011850.HEIC',
+    batch: 1,
+    index: 4,
+    landscape: true,
+  },
+  {
+    // Date but no time: sorts after every timed photo on the same day.
+    seed: 'beach-scan',
+    date: '2026-08-02',
+    time: null,
+    caption: 'Scanned from a print.\n\nNobody remembers who took it.',
+    filename: 'scan-0042.png',
+    batch: 2,
+    index: 0,
+    source: 'filename',
+  },
+  {
+    seed: 'beach-scan-2',
+    date: '2026-08-02',
+    time: null,
+    filename: 'scan-0043.png',
+    batch: 2,
+    index: 1,
+    source: 'filename',
+  },
+  // A second day in the same month.
+  {
+    seed: 'market',
+    date: '2026-08-15',
+    time: '10:05:00',
+    caption: 'Saturday market.',
+    filename: 'IMG_20260815_100500.HEIC',
+    batch: 3,
+    index: 0,
+    landscape: true,
+  },
+  // An earlier month in the same year.
+  {
+    seed: 'snowdrops',
+    date: '2026-03-01',
+    time: '14:22:19',
+    caption: 'Snowdrops out already.',
+    filename: 'IMG_20260301_142219.HEIC',
+    batch: 4,
+    index: 0,
+  },
+  // The previous year, so the year index has more than one entry.
+  {
+    seed: 'christmas',
+    date: '2025-12-25',
+    time: '09:00:00',
+    caption: 'Christmas morning.',
+    filename: 'IMG_20251225_090000.HEIC',
+    batch: 5,
+    index: 0,
+    landscape: true,
+  },
+  {
+    // An early-morning photo: the case that a timezone bug would misfile.
+    seed: 'early-start',
+    date: '2025-12-26',
+    time: '00:30:00',
+    caption: 'Awake far too early.',
+    filename: 'IMG_20251226_003000.HEIC',
+    batch: 5,
+    index: 1,
+  },
+  // Undated, ordered only by batch and selection index.
+  {
+    seed: 'undated-b',
+    date: null,
+    time: null,
+    caption: 'No idea when this was.',
+    filename: 'DSC_0042.JPG',
+    batch: 6,
+    index: 1,
+    source: 'none',
+    landscape: true,
+  },
+  {
+    seed: 'undated-a',
+    date: null,
+    time: null,
+    filename: 'DSC_0041.JPG',
+    batch: 6,
+    index: 0,
+    source: 'none',
+  },
+  // Trashed: must not appear in any display route, but is still in the
+  // catalog and still blocks a duplicate upload of the same bytes.
+  {
+    seed: 'deleted',
+    date: '2026-08-02',
+    time: '19:00:00',
+    caption: 'Blurry, deleted.',
+    filename: 'IMG_20260802_190000.HEIC',
+    batch: 1,
+    index: 5,
+    trashed: '2026-08-20T12:00:00.000Z',
+  },
+];
+
+function toRecord(spec: Spec): PhotoRecord {
+  const id = testPhotoId(spec.seed);
+  const width = spec.landscape ? 4032 : 3024;
+  const height = spec.landscape ? 3024 : 4032;
+
+  return makePhoto({
+    id,
+    contentHash: `sha256-${spec.seed}`,
+    originalFilename: spec.filename,
+    downloadFilename: `${spec.filename.replace(/\.[^.]+$/, '')}.jpg`,
+    sourceMimeType: spec.filename.toLowerCase().endsWith('.png')
+      ? 'image/png'
+      : spec.filename.toLowerCase().endsWith('.jpg')
+        ? 'image/jpeg'
+        : 'image/heic',
+    captureDate: spec.date,
+    captureTime: spec.time,
+    caption: spec.caption ?? null,
+    timestampSource: spec.source ?? 'exif-datetimeoriginal',
+    batchSeq: spec.batch,
+    selectionIndex: spec.index,
+    trashedAt: spec.trashed ?? null,
+    width,
+    height,
+  });
+}
+
+export function fixtureCatalog(): Catalog {
+  return makeCatalog(SPECS.map(toRecord), { batchCounter: 6 });
+}
+
+export const FIXTURE_PHOTO_IDS = Object.fromEntries(
+  SPECS.map((spec) => [spec.seed, testPhotoId(spec.seed)]),
+) as Record<string, string>;

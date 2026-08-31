@@ -21,7 +21,9 @@ export interface BuildEnv {
 const DEV_DEFAULTS: Record<string, string> = {
   DISPLAY_PATH: 'dev-display-path',
   ADMIN_PATH: 'dev-admin-path',
-  WORKER_BASE_URL: 'http://localhost:8787',
+  // Empty means same-origin, so the development fixture server answers the
+  // /p/<id>/<rendition> capability URLs without a second process.
+  WORKER_BASE_URL: '',
   SITE_TITLE: 'Family Photos',
 };
 
