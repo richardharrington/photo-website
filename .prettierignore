@@ -1,0 +1,11 @@
+dist/
+node_modules/
+.netlify/
+.wrangler/
+coverage/
+test-results/
+playwright-report/
+package-lock.json
+tests/fixtures/
+sample-photos/
+docs/
