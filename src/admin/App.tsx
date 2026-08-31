@@ -230,10 +230,12 @@ function BrowseView(props: BrowseViewProps) {
 }
 
 function IndexView({ route, hierarchy }: BrowseViewProps) {
-  if (hierarchy.status !== 'ready') {
+  if (hierarchy.status === 'loading') return <p className="state">Loading…</p>;
+  if (hierarchy.status === 'not-found') return <p className="state">Not found.</p>;
+  if (hierarchy.status === 'error') {
     return (
-      <p className="state">
-        {hierarchy.status === 'error' ? hierarchy.message : 'Loading…'}
+      <p className="state" role="alert">
+        {hierarchy.message}
       </p>
     );
   }
