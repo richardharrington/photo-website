@@ -5,12 +5,12 @@ How to set this site up, run it, and recover it. The design is in
 [implementation-plan.md](implementation-plan.md), and the reasoning behind the
 architecture in [decisions.md](decisions.md).
 
-**Nothing here has been executed yet.** No Cloudflare or Netlify account
-exists, so every account-dependent step below is a checklist item rather than a
-record of something done. Everything that does not need an account — both apps,
-the image pipeline, the catalog logic, the Worker, the gate — is implemented
-and tested locally against the fixtures described under
-[Local development](#local-development).
+**Status, 2026-08-31.** [Account setup](#account-setup) steps 1 to 7 have
+been carried out against live Cloudflare and Netlify accounts and the site is
+deployed. What remains is the [launch checklist](#launch-checklist) and the
+[backup](#backup) configuration. Those steps stay written as checklists
+because they are worth re-running after any change to the gate, the Worker, or
+the account configuration — not because they have never been done.
 
 ## Local development
 
@@ -34,6 +34,12 @@ the storage and the image bytes are fake.
 The development builds print a warning and use placeholder path segments. A
 build with `NETLIFY=true` and a missing variable fails instead, so a real
 deploy cannot fall back to a guessable path.
+
+`npm run dev` is `netlify dev`, which needs the Netlify CLI. It is deliberately
+not a dependency of this project — it is a large install and nothing in the
+test suite needs it — so run it through `npx netlify-cli dev`, or install the
+CLI globally, if you want the edge gate in the loop locally. The three `dev:*`
+scripts need none of that.
 
 ### Image pipeline fixtures
 
@@ -278,22 +284,86 @@ catalog mutation is routed, and that is far cheaper to discover now.
 - [ ] **Disable deploy previews and branch deploys in the site settings.**
       `netlify.toml` skips those builds, but the UI setting is the real
       control.
-- [ ] Set the environment variables from `.env.example`: the generated secrets
-      from step 2, the R2 values from step 3, and `WORKER_BASE_URL` from
-      step 4.
+- [ ] Set the environment variables: the generated secrets from step 2, the
+      R2 values from step 3, `WORKER_BASE_URL` from step 4, and `SITE_TITLE`.
+
+  `SITE_TITLE` is easy to skip because `.env.example` ships a default, but the
+  default applies only to local builds: `resolveBuildEnv` throws on a real
+  deploy when it is unset, exactly as it does for the path segments
+  (`config/build-env.ts`). `R2_ACCOUNT_ID` is the one value that can be left
+  out, since no code reads it.
+
+  Set these **before the first build runs**, whether in the create-site flow
+  or by connecting the repository only afterwards. Connecting a repository
+  triggers a build immediately, and a build with these unset fails by design —
+  an expected red X rather than a broken site, but an alarming one if
+  unexpected.
+
+Notes on the site itself, learned doing this:
+
+- **Create the GitHub repository first.** The deploy model here is
+  Git-connected — `netlify.toml` carries `[context.deploy-preview]` and
+  `[context.branch-deploy]` blocks, which mean nothing otherwise. A site can
+  be created without a provider and linked later, but that is two passes over
+  the same settings.
+- **Change nothing in the UI build settings.** `netlify.toml` pins the build
+  command, publish directory, functions directory, `NODE_VERSION`, the
+  bundler, and the edge function, and it takes precedence over the UI. Setting
+  a build command there too only creates a second source of truth.
+- **Settle the site name before step 7.** The name is the production origin,
+  and step 7's CORS rule pins that exact origin; renaming afterwards means
+  editing the bucket rule to match.
 
 ### 7. Cloudflare: bucket CORS
 
 Back in the Cloudflare console, now that there is a Netlify origin to name.
 
-- [ ] Restrict bucket CORS to the production Netlify origin, allowing `PUT`
-      and the `content-type` header. The browser uploads are `cors`-mode
-      fetches, so a real `Origin` header is sent even under
-      `Referrer-Policy: no-referrer` — this rule does work, unlike an
-      origin check on image loads.
+- [ ] Add the CORS policy on the bucket, under **R2 → the bucket → Settings
+      → CORS Policy**:
+
+  ```json
+  [
+    {
+      "AllowedOrigins": ["https://<your-site>.netlify.app"],
+      "AllowedMethods": ["PUT"],
+      "AllowedHeaders": ["content-type"],
+      "MaxAgeSeconds": 3600
+    }
+  ]
+  ```
+
+  The browser uploads are `cors`-mode fetches, so a real `Origin` header is
+  sent even under `Referrer-Policy: no-referrer` — this rule does work, unlike
+  an origin check on image loads.
+
+  It is deliberately narrower than most CORS advice. `uploadArtifact` in
+  `src/admin/components/Upload.tsx` is the only request in either app that
+  leaves the site's origin: it sends one header, `content-type`, uses `PUT`
+  alone, and reads only `response.ok`. So there is no `GET` here — reads go
+  through the Worker and the bucket stays private — and no `ExposeHeaders`,
+  which guides commonly add for `ETag`. A `PUT` carrying an image content type
+  is never a simple request, so every upload is preceded by an `OPTIONS`
+  preflight that R2 answers from this rule.
+
+- [ ] Confirm the rule with a preflight. It is unauthenticated, so this needs
+      no credentials:
+
+  ```sh
+  curl -si -X OPTIONS "https://<account-id>.r2.cloudflarestorage.com/<bucket>/probe" \
+    -H "Origin: https://<your-site>.netlify.app" \
+    -H "Access-Control-Request-Method: PUT" \
+    -H "Access-Control-Request-Headers: content-type"
+  ```
+
+  Expect `204` with `Access-Control-Allow-Origin` echoing your origin rather
+  than `*`, `Allow-Methods: PUT`, `Allow-Headers: content-type`, and
+  `Vary: Origin` — the last confirming R2 will not serve that allow to a
+  different origin.
 
 Uploads fail until this is in place, so it must precede the launch checklist's
-end-to-end upload.
+end-to-end upload. A custom domain later would be a second origin and would
+have to be added here, or uploads break from the new hostname while continuing
+to work from the old one.
 
 ### 8. Deploy
 
@@ -515,6 +585,11 @@ rm verify-binding.ts verify-binding.toml
 If any of these differ, the documented fallback is to route every catalog
 mutation through a single Worker endpoint, which serializes them.
 
+**Run against the live bucket on 2026-08-31: all four behaved as documented.**
+The S3 path returns 412 on a stale `If-Match`, the binding returns `null`
+without throwing, and `If-None-Match: *` is refused against an existing
+object. The fallback is not needed, and the two adapters stand as written.
+
 ## Backup
 
 The main archives remain Dropbox and Google Photos; this site is a curated
@@ -625,5 +700,4 @@ Carried forward from design.md's validation list, and still open:
   wide-gamut fixture.** The unit tests check the conversion against an
   independent floating-point reference across the colour cube, which covers
   the arithmetic; what is untested is a real saturated photograph end to end.
-- Live R2 conditional-write behaviour, per the checklist above.
 - Video hosting remains a future, separately scoped capability.
