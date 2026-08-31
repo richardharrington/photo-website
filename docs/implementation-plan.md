@@ -87,7 +87,6 @@ docs/
   design.md
   implementation-plan.md
   decisions.md
-  spike-findings-handoff.md   day-one spike results (historical record)
   operations.md
 public/                      robots file and static build inputs
 ```
@@ -422,8 +421,8 @@ surfaces as a conditional-write conflict, not silent loss).
 
 1. **Foundation:** scaffold, lint/test/build/deploy configuration, opaque
    gate, environment docs, fixture catalog, and display UI. Both day-one
-   spikes are already complete (see
-   [spike-findings-handoff.md](spike-findings-handoff.md)); what remains here
+   spikes are already complete (results in [decisions.md](decisions.md)
+   amendments #17-22; the full spike report is in git history); what remains here
    is verifying R2 conditional writes against a live bucket once the
    Cloudflare account exists, alongside free-tier and spend-alert setup.
 2. **Storage pipeline:** R2 client, catalog repository, asset Worker

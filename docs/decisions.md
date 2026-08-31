@@ -109,8 +109,9 @@ the architecture without reconstructing the conversation.
 
 An implementation agent executed both day-one spikes against real fixtures
 before writing production code. Full results, measurements, and reproduction
-notes are in [spike-findings-handoff.md](spike-findings-handoff.md). Three
-defects and one open question surfaced; the resulting decisions follow.
+notes were recorded in a spike handoff document, since removed from the
+working tree (see #24) and preserved in git history. Three defects and one
+open question surfaced; the resulting decisions follow.
 
 17. **HEIF orientation is decode-path dependent.** libheif applies the HEIF
     `irot` property during decode and returns already-upright pixels; Apple
@@ -139,14 +140,15 @@ defects and one open question surfaced; the resulting decisions follow.
     implementation of it that was wrong.
 
 19. **Display P3 → sRGB conversion is implemented, not skipped.** (Resolves
-    the handoff's open question O1.) All of the owner's photos are Display
-    P3, and the pipeline as spiked wrote P3 sample values into files
+    the handoff's open question O1; ratified by the owner, see #23.) All
+    four spike fixtures were Display P3 — the common case for Apple
+    devices — and the pipeline as spiked wrote P3 sample values into files
     *labelled* sRGB — reinterpreting rather than converting. Measured
     deviation against ColorSync was small (mean ~1/255 per channel, max 21),
     but the test image was a low-saturation overcast scene and error
     concentrates in saturated pixels, so that figure understates vivid
     subjects. A 3x3 matrix conversion in linear light is roughly 30 lines,
-    runs once per photo, and applies to every photo the owner owns; writing
+    runs once per photo, and covers the common Apple case; writing
     values that disagree with the profile the file declares is cheaper to fix
     now than after a thousand photos are stored. Amends decision #3: "sRGB
     everywhere" means genuinely converted, not relabelled.
@@ -184,10 +186,13 @@ defects and one open question surfaced; the resulting decisions follow.
 ### Smaller corrections
 
 - **Decision #4 (50 MP cap) stands, with an honest justification.** The cap
-  was defended by reference to "48 MP iPhones," which the owner does not have
-  — the actual devices are 12.2 MP (iPhone 12 Pro, iPad Air 5). A true
-  48.8 MP fixture processed in about 12.5 s, so the cap is comfortable; the
-  justification is simply forward-looking rather than current.
+  was defended by reference to "48 MP iPhones," but no such device is known
+  to be in play: the 12.2 MP fixtures came from an iPhone 12 Pro and an
+  iPad Air 5, and (see the correction under #23–24) they were downloaded
+  samples — what the owner's own devices produce is not yet known. A true
+  48.8 MP fixture processed in about 12.5 s, so the cap is comfortable
+  across the plausible range; the justification is forward-looking rather
+  than tied to any particular device.
 - **Storage measured.** Roughly 2–5 MB per photo across all four artifacts,
   about 0.9 GB/year at 300 photos/year against R2's 10 GB free tier. The
   full-resolution JPEG is frequently larger than its HEIC source (q92 4:4:4
@@ -205,3 +210,35 @@ defects and one open question surfaced; the resulting decisions follow.
 - **Live R2 verification is not a blocker.** No Cloudflare account exists
   yet, so the R2 conditional-write spike is downgraded from a blocking
   day-one item to a Phase 1 account-setup checklist entry.
+
+## Amendments — 2026-08-31 (incorporation review)
+
+A follow-up review checked the amendments above against the spike handoff
+and found the incorporation faithful; the owner then resolved the items the
+review flagged.
+
+23. **O1 resolution ratified.** The owner explicitly approved decision #19:
+    Display P3 → sRGB is genuinely converted, not documented away.
+
+24. **The spike handoff document is deleted from the working tree.** Every
+    actionable finding is incorporated into the three spec documents, which
+    are the single authoritative voice for implementation. A frozen
+    narrative copy alongside the living spec would drift stale, re-open
+    settled questions (it presents O1 as undecided), and spend the
+    implementing agent's context for no benefit. The full report remains in
+    git history as `docs/spike-findings-handoff.md`, removed in the same
+    commit that records this decision.
+
+### Corrections
+
+- **Fixture provenance.** The spike fixtures were sample photos downloaded
+  from the web, not the owner's own photos, and what the owner's iPhone
+  typically produces is not yet known. Decision #19 and the 50 MP cap note
+  above are reworded accordingly; no measurement changes, but claims about
+  "the owner's photos" and "the owner's devices" were unfounded.
+- **Untested input class recorded.** No genuine 48 MP iPhone HEIF Max
+  capture — Apple's real 48 MP tile structure plus an HDR gain map — was
+  ever tested; the 48.8 MP fixture was an upsample. Residual risk is low
+  (libheif composited a real 48-tile Apple grid correctly), but the gap is
+  now an explicit item in design.md's validation list rather than an
+  unrecorded residual risk.

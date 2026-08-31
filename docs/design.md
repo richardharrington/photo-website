@@ -2,8 +2,8 @@
 
 **Status:** Approved design record, revised 2026-08-30 after a design review
 and again 2026-08-31 after both day-one spikes were executed against real
-fixtures (see [decisions.md](decisions.md) and
-[spike-findings-handoff.md](spike-findings-handoff.md)). Implementation is
+fixtures (see [decisions.md](decisions.md); the full spike report survives
+only in git history). Implementation is
 planned in [implementation-plan.md](implementation-plan.md). The items under
 [Implementation validation](#implementation-validation) are technical checks,
 not unresolved product decisions.
@@ -169,10 +169,11 @@ Captions are plain text with line breaks; they do not support HTML or Markdown.
 
 - Initial uploads accept JPEG, HEIC/HEIF, and PNG, up to 50 MB and 50
   megapixels per source file. The megapixel cap is forward-looking rather
-  than binding: the administrator's current devices produce 12.2 MP images,
-  and a 48.8 MP fixture measured about 12.5 seconds end-to-end, so the limit
-  is comfortable. Dimensions are read from container/EXIF headers and checked
-  *before* full decode, so an oversized file is rejected without first
+  than binding: what the administrator's own devices produce is not yet
+  known, but 12.2 MP fixtures processed in about 4-5.5 seconds and a
+  48.8 MP fixture in about 12.5 seconds end-to-end, so the limit is
+  comfortable across the plausible range. Dimensions are read from
+  container/EXIF headers and checked *before* full decode, so an oversized file is rejected without first
   exhausting memory. Video, unsupported formats, and over-limit files are
   rejected with a clear message; oversized panoramas can be downsized
   manually before upload.
@@ -334,8 +335,8 @@ metadata.
 
 Both original day-one spikes have been executed against real fixtures.
 Results, measurements, and the defects they exposed are recorded in
-[spike-findings-handoff.md](spike-findings-handoff.md) and
-[decisions.md](decisions.md).
+[decisions.md](decisions.md); the full spike report was deliberately removed
+from the working tree and survives in git history.
 
 - **Browser pipeline: resolved.** The WASM pipeline correctly handles real
   Apple HEIC (including Apple's tiled `grid` encoding), EXIF orientation, PNG
@@ -354,6 +355,12 @@ Results, measurements, and the defects they exposed are recorded in
   Safari before attempting large batches.
 - Bound the color-conversion error with a highly saturated wide-gamut
   fixture; the existing measurement used a low-saturation scene.
+- Run photos from the administrator's own iPhone through the pipeline once
+  available: every spike fixture was a sample downloaded from the web, and
+  no genuine 48 MP HEIF Max capture — Apple's real 48 MP tile structure
+  plus an HDR gain map — has been tested (the 48.8 MP fixture was an
+  upsample). Residual risk is low, since a real 48-tile Apple grid
+  composited correctly, but the gain-map path is untested.
 - Validate current Netlify/Cloudflare free-tier limits, supported cron
   features, and pricing during account setup; the site must run at $0/month.
 - Implement and test the exact `launchd`/`rclone` configuration before launch.
