@@ -52,46 +52,251 @@ Any similar set works; the tests read what they need from the files.
 Everything below must be done once, before the first production deploy. The
 site must run entirely on free tiers.
 
-### Cloudflare
+The steps are in dependency order, and each item names the console it is done
+in. Two orderings are forced and are easy to get wrong:
 
-- [ ] Create the account with a unique password-manager credential and
-      passkey or authenticator MFA — **not SMS** where a choice exists. Store
-      the recovery codes securely.
-- [ ] Create the R2 bucket. Keep it **private**; nothing in this design ever
-      makes it public.
+- **The shared secrets are generated before either provider is touched**
+  (step 2). `ASSET_SIGNING_KEY` must be the *same* value in Netlify and in the
+  Worker, so it cannot be invented inside whichever one is configured second.
+- **Each provider needs something from the other.** Netlify's environment
+  needs the R2 credentials and the Worker URL; the bucket's CORS rule needs
+  the production Netlify origin. The cycle is broken by building the whole
+  Cloudflare side first except CORS, creating the Netlify site to get an
+  origin (step 6), and setting CORS against it afterwards (step 7).
+
+### 1. Accounts and spend limits
+
+- [x] **Cloudflare** — create the account with a unique password-manager
+      credential and passkey or authenticator MFA — **not SMS** where a choice
+      exists. Store the recovery codes securely.
+- [x] **Netlify** — create the account with the same credential hygiene.
+- [x] **Cloudflare** — configure a spend alert with a small monthly threshold.
+- [x] **Netlify** — configure a spend alert.
+- [x] Re-check the current free-tier limits: R2 storage, Class A/B
+      operations, and Worker requests. Measured usage is roughly 2–5 MB per
+      photo across all four artifacts, about 0.9 GB/year at 300 photos/year,
+      against a 10 GB free tier.
+
+### 2. Create `.env` and generate the shared secrets
+
+Local only — no account is involved. These values are inputs to both
+providers, so they come first.
+
+`.env` is gitignored and is never deployed. Netlify reads its own copy of
+these values from the site configuration in step 6, and the Worker gets the
+one secret it needs in step 4. The local file is the working copy those are
+pasted from, and the one `netlify dev` reads.
+
+- [x] `cp .env.example .env`, then `chmod 600 .env`.
+- [x] Fill in the five values that need no account. Generate each one with its
+      own command — never reuse a value across two variables:
+
+  - `DISPLAY_PATH` — `openssl rand -hex 16`. A single path segment, no `/`;
+    the build refuses one containing a slash.
+  - `ADMIN_PATH` — `openssl rand -hex 16`, run a second time. A separate draw,
+    not a transformation of the display path.
+  - `INTERNAL_GATE_SECRET` — `openssl rand -hex 32`. Hex rather than base64:
+    it travels as an HTTP header value between the edge gate and the
+    functions.
+  - `ASSET_SIGNING_KEY` — `openssl rand -base64 32`. Used as raw UTF-8 key
+    material for HMAC-SHA-256, so base64's own alphabet is fine here.
+  - `SITE_TITLE` — the viewer-facing title. The shipped default,
+    `Family Photos`, needs no change.
+
+  Generating all four secrets at once, to paste into the file:
+
+  ```sh
+  echo "DISPLAY_PATH=$(openssl rand -hex 16)"
+  echo "ADMIN_PATH=$(openssl rand -hex 16)"
+  echo "INTERNAL_GATE_SECRET=$(openssl rand -hex 32)"
+  echo "ASSET_SIGNING_KEY=$(openssl rand -base64 32)"
+  ```
+
+- [x] Confirm `DISPLAY_PATH` and `ADMIN_PATH` are independent random values.
+      Neither may be derivable from the other, and the gate refuses to serve
+      anything if they are equal.
+- [ ] Leave the five `R2_*` variables empty until step 3, and
+      `WORKER_BASE_URL` empty until step 4. They only have to be filled in by
+      the time step 6 sets the Netlify environment. Note that the two are
+      needed at different moments: `WORKER_BASE_URL` is inlined at build time,
+      so a real deploy without it fails outright, while the `R2_*` values are
+      read per request and a mistake there surfaces as failing API calls on a
+      site that built cleanly.
+- [ ] Keep `ASSET_SIGNING_KEY` to hand. It goes into the Worker in step 4 and
+      into Netlify in step 6, and the two must match.
+
+### 3. Cloudflare: bucket and credentials
+
+- [ ] Create the R2 bucket, named to match `bucket_name` in `wrangler.toml`.
+      Keep it **private**; nothing in this design ever makes it public.
+- [ ] Create the S3-compatible API token at
+      `https://dash.cloudflare.com/<account-id>/r2/api-tokens`, reached from
+      **R2 Object Storage → API → Manage API tokens → Create API token**.
+
+  This must be the R2 page. **Manage account → Account API tokens** is a
+  different flow that looks plausible and is wrong: it offers account-wide
+  templates such as "Read all resources" (190 permissions) with no R2
+  object permission and no bucket picker, and it ends by showing a single
+  token string rather than an access key and secret. If that is what you
+  are looking at, back out. Cloudflare renames these controls from time to
+  time; what matters is the effect described for each.
+
+  - **Token type.** If offered a choice between an account token and a user
+    token, take the account one. A user token inherits one member's
+    permissions and stops working if that membership or role changes; this
+    credential should outlive any individual.
+  - **Permission: Object Read & Write.** Not `Admin Read & Write`, and not
+    either read-only option. The functions call exactly `GetObject`,
+    `HeadObject`, `PutObject`, `ListObjectsV2`, and `DeleteObjects`
+    (`netlify/functions/lib/s3-store.ts`), all of them object operations
+    inside a bucket that already exists. Nothing creates, deletes, or
+    reconfigures a bucket, so admin rights would only widen what a leaked
+    key can do. CORS is set through the dashboard in step 7, not through
+    this token.
+  - **Scope: "Apply to specific buckets only"**, then select the bucket
+    created above. Not "Apply to all buckets in this account" — that grants
+    the token every bucket the account will ever hold, including ones
+    created later for unrelated purposes.
+  - **TTL: no expiry.** Nothing here rotates credentials automatically, so
+    an expiring token becomes a silent outage: uploads and every catalog
+    write start failing at a date chosen months earlier. Prefer rotating
+    deliberately when there is a reason to. If a TTL is set anyway, record
+    the expiry date somewhere that will be read.
+  - **Client IP filtering: leave empty.** The callers are Netlify Functions,
+    whose egress addresses are neither stable nor published, so an allowlist
+    here fails intermittently and looks like a bug in the site.
+
+- [ ] Map the four values Cloudflare shows on creation. Only three of them
+      belong in `.env`, and the secret is displayed **once** — a lost one
+      cannot be recovered, only replaced.
+
+  - **Token value** — goes nowhere. It is the bearer credential for R2's
+    REST API, and nothing in this repository uses it; every call here goes
+    through the S3-compatible API instead. It is still a live credential
+    against the same bucket with the same permissions, so keep it in the
+    password manager or discard it — but do not paste it into `.env`, where
+    it would sit unused as one more thing to leak.
+  - **Access Key ID** → `R2_ACCESS_KEY_ID`.
+  - **Secret Access Key** → `R2_SECRET_ACCESS_KEY`.
+  - **Endpoint** → `R2_S3_ENDPOINT`. The page lists one endpoint per
+    jurisdiction; take the one labelled **Default** unless the bucket was
+    deliberately created in a jurisdiction such as the EU, in which case the
+    endpoint must match the bucket. It is of the form
+    `https://<account-id>.r2.cloudflarestorage.com`, and must be copied with
+    **no bucket name appended and no trailing slash**. The SDK appends
+    `/<bucket>/<key>` itself, so a bucket already in the value yields a
+    doubled path; the edge gate also derives the admin app's CSP
+    `connect-src` origin from it (`netlify/edge-functions/gate.ts:77`), and
+    a wrong origin means the browser blocks uploads with nothing failing
+    server-side to point at the cause.
+
+  Also fill in `R2_BUCKET` with the bucket name, and `R2_ACCOUNT_ID` with
+  the account ID — the same hex string that appears in the endpoint
+  hostname. Nothing in this repository reads `R2_ACCOUNT_ID`; it is kept
+  because the `rclone` remote in [Backup](#backup) is configured by hand
+  against the same account and endpoint.
+
+- [ ] Optionally confirm the four R2 values before going further. A mistake
+      is far easier to diagnose here than inside step 5, or after a deploy.
+      From the repository root, on Node 20.6 or newer:
+
+  ```sh
+  node --env-file=.env --input-type=module -e '
+    import { S3Client, ListObjectsV2Command } from "@aws-sdk/client-s3";
+    const client = new S3Client({
+      region: "auto",
+      endpoint: process.env.R2_S3_ENDPOINT,
+      credentials: {
+        accessKeyId: process.env.R2_ACCESS_KEY_ID,
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+      },
+    });
+    const out = await client.send(
+      new ListObjectsV2Command({ Bucket: process.env.R2_BUCKET }),
+    );
+    console.log("ok:", out.KeyCount ?? 0, "objects");
+  '
+  ```
+
+  This needs nothing that is not already installed: `@aws-sdk/client-s3` is
+  a dependency of this project, because R2's S3-compatible API is how the
+  Netlify functions reach the bucket. The client is constructed exactly as
+  `netlify/functions/lib/s3-store.ts` constructs it and reads the same four
+  variables straight out of `.env`, so a pass here means the real adapter
+  will connect. A fresh bucket prints `ok: 0 objects`.
+
+  `wrangler` cannot stand in for this check. It authenticates as your
+  Cloudflare login and would prove only that the account exists — not that
+  the token, its bucket scope, or the endpoint are right.
+
+  When it fails, the error usually points at one variable:
+
+  - A rejected or mismatched key (`InvalidAccessKeyId`,
+    `SignatureDoesNotMatch`) — `R2_ACCESS_KEY_ID` or
+    `R2_SECRET_ACCESS_KEY`, or a token that was scoped read-only.
+  - `AccessDenied` — the token is valid but not scoped to this bucket, so
+    re-check "Apply to specific buckets only".
+  - `NoSuchBucket` — `R2_BUCKET`, or an `R2_S3_ENDPOINT` that already
+    carries the bucket name and so asks for it twice.
+  - A DNS or TLS error — `R2_S3_ENDPOINT`, most often the wrong
+    jurisdiction or a typo in the account ID.
+
+  A pass does not confirm the permission, only the credentials, the
+  endpoint, and the bucket scope: listing succeeds under `Object Read only`
+  too. Step 5 is what catches that, since its checks are writes — so an
+  `AccessDenied` there, where a `412` was expected, means the token
+  permission rather than the conditional-write semantics.
+
+CORS is deliberately not set here. It names an origin that does not exist yet
+— see step 7.
+
+### 4. Cloudflare: deploy the Worker
+
+The Worker binds the R2 bucket, so the bucket must already exist.
+
+- [ ] `npx wrangler deploy`, and note the `workers.dev` URL — this is
+      `WORKER_BASE_URL` for step 6. No custom domain is needed.
+- [ ] `npx wrangler secret put ASSET_SIGNING_KEY`, using the value from
+      step 2. A secret can only be set on a deployed Worker.
+- [ ] Confirm the daily cron trigger is registered (`wrangler.toml`,
+      `17 4 * * *`).
+
+### 5. Verify R2 conditional writes against the live bucket
+
+Needs the bucket, the S3 token, and the deployed Worker — the four checks
+exercise both write paths.
+
+- [ ] Work through
+      [Conditional-write verification](#conditional-write-verification) below.
+
+Do this before deploying Netlify. The documented fallback changes how every
+catalog mutation is routed, and that is far cheaper to discover now.
+
+### 6. Netlify: site and environment
+
+- [ ] Create the site and note its production origin. Step 7 needs it.
+- [ ] **Disable deploy previews and branch deploys in the site settings.**
+      `netlify.toml` skips those builds, but the UI setting is the real
+      control.
+- [ ] Set the environment variables from `.env.example`: the generated secrets
+      from step 2, the R2 values from step 3, and `WORKER_BASE_URL` from
+      step 4.
+
+### 7. Cloudflare: bucket CORS
+
+Back in the Cloudflare console, now that there is a Netlify origin to name.
+
 - [ ] Restrict bucket CORS to the production Netlify origin, allowing `PUT`
       and the `content-type` header. The browser uploads are `cors`-mode
       fetches, so a real `Origin` header is sent even under
       `Referrer-Policy: no-referrer` — this rule does work, unlike an
       origin check on image loads.
-- [ ] Create an S3-compatible API token scoped to that one bucket.
-- [ ] Deploy the Worker (`npx wrangler deploy`) and note its `workers.dev`
-      URL. No custom domain is needed.
-- [ ] `npx wrangler secret put ASSET_SIGNING_KEY` — the same value that goes
-      into Netlify.
-- [ ] Confirm the daily cron trigger is registered (`wrangler.toml`,
-      `17 4 * * *`).
-- [ ] **Verify R2 conditional writes against the live bucket.** See
-      [Conditional-write verification](#conditional-write-verification) below.
-- [ ] Re-check the current free-tier limits: R2 storage, Class A/B
-      operations, and Worker requests. Measured usage is roughly 2–5 MB per
-      photo across all four artifacts, about 0.9 GB/year at 300 photos/year,
-      against a 10 GB free tier.
-- [ ] Configure a spend alert with a small monthly threshold.
 
-### Netlify
+Uploads fail until this is in place, so it must precede the launch checklist's
+end-to-end upload.
 
-- [ ] Create the account with the same credential hygiene as above.
-- [ ] **Disable deploy previews and branch deploys in the site settings.**
-      `netlify.toml` skips those builds, but the UI setting is the real
-      control.
-- [ ] Set the environment variables from `.env.example`. Generate each secret
-      fresh: `openssl rand -hex 16` for path segments,
-      `openssl rand -base64 32` for keys.
-- [ ] Confirm `DISPLAY_PATH` and `ADMIN_PATH` are independent random values.
-      Neither may be derivable from the other, and the gate refuses to serve
-      anything if they are equal.
-- [ ] Configure a spend alert.
+### 8. Deploy
+
 - [ ] Deploy, then walk the [launch checklist](#launch-checklist).
 
 ### Conditional-write verification
@@ -104,15 +309,208 @@ Miniflare, whose `onlyIf` handling has been reported inverted
 (`workers-sdk#6411`, closed as not planned), so a backwards implementation
 could pass against it.
 
-What remains is to confirm the real bucket behaves as documented:
+What remains is to confirm the real bucket behaves as documented. Four checks,
+against a scratch key rather than `catalog/current.json` — at this point in the
+setup the catalog does not exist yet, and a verification run has no business
+creating it. Both scratch files must be written **inside the repository**, so
+that Node resolves `node_modules` and wrangler picks up the project context;
+both are deleted at the end, and `git status` should be clean afterwards.
 
-1. `PUT catalog/current.json` with `If-Match` set to the current ETag —
-   expect success and a new ETag.
-2. Repeat with the now-stale ETag — expect **HTTP 412** on the S3 path.
-3. From a Worker, `put(key, value, { onlyIf: { etagMatches: <stale> } })` —
-   expect a **`null` return with no exception**.
-4. `PUT` with `If-None-Match: *` against an existing object — expect a
-   conflict.
+Note that the maintenance cron sweeps only the `photos/` and
+`catalog/snapshots/` prefixes, so a `_verify/` object left behind by an aborted
+run is never cleaned up automatically. Delete it by hand if a run does not
+reach its own cleanup line.
+
+#### Checks 1–3: the S3 path, as the Netlify functions see it
+
+Write the script to the repository root:
+
+````sh
+cat > verify-s3.mjs <<'EOF'
+import {
+  S3Client,
+  PutObjectCommand,
+  DeleteObjectsCommand,
+} from "@aws-sdk/client-s3";
+
+const Bucket = process.env.R2_BUCKET;
+const Key = "_verify/conditional-write";
+const client = new S3Client({
+  region: "auto",
+  endpoint: process.env.R2_S3_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+  },
+});
+
+const put = (Body, extra = {}) =>
+  client.send(
+    new PutObjectCommand({
+      Bucket,
+      Key,
+      Body,
+      ContentType: "text/plain",
+      ...extra,
+    }),
+  );
+const show = (e) =>
+  `${e?.name ?? "Error"} / HTTP ${e?.$metadata?.httpStatusCode ?? "?"}`;
+
+const seeded = await put("one");
+const stale = seeded.ETag;
+
+try {
+  const fresh = await put("two", { IfMatch: stale });
+  console.log(
+    fresh.ETag && fresh.ETag !== stale
+      ? `1 PASS  If-Match on the current ETag succeeded, new ETag ${fresh.ETag}`
+      : `1 FAIL  succeeded but the ETag did not change (${fresh.ETag})`,
+  );
+} catch (error) {
+  console.log(
+    `1 FAIL  If-Match on the current ETag was rejected: ${show(error)}`,
+  );
+}
+
+try {
+  await put("three", { IfMatch: stale });
+  console.log(
+    "2 FAIL  a stale If-Match was accepted; the write was not guarded",
+  );
+} catch (error) {
+  const status = error?.$metadata?.httpStatusCode;
+  console.log(
+    status === 412
+      ? `2 PASS  stale If-Match rejected with ${show(error)}`
+      : `2 FAIL  expected HTTP 412, got ${show(error)}`,
+  );
+}
+
+try {
+  await put("four", { IfNoneMatch: "*" });
+  console.log(
+    "3 FAIL  If-None-Match:* overwrote an object that already exists",
+  );
+} catch (error) {
+  const status = error?.$metadata?.httpStatusCode;
+  console.log(
+    status === 412 || status === 409
+      ? `3 PASS  If-None-Match:* rejected with ${show(error)}`
+      : `3 FAIL  expected a conflict, got ${show(error)}`,
+  );
+}
+
+await client.send(
+  new DeleteObjectsCommand({ Bucket, Delete: { Objects: [{ Key }] } }),
+);
+console.log(`cleaned up ${Key}`);
+EOF
+````
+
+Run it, then remove it:
+
+```sh
+node --env-file=.env verify-s3.mjs
+rm verify-s3.mjs
+```
+
+Expected output, one line per check:
+
+```text
+1 PASS  If-Match on the current ETag succeeded, new ETag "..."
+2 PASS  stale If-Match rejected with PreconditionFailed / HTTP 412
+3 PASS  If-None-Match:* rejected with ... / HTTP 412
+cleaned up _verify/conditional-write
+```
+
+Check 3 may report HTTP 409 rather than 412 and still pass; S3-compatible
+implementations differ, which is why `isPreconditionFailure` in
+`netlify/functions/lib/s3-store.ts` accepts the `ConditionalRequestConflict`
+name as well as the status.
+
+#### Check 4: the Workers binding, as the Worker sees it
+
+This one cannot be done from the S3 path or from `wrangler dev` on its own —
+it needs the R2 binding, running against the real bucket. `--remote` is what
+makes that true: a plain `wrangler dev` would put Miniflare's emulated R2 in
+the way, which is the one thing this whole check exists to avoid.
+
+Write the Worker and its own wrangler config to the repository root:
+
+````sh
+cat > verify-binding.ts <<'EOF'
+interface Env {
+  PHOTOS: R2Bucket;
+}
+
+export default {
+  async fetch(_request: Request, env: Env): Promise<Response> {
+    const key = "_verify/binding-write";
+
+    const first = await env.PHOTOS.put(key, "one");
+    const stale = first!.etag;
+    await env.PHOTOS.put(key, "two");
+
+    let returned: string;
+    let threw: string | null = null;
+    try {
+      const result = await env.PHOTOS.put(key, "three", {
+        onlyIf: { etagMatches: stale },
+      });
+      returned = result === null ? "null" : "an R2Object";
+    } catch (error) {
+      returned = "nothing";
+      threw = String(error);
+    }
+
+    await env.PHOTOS.delete(key);
+
+    const pass = returned === "null" && threw === null;
+    return Response.json({
+      verdict: pass ? "4 PASS" : "4 FAIL",
+      returned,
+      threw,
+    });
+  },
+};
+EOF
+
+cat > verify-binding.toml <<'EOF'
+name = "verify-conditional"
+main = "verify-binding.ts"
+compatibility_date = "2026-08-01"
+
+# Must match bucket_name in wrangler.toml.
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "family-photos"
+EOF
+````
+
+Start it against the live bucket, and in a second terminal call it once:
+
+```sh
+npx wrangler dev --remote -c verify-binding.toml   # prints a localhost URL
+curl -s http://localhost:8787
+```
+
+Expected:
+
+```json
+{ "verdict": "4 PASS", "returned": "null", "threw": null }
+```
+
+`"returned": "an R2Object"` means the stale ETag was accepted and the write was
+not guarded. `"threw"` non-null means this surface raises where the adapter
+expects a return value — the case `worker/src/binding-store.ts` is written
+around, and the reason it cannot be a try/catch like the S3 one.
+
+Stop the dev session with Ctrl-C, then:
+
+```sh
+rm verify-binding.ts verify-binding.toml
+```
 
 If any of these differ, the documented fallback is to route every catalog
 mutation through a single Worker endpoint, which serializes them.
