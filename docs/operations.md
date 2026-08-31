@@ -655,33 +655,211 @@ there.
 
 Run against production after the first deploy.
 
-- [ ] `/` and a handful of wrong paths return a plain 404 with no route
-      information.
-- [ ] `/robots.txt` is served and disallows everything.
-- [ ] `/.netlify/functions/admin` returns 404 from outside, including with a
-      forged `x-photo-access-mode: admin` header.
-- [ ] The display path serves the viewer; the admin path serves the admin app.
-- [ ] The display app's HTML and JS contain no occurrence of the admin path.
-- [ ] Every response carries `X-Robots-Tag` and `Referrer-Policy: no-referrer`
-      — pages, API responses, **and images**.
-- [ ] HTML carries the strict CSP; the display CSP contains neither
-      `wasm-unsafe-eval` nor the R2 origin.
-- [ ] Upload a real photo end to end from the administrator's own device.
-- [ ] **Download the stored artifacts and inspect the bytes for EXIF and GPS.**
-      There should be none: every artifact is re-encoded from decoded pixels.
-      Verify against a source that genuinely had coordinates.
-- [ ] Check a portrait photo is upright in the grid, the lightbox, and the
-      downloaded original.
-- [ ] `/p/<id>/full` returns 404; the full-resolution original is reachable
-      only through a signed link.
-- [ ] A signed download link works, and stops working after five minutes.
-- [ ] Trash a photo, confirm its capability URLs stop serving within about a
-      minute, then restore it.
-- [ ] Trigger the Worker cron manually
-      (`npx wrangler dev --test-scheduled`) and confirm it reports sensibly
-      against a bucket with nothing yet to purge.
-- [ ] Run one nightly backup and confirm the mirror contains the catalog, the
-      snapshots, the audit log, and the photo objects.
+Most of these are commands. They need the two secret path segments, which must
+not be typed into a shell — they would land in history, and they are the whole
+access model. Load them from `.env` instead, and name the site once:
+
+```sh
+set -a; . ./.env; set +a
+SITE="https://<your-site>.netlify.app"
+```
+
+That puts `$DISPLAY_PATH`, `$ADMIN_PATH`, and `$WORKER_BASE_URL` in the
+environment of that shell only. Everything below assumes them, plus `$SITE`.
+
+The first group needs nothing but a deployed site. The second needs one real
+photograph in the library, so begin it with the upload, which is what yields
+the photo ID the rest of that group uses.
+
+### Reachable before any photo exists
+
+- [ ] **Wrong paths return a plain 404 that reveals no route information.**
+
+  ```sh
+  for path in / /admin /api /index.html /assets/index.js /.netlify/functions/display; do
+    printf '%-34s %s\n' "$path" "$(curl -s -o /dev/null -w '%{http_code}' "$SITE$path")"
+  done
+  curl -s "$SITE/nope"; echo
+  ```
+
+  Every status `404`, and the body exactly `Not Found` — no framework page, no
+  hint that a display or admin route exists.
+
+- [ ] **`/robots.txt` is served and disallows everything.**
+
+  ```sh
+  curl -si "$SITE/robots.txt" | sed -n '1p'
+  curl -s "$SITE/robots.txt"
+  ```
+
+  `200`, then `User-agent: *` and `Disallow: /`. This is the only thing
+  reachable outside a secret path.
+
+- [ ] **The admin function is unreachable directly, including with a forged
+      access-mode header.**
+
+  ```sh
+  curl -s -o /dev/null -w 'plain:  %{http_code}\n' "$SITE/.netlify/functions/admin"
+  curl -s -o /dev/null -w 'forged: %{http_code}\n' \
+    -H 'x-photo-access-mode: admin' "$SITE/.netlify/functions/admin"
+  ```
+
+  Both `404`. The second is the important one: the mode header is only
+  trustworthy because the gate's shared marker proves the gate set it, and
+  this proves an outside caller cannot simply claim it.
+
+- [ ] **Each app is served on its own path.**
+
+  ```sh
+  curl -s -o /dev/null -w 'display: %{http_code}\n' "$SITE/$DISPLAY_PATH/"
+  curl -s -o /dev/null -w 'admin:   %{http_code}\n' "$SITE/$ADMIN_PATH/"
+  ```
+
+  Both `200`.
+
+- [ ] **The display app's HTML and JS contain no occurrence of the admin
+      path.**
+
+  ```sh
+  html=$(curl -s "$SITE/$DISPLAY_PATH/")
+  printf '%s' "$html" | grep -q "$ADMIN_PATH" \
+    && echo "FAIL  admin path in HTML" || echo "PASS  HTML clean"
+  for asset in $(printf '%s' "$html" | grep -oE '/[A-Za-z0-9_./-]+\.js' | sort -u); do
+    curl -s "$SITE$asset" | grep -q "$ADMIN_PATH" \
+      && echo "FAIL  admin path in $asset" || echo "PASS  $asset clean"
+  done
+  ```
+
+  Every line `PASS`. This is the check that the separate Vite builds are doing
+  their job: nothing in the display build's module graph may reach `src/admin`.
+
+- [ ] **Every response carries the security headers**, on pages and API
+      responses here; images are covered by the Worker check below.
+
+  ```sh
+  for url in "$SITE/$DISPLAY_PATH/" "$SITE/$DISPLAY_PATH/api/hierarchy" "$SITE/robots.txt"; do
+    echo "== $url"
+    curl -sI "$url" | grep -iE '^(x-robots-tag|referrer-policy|x-content-type-options):'
+  done
+  ```
+
+  Each should show `X-Robots-Tag: noindex, nofollow, noarchive, nosnippet`,
+  `Referrer-Policy: no-referrer`, and `X-Content-Type-Options: nosniff`.
+
+- [ ] **The HTML carries the strict CSP, and the display CSP contains neither
+      `wasm-unsafe-eval` nor the R2 origin.**
+
+  ```sh
+  display_csp=$(curl -sI "$SITE/$DISPLAY_PATH/" | grep -i '^content-security-policy:')
+  admin_csp=$(curl -sI "$SITE/$ADMIN_PATH/" | grep -i '^content-security-policy:')
+
+  printf '%s' "$display_csp" | grep -q "wasm-unsafe-eval" \
+    && echo "FAIL  display allows wasm" || echo "PASS  display has no wasm-unsafe-eval"
+  printf '%s' "$display_csp" | grep -q "r2.cloudflarestorage.com" \
+    && echo "FAIL  display names R2" || echo "PASS  display has no R2 origin"
+  printf '%s' "$admin_csp" | grep -q "wasm-unsafe-eval" \
+    && echo "PASS  admin allows wasm" || echo "FAIL  admin missing wasm-unsafe-eval"
+  printf '%s' "$admin_csp" | grep -q "r2.cloudflarestorage.com" \
+    && echo "PASS  admin names R2" || echo "FAIL  admin missing R2 origin"
+
+  printf '%s\n' "$display_csp"
+  ```
+
+  All four `PASS`. The asymmetry is the point: only the admin app compiles
+  WASM codecs and uploads to R2, so only its policy may permit either. Read
+  the printed policy too — `frame-ancestors 'none'`, `base-uri 'none'`,
+  `form-action 'none'`, and no `unsafe-inline` anywhere.
+
+### After uploading one real photograph
+
+- [ ] **Upload a real photo end to end from the administrator's own device.**
+      Browser work: open `$SITE/$ADMIN_PATH/`, add a photo, watch it commit.
+      Then capture its ID for the checks below.
+
+  ```sh
+  PHOTO_ID=$(curl -s "$SITE/$ADMIN_PATH/api/export" \
+    | python3 -c 'import json,sys; print(next(iter(json.load(sys.stdin)["photos"])))')
+  echo "$PHOTO_ID"
+  ```
+
+- [ ] **The full-resolution original is not reachable by knowing the ID, and
+      images carry the same headers as everything else.**
+
+  ```sh
+  for r in thumb display-1280 display-2560 full; do
+    printf '%-14s %s\n' "$r" \
+      "$(curl -s -o /dev/null -w '%{http_code}' "$WORKER_BASE_URL/p/$PHOTO_ID/$r")"
+  done
+  curl -sI "$WORKER_BASE_URL/p/$PHOTO_ID/thumb" \
+    | grep -iE '^(x-robots-tag|referrer-policy|cache-control):'
+  ```
+
+  `200` for the three display renditions and **`404` for `full`** — it is
+  reachable only through a signed link. The header check completes the header item
+  above, and images are where a robots directive matters most, since an image
+  cannot carry a meta tag.
+
+- [ ] **A signed download link works, and stops working after five minutes.**
+
+  ```sh
+  signed=$(curl -s "$SITE/$DISPLAY_PATH/api/download/$PHOTO_ID" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["url"])')
+  curl -s -o /tmp/full.jpg -w 'immediately: %{http_code}\n' "$signed"
+  sleep 310
+  curl -s -o /dev/null -w 'after 5m:    %{http_code}\n' "$signed"
+  ```
+
+  `200`, then anything but `200`. The TTL is `SIGNED_URL_TTL_SECONDS`, five
+  minutes.
+
+- [ ] **The stored artifacts carry no EXIF and no GPS.** Use a source that
+      genuinely had coordinates, or the check proves nothing.
+
+  ```sh
+  exiftool -a -G1 /tmp/full.jpg | grep -iE 'gps|exif|datetime|make|model' \
+    || echo "none present"
+  ```
+
+  Without `exiftool`, `strings /tmp/full.jpg | grep -icE 'exif|gps'` should
+  print `0`. There should be nothing: every artifact is re-encoded from
+  decoded pixels, so this is a property of the pipeline rather than a
+  stripping step that could be forgotten.
+
+- [ ] **A portrait photo is upright** in the grid, in the lightbox, and in the
+      downloaded original. Browser work, plus `/tmp/full.jpg` from above.
+
+- [ ] **Trashing a photo stops its capability URLs within about a minute, and
+      restoring brings them back.** Trash it in the admin app, then:
+
+  ```sh
+  for i in 1 2 3 4 5 6; do
+    printf '%s  %s\n' "$(date +%T)" \
+      "$(curl -s -o /dev/null -w '%{http_code}' "$WORKER_BASE_URL/p/$PHOTO_ID/thumb")"
+    sleep 15
+  done
+  ```
+
+  `200` at first, then `404` once the Worker's catalog cache turns over —
+  `CATALOG_CACHE_SECONDS` is 60. Restore it in the admin app afterwards and
+  watch the same loop go back to `200`.
+
+### Scheduled work
+
+- [ ] **The Worker's cron handler runs and reports sensibly** against a bucket
+      with nothing yet to purge.
+
+  ```sh
+  npx wrangler dev --remote --test-scheduled
+  # then, in a second terminal:
+  curl -s "http://localhost:8787/__scheduled?cron=17+4+*+*+*"
+  ```
+
+  `--remote` matters: the point is the real bucket, not an emulated one.
+
+- [ ] **One nightly backup completes and mirrors everything.** Run
+      `scripts/backup.sh` by hand, per [Backup](#backup), and confirm the
+      destination holds the catalog, the snapshots, the audit log, and the
+      photo objects.
 
 ## Known gaps
 
