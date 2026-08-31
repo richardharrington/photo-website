@@ -48,6 +48,8 @@ export interface R2ObjectLike {
   etag: string;
   size: number;
   uploaded: Date;
+  /** Present on a `get`, absent on a `head` or a `put` result. */
+  body?: ReadableStream | null;
   arrayBuffer?(): Promise<ArrayBuffer>;
 }
 
