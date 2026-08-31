@@ -4,6 +4,12 @@
  * Separated from the Netlify plumbing in `gate.ts` so the security-critical
  * part — what is reachable, and as which access mode — can be tested directly
  * without an edge runtime.
+ *
+ * It lives here rather than beside `gate.ts` because Netlify treats *every*
+ * file in the edge functions directory as an edge function and requires each
+ * to default-export one. A helper module there fails the deploy at the
+ * bundling stage — "Default export must be a function" — even though nothing
+ * routes to it and `netlify.toml` declares only `gate`. Do not move it back.
  */
 
 export type AccessMode = 'display' | 'admin';

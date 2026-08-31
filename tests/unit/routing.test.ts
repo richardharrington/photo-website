@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { routeRequest, secureEquals } from '../../netlify/edge-functions/routing.ts';
-import type { GateConfig } from '../../netlify/edge-functions/routing.ts';
+import { routeRequest, secureEquals } from '../../netlify/lib/routing.ts';
+import type { GateConfig } from '../../netlify/lib/routing.ts';
 
 const CONFIG: GateConfig = {
   displayPath: 'd15p1ay5ecret0000',

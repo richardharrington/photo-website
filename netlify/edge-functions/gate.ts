@@ -14,8 +14,8 @@ import {
   originOf,
   withHeaders,
 } from '../../src/shared/headers.ts';
-import { routeRequest, secureEquals } from './routing.ts';
-import type { AccessMode, GateConfig } from './routing.ts';
+import { routeRequest, secureEquals } from '../lib/routing.ts';
+import type { AccessMode, GateConfig } from '../lib/routing.ts';
 
 /**
  * Header carrying the access mode from the gate to the function. The function
