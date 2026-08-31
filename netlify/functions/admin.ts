@@ -7,11 +7,8 @@
  * maintain the catalog.
  */
 
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import {
   RENDITIONS,
-  RENDITION_SPECS,
   SIGNED_URL_TTL_SECONDS,
   photoObjectKey,
 } from '../../src/shared/constants.ts';
@@ -55,6 +52,7 @@ import {
 import { toPublicPhoto } from '../../src/shared/display-api.ts';
 import { S3ObjectStore } from './lib/s3-store.ts';
 import { readRoute } from './lib/read-routes.ts';
+import { presignedUploadUrls } from './lib/presign.ts';
 import {
   badRequest,
   checkAccess,
@@ -70,8 +68,6 @@ import {
 
 /** How long a preview's confirmation token stays valid. */
 const CONFIRMATION_TTL_SECONDS = 10 * 60;
-/** Presigned PUT lifetime: long enough for a slow upload, short enough to matter. */
-const UPLOAD_URL_TTL_SECONDS = 30 * 60;
 
 function s3Config() {
   return {
@@ -180,29 +176,7 @@ async function handlePrepare(request: Request): Promise<Response> {
   }
 
   const photoId = generatePhotoId();
-  const client = new S3Client({
-    region: 'auto',
-    endpoint: s3Config().endpoint,
-    credentials: {
-      accessKeyId: s3Config().accessKeyId,
-      secretAccessKey: s3Config().secretAccessKey,
-    },
-  });
-
-  // One URL per object, each scoped to exactly that key and content type, so
-  // a leaked URL cannot be used to write anything else into the bucket.
-  const uploads: Record<string, string> = {};
-  for (const rendition of RENDITIONS) {
-    uploads[rendition] = await getSignedUrl(
-      client,
-      new PutObjectCommand({
-        Bucket: s3Config().bucket,
-        Key: photoObjectKey(photoId, rendition),
-        ContentType: RENDITION_SPECS[rendition].contentType,
-      }),
-      { expiresIn: UPLOAD_URL_TTL_SECONDS },
-    );
-  }
+  const uploads = await presignedUploadUrls(s3Config(), photoId);
 
   return json({
     status: 'ready',
