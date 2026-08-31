@@ -5,6 +5,16 @@
 
 [build.environment]
   NODE_VERSION = "22"
+  # Netlify's secrets scanner compares environment variable *values* against
+  # the build output. These four are not secrets: SITE_TITLE and
+  # WORKER_BASE_URL are inlined into the client bundles on purpose (see
+  # clientDefines in config/build-env.ts), the Worker URL is fetched by every
+  # viewer's browser, R2_BUCKET is already committed in wrangler.toml, and
+  # nothing reads R2_ACCOUNT_ID at all. They trip the scanner only because
+  # their values also appear in this repository as defaults — "Family Photos"
+  # is the <title> in src/display/index.html. The variables that *are* secret
+  # stay scanned, so a real leak into the bundle still fails the build.
+  SECRETS_SCAN_OMIT_KEYS = "SITE_TITLE,R2_BUCKET,R2_ACCOUNT_ID,WORKER_BASE_URL"
 
 # Deploy previews and branch deploys are disabled by design (design.md,
 # "Deployment and account security"): testing happens locally, then production
