@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd job for the nightly R2 mirror.
+
+  Install with:
+    cp scripts/com.family.photo-backup.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.family.photo-backup.plist
+
+  Scheduled at 01:30 so it finishes before IDrive's nightly run; adjust the
+  hour to stay ahead of whatever IDrive is actually set to.
+
+  No credentials appear here. The rclone remote lives in the user profile
+  (~/.config/rclone/rclone.conf) with restricted permissions.
+-->
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.family.photo-backup</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/bash</string>
+      <!-- Absolute path: edit to match where this repository is checked out. -->
+      <string>/Users/CHANGEME/dev/photo_website/scripts/backup.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+      <key>Hour</key>
+      <integer>1</integer>
+      <key>Minute</key>
+      <integer>30</integer>
+    </dict>
+
+    <!-- Missed while the laptop was asleep? Run at the next opportunity. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/CHANGEME/Library/Logs/photo-backup/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/CHANGEME/Library/Logs/photo-backup/launchd.err.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+      <key>PATH</key>
+      <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+  </dict>
+</plist>
