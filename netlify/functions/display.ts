@@ -6,18 +6,13 @@
  * and the tests all answer with the same code.
  */
 
-import {
-  dayResponse,
-  hierarchyResponse,
-  photoResponse,
-  undatedResponse,
-} from '../../src/shared/display-api.ts';
 import { getLivePhoto } from '../../src/shared/catalog.ts';
 import { SIGNED_URL_TTL_SECONDS } from '../../src/shared/constants.ts';
 import { isValidPhotoId } from '../../src/shared/ids.ts';
 import { assetGrantPath, signAssetGrant } from '../../src/shared/signing.ts';
 import { loadCatalog } from '../../src/shared/catalog-repository.ts';
 import { S3ObjectStore } from './lib/s3-store.ts';
+import { readRoute } from './lib/read-routes.ts';
 import {
   checkAccess,
   json,
@@ -38,8 +33,6 @@ function store(): S3ObjectStore {
   });
 }
 
-const DAY_ROUTE = /^\/day\/(\d{4})\/(\d{2})\/(\d{2})$/;
-const PHOTO_ROUTE = /^\/photo\/([0-9a-f]{32})$/;
 const DOWNLOAD_ROUTE = /^\/download\/([0-9a-f]{32})$/;
 
 export default async function handler(request: Request): Promise<Response> {
@@ -53,31 +46,8 @@ export default async function handler(request: Request): Promise<Response> {
   try {
     const { catalog } = await loadCatalog(store(), nowIso);
 
-    if (path === '/hierarchy') {
-      return json(
-        hierarchyResponse(catalog, process.env.SITE_TITLE ?? 'Family Photos'),
-      );
-    }
-
-    if (path === '/undated') return json(undatedResponse(catalog));
-
-    const day = DAY_ROUTE.exec(path);
-    if (day) {
-      const [, year, month, dayOfMonth] = day as unknown as string[];
-      const body = dayResponse(
-        catalog,
-        Number(year),
-        Number(month),
-        Number(dayOfMonth),
-      );
-      return body ? json(body) : notFound();
-    }
-
-    const photo = PHOTO_ROUTE.exec(path);
-    if (photo) {
-      const body = photoResponse(catalog, photo[1]!);
-      return body ? json(body) : notFound();
-    }
+    const read = readRoute(catalog, path);
+    if (read) return read;
 
     const download = DOWNLOAD_ROUTE.exec(path);
     if (download) return downloadLink(catalog, download[1]!);

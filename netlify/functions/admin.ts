@@ -54,6 +54,7 @@ import {
 } from '../../src/shared/signing.ts';
 import { toPublicPhoto } from '../../src/shared/display-api.ts';
 import { S3ObjectStore } from './lib/s3-store.ts';
+import { readRoute } from './lib/read-routes.ts';
 import {
   badRequest,
   checkAccess,
@@ -99,6 +100,14 @@ export default async function handler(request: Request): Promise<Response> {
 
     const download = /^\/download\/([0-9a-f]{32})$/.exec(path);
     if (method === 'GET' && download) return downloadLink(download[1]!);
+
+    // The admin app browses through the viewer's own projections; see
+    // lib/read-routes.ts for why both functions must answer these.
+    if (method === 'GET') {
+      const { catalog } = await loadCatalog(store(), nowIso);
+      const read = readRoute(catalog, path);
+      if (read) return read;
+    }
 
     if (method !== 'POST') return notFound();
 
