@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { navigate } from '../../shared/ui/navigation.ts';
 import { altTextFor } from '../../shared/validation.ts';
 import { derivativeSrcSet, derivativeUrl } from '../../shared/urls.ts';
@@ -7,24 +7,44 @@ import {
   formatCaptureTimeForViewer,
 } from '../../shared/datetime.ts';
 import { displayApi, routes } from '../api.ts';
-import type { PhotoResponse } from '../../shared/display-api.ts';
+import type { PublicPhoto } from '../../shared/display-api.ts';
 
 interface LightboxProps {
-  detail: PhotoResponse;
+  photo: PublicPhoto;
+  /** Position within the group, and its size, for "3 of 24". */
+  index: number;
+  total: number;
+  /**
+   * Every photo ID in the group, in display order.
+   *
+   * Passing the whole list rather than a precomputed previous/next is what
+   * makes rapid navigation correct. Stepping resolves the current position
+   * from `window.location`, which `history.pushState` updates synchronously,
+   * so a second arrow press arriving before React has re-rendered still
+   * advances — where a neighbour captured in a stale render would send it
+   * back to the photo already shown.
+   */
+  orderedIds: readonly string[];
   /** Where Escape and the close button return to. */
   groupHref: string;
   groupLabel: string;
 }
 
-function captureLine(detail: PhotoResponse): string | null {
-  const { captureDate, captureTime } = detail.photo;
+function captureLine(photo: PublicPhoto): string | null {
+  const { captureDate, captureTime } = photo;
   if (!captureDate) return null;
   const date = formatCaptureDate(captureDate);
   return captureTime ? `${date} at ${formatCaptureTimeForViewer(captureTime)}` : date;
 }
 
-export function Lightbox({ detail, groupHref, groupLabel }: LightboxProps) {
-  const { photo, previousId, nextId, index, total } = detail;
+export function Lightbox({
+  photo,
+  index,
+  total,
+  orderedIds,
+  groupHref,
+  groupLabel,
+}: LightboxProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [showInfo, setShowInfo] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -32,17 +52,33 @@ export function Lightbox({ detail, groupHref, groupLabel }: LightboxProps) {
 
   const close = useCallback(() => navigate(groupHref), [groupHref]);
 
-  const goTo = useCallback((id: string | null) => {
-    if (id) navigate(routes.photo(id));
-  }, []);
+  /** Move by one position from wherever the URL currently is. */
+  const step = useCallback(
+    (delta: number) => {
+      const currentId = window.location.pathname.split('/').pop() ?? '';
+      const position = orderedIds.indexOf(currentId);
+      if (position === -1) return;
+      const target = orderedIds[position + delta];
+      if (target) navigate(routes.photo(target));
+    },
+    [orderedIds],
+  );
+
+  const currentPosition = orderedIds.indexOf(photo.id);
+  const hasPrevious = currentPosition > 0;
+  const hasNext = currentPosition !== -1 && currentPosition < orderedIds.length - 1;
 
   // Move focus into the dialog when it opens, so a keyboard user is not left
-  // behind on the grid, and arrow keys reach the handler below.
-  useEffect(() => {
+  // behind on the grid.
+  useLayoutEffect(() => {
     dialogRef.current?.focus();
   }, [photo.id]);
 
-  useEffect(() => {
+  // A layout effect, not a passive one. Passive effects run *after* paint, so
+  // with useEffect the dialog is on screen and looks interactive for a frame
+  // before its key handler exists — and any key pressed in that window is
+  // silently dropped.
+  useLayoutEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       switch (event.key) {
         case 'Escape':
@@ -51,11 +87,11 @@ export function Lightbox({ detail, groupHref, groupLabel }: LightboxProps) {
           break;
         case 'ArrowLeft':
           event.preventDefault();
-          goTo(previousId);
+          step(-1);
           break;
         case 'ArrowRight':
           event.preventDefault();
-          goTo(nextId);
+          step(1);
           break;
         default:
           break;
@@ -64,7 +100,7 @@ export function Lightbox({ detail, groupHref, groupLabel }: LightboxProps) {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [close, goTo, previousId, nextId]);
+  }, [close, step]);
 
   // The page behind the lightbox must not scroll while it is open.
   useEffect(() => {
@@ -91,7 +127,7 @@ export function Lightbox({ detail, groupHref, groupLabel }: LightboxProps) {
   }
 
   const large = photo.derivatives['display-2560'];
-  const capture = captureLine(detail);
+  const capture = captureLine(photo);
   const alt = altTextFor(photo);
 
   return (
@@ -123,8 +159,8 @@ export function Lightbox({ detail, groupHref, groupLabel }: LightboxProps) {
         <button
           type="button"
           className="lightbox__nav lightbox__nav--previous"
-          onClick={() => goTo(previousId)}
-          disabled={previousId === null}
+          onClick={() => step(-1)}
+          disabled={!hasPrevious}
           aria-label="Previous photo"
         >
           <span aria-hidden="true">&#8249;</span>
@@ -151,8 +187,8 @@ export function Lightbox({ detail, groupHref, groupLabel }: LightboxProps) {
         <button
           type="button"
           className="lightbox__nav lightbox__nav--next"
-          onClick={() => goTo(nextId)}
-          disabled={nextId === null}
+          onClick={() => step(1)}
+          disabled={!hasNext}
           aria-label="Next photo"
         >
           <span aria-hidden="true">&#8250;</span>

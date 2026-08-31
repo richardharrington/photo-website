@@ -83,6 +83,15 @@ test.describe('the lightbox', () => {
     await page.keyboard.press('ArrowLeft');
     await expect(dialog).toContainText('2 of 6');
 
+    // Consecutive presses with no wait between them: each must advance one
+    // photo. Deriving neighbours from an in-flight detail response made a
+    // fast second press navigate to the photo already shown, so holding the
+    // key moved one step and stopped.
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await expect(dialog).toContainText('5 of 6');
+
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page).toHaveURL(`${BASE}/2026/08/02`);

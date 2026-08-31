@@ -36,33 +36,18 @@ function groupLabel(group: GroupRef): string {
     : formatCaptureDate(`${group.year}-${pad2(group.month)}-${pad2(group.day)}`);
 }
 
-/** The grid behind the lightbox, so closing lands on a populated page. */
-function GroupBackdrop({ group }: { group: GroupRef }) {
-  const resource = useResource<GroupResponse>(
-    (signal) =>
-      group.kind === 'undated'
-        ? displayApi.undated(signal)
-        : displayApi.day(group.year, group.month, group.day, signal),
-    [group.kind, groupHref(group)],
-  );
-
-  const crumbs =
-    group.kind === 'undated'
-      ? [{ label: __SITE_TITLE__, href: routes.home() }]
-      : [
-          { label: __SITE_TITLE__, href: routes.home() },
-          { label: String(group.year), href: routes.year(group.year) },
-          {
-            label: formatMonth(group.year, group.month),
-            href: routes.month(group.year, group.month),
-          },
-        ];
-
-  return (
-    <Layout crumbs={crumbs} title={groupLabel(group)}>
-      {resource.status === 'ready' ? <PhotoGrid photos={resource.data.photos} /> : null}
-    </Layout>
-  );
+function crumbsFor(group: GroupRef) {
+  if (group.kind === 'undated') {
+    return [{ label: __SITE_TITLE__, href: routes.home() }];
+  }
+  return [
+    { label: __SITE_TITLE__, href: routes.home() },
+    { label: String(group.year), href: routes.year(group.year) },
+    {
+      label: formatMonth(group.year, group.month),
+      href: routes.month(group.year, group.month),
+    },
+  ];
 }
 
 export function PhotoPage({ id }: { id: string }) {
@@ -74,36 +59,88 @@ export function PhotoPage({ id }: { id: string }) {
     { keepPreviousData: true },
   );
 
-  switch (detail.status) {
-    case 'loading':
-      return (
-        <Layout>
-          <Loading />
-        </Layout>
-      );
-    case 'not-found':
-      // Unknown, trashed, and permanently deleted all land here identically.
-      return (
-        <Layout>
-          <NotFound />
-        </Layout>
-      );
-    case 'error':
-      return (
-        <Layout>
-          <ErrorState message={detail.message} />
-        </Layout>
-      );
-    case 'ready':
-      return (
-        <>
-          <GroupBackdrop group={detail.data.group} />
-          <Lightbox
-            detail={detail.data}
-            groupHref={groupHref(detail.data.group)}
-            groupLabel={groupLabel(detail.data.group)}
-          />
-        </>
-      );
+  const group = detail.status === 'ready' ? detail.data.group : null;
+
+  /**
+   * The photo's own group: the grid behind the lightbox, and the source of
+   * previous/next.
+   *
+   * Deriving neighbours from the *detail* response was wrong. During a
+   * navigation the retained detail still describes the previous photo, so a
+   * second arrow press computed the same "next" and went nowhere — holding an
+   * arrow key advanced one photo instead of several. The ordered group and the
+   * route's own ID always agree, whatever request is in flight.
+   */
+  const groupResource = useResource<GroupResponse | null>(
+    (signal) => {
+      if (!group) return Promise.resolve(null);
+      return group.kind === 'undated'
+        ? displayApi.undated(signal)
+        : displayApi.day(group.year, group.month, group.day, signal);
+    },
+    [group ? groupHref(group) : null],
+    { keepPreviousData: true },
+  );
+
+  if (detail.status === 'loading') {
+    return (
+      <Layout>
+        <Loading />
+      </Layout>
+    );
   }
+  if (detail.status === 'not-found') {
+    // Unknown, trashed, and permanently deleted all land here identically.
+    return (
+      <Layout>
+        <NotFound />
+      </Layout>
+    );
+  }
+  if (detail.status === 'error') {
+    return (
+      <Layout>
+        <ErrorState message={detail.message} />
+      </Layout>
+    );
+  }
+
+  const photos =
+    groupResource.status === 'ready' ? (groupResource.data?.photos ?? []) : [];
+
+  // Position computed from the route's ID, so it is right even while a detail
+  // request for that ID is still in flight.
+  const index = photos.findIndex((photo) => photo.id === id);
+  const known = index !== -1;
+
+  const shown = known ? photos[index]! : detail.data.photo;
+
+  // The whole group in display order. Until the group has loaded, the detail
+  // response's own neighbours stand in as a three-entry list, so the lightbox
+  // has one uniform way to step regardless of what is still in flight.
+  const orderedIds = known
+    ? photos.map((photo) => photo.id)
+    : [detail.data.previousId, id, detail.data.nextId].filter(
+        (value): value is string => value !== null,
+      );
+
+  return (
+    <>
+      <Layout
+        crumbs={crumbsFor(detail.data.group)}
+        title={groupLabel(detail.data.group)}
+      >
+        {photos.length > 0 ? <PhotoGrid photos={photos} /> : null}
+      </Layout>
+
+      <Lightbox
+        photo={shown}
+        index={known ? index : detail.data.index}
+        total={known ? photos.length : detail.data.total}
+        orderedIds={orderedIds}
+        groupHref={groupHref(detail.data.group)}
+        groupLabel={groupLabel(detail.data.group)}
+      />
+    </>
+  );
 }

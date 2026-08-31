@@ -35,6 +35,12 @@ export default defineConfig({
       stdout: 'ignore',
     },
     {
+      command: 'npm run dev:admin',
+      url: 'http://localhost:5174/dev-admin-path/',
+      reuseExistingServer: !process.env.CI,
+      stdout: 'ignore',
+    },
+    {
       // The pipeline needs a real engine: createImageBitmap, OffscreenCanvas,
       // and WebAssembly cannot be exercised meaningfully under a DOM shim.
       command: 'npm run dev:harness',

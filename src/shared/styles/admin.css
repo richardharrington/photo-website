@@ -1,0 +1,478 @@
+/*
+ * Admin styles.
+ *
+ * Laptop-oriented: the grid, marquee selection, and side detail panel assume a
+ * pointer and a wide viewport. Mobile viewing is responsive, but touch-specific
+ * bulk selection is out of scope for the first release.
+ */
+
+.admin {
+  min-height: 100vh;
+}
+
+.admin__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+  padding: var(--space) calc(var(--space) * 1.5);
+  border-bottom: 1px solid var(--border);
+}
+
+.admin__title {
+  color: var(--fg);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.admin__nav {
+  display: flex;
+  gap: var(--space);
+  font-size: 0.9375rem;
+}
+
+.admin__nav a {
+  color: var(--fg-muted);
+  text-decoration: none;
+}
+
+.admin__nav a:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+.admin__main {
+  max-width: 78rem;
+  margin: 0 auto;
+  padding: calc(var(--space) * 1.5);
+}
+
+.admin__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space);
+  margin-bottom: var(--space);
+}
+
+.admin__toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--fg-muted);
+}
+
+button {
+  font: inherit;
+  font-size: 0.9375rem;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Upload ----------------------------------------------------------------- */
+
+.upload {
+  margin-bottom: calc(var(--space) * 1.5);
+}
+
+.drop-target {
+  /* Large and easy to target at all times, not only when the library is
+     empty (design.md, "Admin site"). */
+  min-height: 7rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: var(--space);
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  cursor: pointer;
+  text-align: center;
+}
+
+.upload--empty-library .drop-target {
+  min-height: 16rem;
+}
+
+.drop-target--active {
+  border-color: var(--focus);
+}
+
+.drop-target__headline {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.drop-target__hint {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.875rem;
+}
+
+.drop-target__input {
+  display: none;
+}
+
+.queue {
+  margin-top: var(--space);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.queue__summary {
+  padding: 0.625rem var(--space);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9375rem;
+}
+
+.queue__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.queue__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem var(--space);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.875rem;
+}
+
+.queue__item:last-child {
+  border-bottom: none;
+}
+
+.queue__name {
+  flex: 1;
+  min-width: 12rem;
+  overflow-wrap: anywhere;
+}
+
+.queue__state {
+  color: var(--fg-muted);
+}
+
+/* A skipped duplicate is neutral, not an error: re-dropping a folder is the
+   documented way to resume an interrupted batch. */
+.queue__item--skipped .queue__state {
+  color: var(--fg-muted);
+}
+
+.queue__item--failed .queue__state,
+.queue__error {
+  color: #b91c1c;
+}
+
+@media (prefers-color-scheme: dark) {
+  .queue__item--failed .queue__state,
+  .queue__error {
+    color: #fca5a5;
+  }
+}
+
+.queue__progress {
+  width: 8rem;
+}
+
+/* Admin grid ------------------------------------------------------------- */
+
+.admin-grid {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.75rem;
+  /* The marquee drags on this element, so text selection must not fight it. */
+  user-select: none;
+  min-height: 12rem;
+}
+
+.admin-grid__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.admin-grid__tile {
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 3px;
+  overflow: hidden;
+  aspect-ratio: 1;
+  background: var(--bg-raised);
+}
+
+.admin-grid__tile--selected {
+  border-color: var(--focus);
+}
+
+.admin-grid__image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/* Every admin thumbnail shows its original filename, unlike the viewer. */
+.admin-grid__filename {
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-grid__marquee {
+  position: absolute;
+  border: 1px solid var(--focus);
+  background: color-mix(in srgb, var(--focus) 18%, transparent);
+  pointer-events: none;
+}
+
+/* Detail panel ----------------------------------------------------------- */
+
+.detail {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(24rem, 100vw);
+  overflow-y: auto;
+  padding: var(--space);
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  box-shadow: -8px 0 24px rgb(0 0 0 / 12%);
+  z-index: 5;
+}
+
+.detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.detail__title {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.detail__preview {
+  width: 100%;
+  margin: var(--space) 0;
+  border-radius: 4px;
+}
+
+.detail__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.detail__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.detail__field span {
+  color: var(--fg-muted);
+}
+
+.detail__field input,
+.detail__field textarea {
+  font: inherit;
+  font-size: 0.9375rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.detail__field input:disabled {
+  opacity: 0.5;
+}
+
+.detail__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.detail__saved {
+  color: var(--fg-muted);
+  font-size: 0.875rem;
+}
+
+.detail__error {
+  color: #b91c1c;
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .detail__error {
+    color: #fca5a5;
+  }
+}
+
+.detail__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: var(--space);
+  padding-top: var(--space);
+  border-top: 1px solid var(--border);
+}
+
+.detail__delete {
+  border-color: #b91c1c;
+  color: #b91c1c;
+}
+
+/* Confirmation and undo -------------------------------------------------- */
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space);
+  background: rgb(0 0 0 / 45%);
+}
+
+.confirm {
+  max-width: 26rem;
+  padding: calc(var(--space) * 1.25);
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.confirm h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.125rem;
+}
+
+.confirm p {
+  margin: 0 0 var(--space);
+}
+
+.confirm__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.confirm__destructive {
+  border-color: #b91c1c;
+  color: #b91c1c;
+}
+
+.undo {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space);
+  transform: translateX(-50%);
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  gap: var(--space);
+  padding: 0.625rem var(--space);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
+}
+
+/* Trash ------------------------------------------------------------------ */
+
+.trash__intro {
+  color: var(--fg-muted);
+  font-size: 0.9375rem;
+}
+
+.trash__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: var(--space);
+  font-size: 0.875rem;
+  color: var(--fg-muted);
+}
+
+.trash__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: var(--space);
+}
+
+.trash__item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.trash__tile {
+  padding: 0;
+  aspect-ratio: 1;
+  border: 2px solid transparent;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--bg-raised);
+}
+
+.trash__tile--selected {
+  border-color: var(--focus);
+}
+
+.trash__tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.trash__meta {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+}
+
+.trash__filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+}

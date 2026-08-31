@@ -16,7 +16,11 @@ import {
   photoObjectKey,
 } from '../../src/shared/constants.ts';
 import type { Rendition } from '../../src/shared/constants.ts';
-import { findByContentHash, trashedPhotos } from '../../src/shared/catalog.ts';
+import {
+  findByContentHash,
+  getLivePhoto,
+  trashedPhotos,
+} from '../../src/shared/catalog.ts';
 import type { DerivativeDescriptor } from '../../src/shared/catalog.ts';
 import { loadCatalog, mutateCatalog } from '../../src/shared/catalog-repository.ts';
 import {
@@ -91,6 +95,10 @@ export default async function handler(request: Request): Promise<Response> {
   try {
     if (method === 'GET' && path === '/export') return exportCatalog();
     if (method === 'GET' && path === '/trash') return listTrash();
+    if (method === 'GET' && path === '/trash/count') return trashCount();
+
+    const download = /^\/download\/([0-9a-f]{32})$/.exec(path);
+    if (method === 'GET' && download) return downloadLink(download[1]!);
 
     if (method !== 'POST') return notFound();
 
@@ -527,6 +535,33 @@ async function handlePermanentDeleteConfirm(request: Request): Promise<Response>
   return json({ deleted: outcome.affected, count: outcome.affected.length });
 }
 
+/**
+ * A short-lived signed URL for the full-resolution JPEG.
+ *
+ * The admin needs its own copy of this rather than reaching into the display
+ * function, because the two are reachable only through their own secret paths.
+ * Trashed photos are refused here exactly as they are for a viewer.
+ */
+async function downloadLink(photoId: string): Promise<Response> {
+  const { catalog } = await loadCatalog(store(), nowIso);
+  const photo = getLivePhoto(catalog, photoId);
+  if (!photo) return notFound();
+
+  const grant = {
+    photoId: photo.id,
+    rendition: 'full',
+    expiresAt: nowSeconds() + SIGNED_URL_TTL_SECONDS,
+  };
+  const signature = await signAssetGrant(requiredEnv('ASSET_SIGNING_KEY'), grant);
+  const workerBase = requiredEnv('WORKER_BASE_URL').replace(/\/+$/, '');
+
+  return json({
+    url: `${workerBase}${assetGrantPath(grant, signature)}`,
+    expiresAt: new Date(grant.expiresAt * 1000).toISOString(),
+    filename: photo.downloadFilename,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Trash listing and export
 // ---------------------------------------------------------------------------
@@ -558,6 +593,17 @@ async function listTrash(): Promise<Response> {
 
   items.sort((a, b) => (a.trashedAt! < b.trashedAt! ? 1 : -1));
   return json({ items, expiresAt: new Date(expiresAt * 1000).toISOString() });
+}
+
+/**
+ * Just the number, for the persistent Trash navigation link.
+ *
+ * Separate from listTrash so the header does not mint a signed thumbnail URL
+ * per trashed photo on every page view.
+ */
+async function trashCount(): Promise<Response> {
+  const { catalog } = await loadCatalog(store(), nowIso);
+  return json({ count: trashedPhotos(catalog).length });
 }
 
 /** The provider-independent curation export: the catalog exactly as stored. */
