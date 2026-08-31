@@ -1,0 +1,17 @@
+# Real photos used as pipeline test fixtures. Never commit: this repo may be public.
+sample-photos/
+
+# Secrets. See docs/design.md — R2 credentials, route values, and signing keys
+# live only in Netlify/Cloudflare environment config.
+.env
+.env.*
+!.env.example
+
+# Build and dependency output
+node_modules/
+dist/
+.netlify/
+.wrangler/
+
+# macOS
+.DS_Store

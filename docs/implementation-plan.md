@@ -13,10 +13,11 @@ images, and free-tier only.
 ## Architecture
 
 ```text
-Admin browser
-  ├─ full image pipeline: decode (incl. HEIC via libheif-WASM), EXIF
-  │  orientation, resize, encode (mozjpeg/libwebp WASM), SHA-256 hash
-  └─ direct R2 PUTs of finished artifacts via presigned URLs
+Admin browser  (Chromium or Safari; Firefox unsupported for admin)
+  ├─ full image pipeline, strictly serial per file: decode (incl. HEIC via
+  │  libheif-WASM), orient, P3→sRGB convert, resize, encode
+  │  (mozjpeg/libwebp WASM), SHA-256 hash
+  └─ direct R2 PUTs of finished artifacts via presigned URLs (concurrent)
 
 Viewer browser
   └─ static React display app; images from Worker capability URLs
@@ -37,6 +38,14 @@ Administrator laptop
 
 There are no Netlify Background Functions and no server-side image libraries;
 nothing in the stack requires a paid plan.
+
+The admin app is supported on Chromium-based browsers and Safari only.
+Firefox is unsupported for administration: it measured roughly 10x slower per
+photo and crashed the tab on a fourth consecutive file, a pattern suggesting
+memory accumulating across files. The display site is unaffected. Note that
+`libheif-js` inlines its WebAssembly into the JS bundle, so no separate
+`.wasm` fetch needs allowing in `connect-src`, though `'wasm-unsafe-eval'` is
+still required.
 
 ### Why the Cloudflare Worker exists
 
@@ -78,6 +87,7 @@ docs/
   design.md
   implementation-plan.md
   decisions.md
+  spike-findings-handoff.md   day-one spike results (historical record)
   operations.md
 public/                      robots file and static build inputs
 ```
@@ -125,7 +135,8 @@ Apply `X-Robots-Tag: noindex, nofollow, noarchive, nosnippet` and
 Worker layers. HTML also includes the robots meta tag. HTML responses add a
 strict `Content-Security-Policy`: same-origin resources, `img-src` including
 the Worker origin, `connect-src` including the R2 upload endpoint (admin app
-only), and `'wasm-unsafe-eval'` for the admin app's WASM codecs. No
+only), and `'wasm-unsafe-eval'` for the admin app's WASM codecs (which are
+inlined into the bundle, so no additional WASM origin is needed). No
 origin/referrer checking is performed at the Worker: image loads carry neither
 header under this design, so signed URLs and capability URLs are the access
 model.
@@ -150,10 +161,22 @@ and only permanent deletion or the purge cron removes objects.
 
 Conditional writes with the R2 object ETag are used for every catalog
 mutation. If a conditional write conflicts, reload and retry against the
-latest catalog rather than overwriting it. A day-one spike verifies
-ETag-conditioned PUTs through both the S3 API and Worker bindings; the
-documented fallback is routing all catalog mutations through a single Worker
-endpoint.
+latest catalog rather than overwriting it. **This retry loop is correct only
+because R2 is strongly consistent** for read-after-write and list-after-write:
+a retry is guaranteed to read the write that just beat it. That dependency is
+recorded deliberately — migrating to eventually-consistent storage would break
+catalog atomicity silently.
+
+The two write surfaces signal conflicts in structurally different ways, and a
+shared retry helper must handle both shapes. The S3 API (`PutObject` with
+`If-Match`) returns **HTTP 412**, while the Workers binding
+(`put(key, value, { onlyIf: { etagMatches } })`) returns **`null` without
+throwing** — so a bare `try`/`catch` is wrong on the binding path, where a
+conflict is an ordinary return value. Multipart uploads do not support
+conditional headers, which is irrelevant here because `catalog/current.json`
+will never be multipart. Live verification against a real bucket is a Phase 1
+account-setup task; the documented fallback remains routing all catalog
+mutations through a single Worker endpoint.
 
 ## Catalog model
 
@@ -183,16 +206,44 @@ files in the order they were selected or dropped.
 
 1. **Begin batch.** The admin app registers a drop/selection; the admin API
    increments the catalog batch counter and returns `batchSeq`. Each file
-   gets a `selectionIndex` from its position in the selection.
-2. **Process locally.** For each file the browser validates extension/type
-   and the 50 MB limit, decodes it (libheif-WASM for HEIC), rejects sources
-   over 50 megapixels, applies EXIF orientation, extracts metadata with
-   `exifr` using the precedence in `design.md` (conservative filename parsing
-   only when needed), computes the source-byte SHA-256, and encodes the four
-   artifacts: full sRGB JPEG (quality 92, 4:4:4, PNG alpha flattened on
-   white) and 400/1280/2560 px sRGB WebP derivatives (quality 82). All
-   encoding uses WASM codecs (mozjpeg, libwebp) for identical output in every
-   browser.
+   gets a `selectionIndex` from its position in the selection. This counter
+   is the *only* server-side state written before any commit; an abandoned
+   batch merely leaves a harmless gap in the sequence.
+2. **Process locally, one file at a time.** Decoding and encoding are
+   strictly serial; the concurrency in step 4 applies to uploads only,
+   because several simultaneous large decodes risk exhausting memory. For
+   each file the browser:
+   - validates extension/type and the 50 MB limit;
+   - reads dimensions from container/EXIF headers and rejects sources over
+     50 megapixels **before** full decode, so an oversized file cannot
+     exhaust memory before the guard meant to prevent that fires;
+   - extracts metadata with `exifr` using the precedence in `design.md`
+     (conservative filename parsing only when needed), passing **both**
+     `reviveValues: false` — keep the raw `YYYY:MM:DD HH:MM:SS` string rather
+     than a `Date` reinterpreted in the local timezone — and
+     `translateValues: false` — keep numeric enums, so `Orientation` is `6`
+     rather than `"Rotate 90 CW"`. These options must be set together;
+     either one alone yields a silent defect. Store `OffsetTimeOriginal`
+     separately when present;
+   - decodes: libheif-WASM for HEIC, `createImageBitmap` with an explicit
+     `imageOrientation: 'none'` for JPEG/PNG (never rely on the default,
+     which has shifted historically and varies across engines);
+   - applies orientation **path-dependently**: never apply EXIF orientation
+     to libheif output, which already honoured the HEIF `irot` property and
+     which Apple redundantly tags on top; always apply it on the
+     `createImageBitmap` path. A defensive implementation may compare
+     libheif's returned aspect ratio against the EXIF-implied display aspect
+     and rotate only on mismatch, covering the unobserved case of a HEIC
+     carrying EXIF orientation but no `irot`;
+   - converts wide-gamut (Display P3) pixels to sRGB with a 3x3 matrix
+     applied in linear light, using lookup tables for the transfer-function
+     round trip;
+   - flattens PNG alpha on white;
+   - computes the source-byte SHA-256;
+   - encodes the four artifacts with WASM codecs (mozjpeg, libwebp) for
+     identical output in every browser: the full sRGB JPEG at quality 92 with
+     `chroma_subsample: 1` and `auto_subsample: false` for true 4:4:4, and
+     400/1280/2560 px sRGB WebP derivatives at quality 82.
 3. **Prepare.** The browser sends hash and filename. If the hash exists in
    the catalog, the API reports the existing photo and the UI marks the file
    “already uploaded – skipped” with a link—no error styling, no upload.
@@ -200,13 +251,15 @@ files in the order they were selected or dropped.
    single-object presigned PUT URLs.
 4. **Upload.** The browser PUTs the four artifacts directly to R2, with a
    small concurrent queue (initially three files in flight) and overall plus
-   per-file progress and retry.
+   per-file progress and retry. This concurrency governs **uploads only** —
+   step 2's decode/encode work stays serial.
 5. **Commit.** The browser calls `commit` with the photo ID, metadata,
    ordering fields, and descriptors. The API HEAD-verifies all four objects,
    re-checks hash uniqueness, and creates the record in one conditional
    catalog write. The photo is immediately live in the display hierarchy.
-6. **Failure and resume.** Nothing is persisted server-side before commit. A
-   failed file shows its reason and a retry control; a closed tab simply
+6. **Failure and resume.** No photo record is persisted server-side before
+   commit (the batch counter of step 1 is the sole exception). A failed file
+   shows its reason and a retry control; a closed tab simply
    leaves uncommitted files out of the catalog. The documented resume path is
    re-dropping the folder—already-committed files are skipped by the hash
    check. The daily cron deletes `photos/<id>/` prefixes that have no catalog
@@ -292,13 +345,33 @@ bulk selection, catalog import, or video features.
 - Unit-test timestamp precedence, filename patterns including
   `IMG_20260802_174850943_HDR.jpg`, date/time validation,
   `(batchSeq, selectionIndex)` ordering, hash duplicate detection, download
-  signatures, confirmation-token/ID-list binding, and catalog conflict
-  retries.
+  signatures, and confirmation-token/ID-list binding.
+- Test catalog conflict retries against a controlled **in-memory fake with
+  explicitly asserted semantics — not Miniflare's emulated R2**, whose
+  `onlyIf` handling has been reported inverted (`workers-sdk#6411`, closed as
+  not planned), so tests could otherwise validate against backwards
+  semantics. Cover both conflict shapes: HTTP 412 on the S3 path and a `null`
+  return on the binding path. Verify real behaviour once against a live
+  bucket during account setup.
 - Exercise the browser pipeline against fixtures for portrait EXIF
-  orientation, GPS metadata, JPEG, PNG transparency, 48 MP iPhone HEIC,
-  wide-gamut input, missing timestamps, and malformed files—in Chrome,
-  Safari, and Firefox (Playwright), asserting output dimensions, sRGB
-  conversion, and metadata stripping.
+  orientation, GPS metadata, JPEG, PNG transparency, high-megapixel HEIC,
+  wide-gamut input, a highly saturated wide-gamut source, missing timestamps,
+  and malformed files — in Chromium and WebKit/Safari via Playwright —
+  asserting metadata and GPS stripping, alpha flattening, and clean rejection
+  of malformed input without a tab crash.
+- **Orientation regression test (mandatory).** A portrait iPhone HEIC whose
+  final artifacts are asserted portrait by *pixel comparison against a
+  known-good rendering*. Dimension assertions are explicitly insufficient
+  here: the double-rotation defect this guards against yields four artifacts
+  that are mutually consistent and dimensionally plausible, so any
+  dimensions-only check passes. Note that `sips` is not a valid oracle — it
+  reports post-orientation dimensions while copying rather than baking the
+  orientation tag, and will confidently give the wrong answer.
+- **Timezone test.** A photo whose EXIF local time is early morning must land
+  on the same calendar day regardless of the parsing machine's timezone.
+- **Color test.** Assert converted output against a reference P3→sRGB
+  conversion, including a saturated fixture, since deviation concentrates in
+  the most saturated pixels.
 - Integration-test the opaque-route gate: root/incorrect path 404, display
   cannot reach admin, trashed photo 404 from both API and Worker,
   no-index/referrer headers everywhere, CSP present.
@@ -348,9 +421,11 @@ surfaces as a conditional-write conflict, not silent loss).
 ## Delivery phases
 
 1. **Foundation:** scaffold, lint/test/build/deploy configuration, opaque
-   gate, environment docs, fixture catalog, display UI, and the two day-one
-   spikes (browser WASM pipeline fixtures; R2 conditional writes via S3 API
-   and bindings).
+   gate, environment docs, fixture catalog, and display UI. Both day-one
+   spikes are already complete (see
+   [spike-findings-handoff.md](spike-findings-handoff.md)); what remains here
+   is verifying R2 conditional writes against a live bucket once the
+   Cloudflare account exists, alongside free-tier and spend-alert setup.
 2. **Storage pipeline:** R2 client, catalog repository, asset Worker
    (capability URLs + signed downloads), browser pipeline, begin-batch/
    prepare/upload/commit flow, and re-drop resume.

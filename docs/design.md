@@ -1,8 +1,10 @@
 # Photo Sharing Site Design
 
 **Status:** Approved design record, revised 2026-08-30 after a design review
-(see [decisions.md](decisions.md)). Implementation is planned in
-[implementation-plan.md](implementation-plan.md). The remaining items under
+and again 2026-08-31 after both day-one spikes were executed against real
+fixtures (see [decisions.md](decisions.md) and
+[spike-findings-handoff.md](spike-findings-handoff.md)). Implementation is
+planned in [implementation-plan.md](implementation-plan.md). The items under
 [Implementation validation](#implementation-validation) are technical checks,
 not unresolved product decisions.
 
@@ -76,17 +78,21 @@ trusted.
 - Supported browsers are current Chrome, Safari, Firefox, and Edge releases.
   The viewer is responsive on current mobile Safari/Chrome; obsolete browsers
   such as Internet Explorer are unsupported. All supported browsers decode
-  WebP, so display derivatives are WebP-only.
+  WebP, so display derivatives are WebP-only. The **admin** app additionally
+  requires a Chromium-based browser or Safari: Firefox runs the image
+  pipeline roughly 10x slower and crashed on a fourth consecutive file, so it
+  is unsupported for administration. Viewing the display site in Firefox is
+  fully supported.
 - UI: React, TypeScript, and Vite. The display and admin apps are two fully
   separate builds so no admin code can appear under the display path.
 - Server API: Netlify Functions (catalog reads and mutations only; the server
   performs no image processing).
 - Object storage: a private Cloudflare R2 bucket.
 - **All image processing runs in the admin browser.** The admin app decodes
-  sources (including HEIC, via a WebAssembly build of libheif), applies EXIF
-  orientation, validates size, and encodes all final artifacts with
-  WebAssembly codecs (mozjpeg, libwebp) so output is identical in every
-  supported browser. The browser then uploads the finished artifacts directly
+  sources (including HEIC, via a WebAssembly build of libheif), applies
+  orientation, converts wide-gamut color to sRGB, validates size, and encodes
+  all final artifacts with WebAssembly codecs (mozjpeg, libwebp) so output is
+  identical in every supported browser. The browser then uploads the finished artifacts directly
   to R2 using narrowly scoped, short-lived signed PUT URLs issued by the
   server API. The original source file never leaves the administrator's
   computer; no server-side processing, background functions, or paid plan
@@ -140,7 +146,11 @@ On ingest, timestamp precedence is:
 4. no date/time (Undated).
 
 Metadata extraction runs in the admin browser during upload; the server
-validates submitted values but does not re-extract them. The catalog records
+validates submitted values but does not re-extract them. EXIF timestamps are
+read as naive camera-local strings and never revived into machine-local date
+values: reviving them would reinterpret a zoneless wall-clock time in the
+administrator's own timezone and could file early-morning photos under the
+wrong calendar day. The catalog records
 the selected timestamp source for diagnostics and later correction.
 Camera-local calendar date/time is preserved for grouping; known offsets are
 retained but timestamps are not shifted to a viewer timezone.
@@ -158,23 +168,41 @@ Captions are plain text with line breaks; they do not support HTML or Markdown.
 ### Image files
 
 - Initial uploads accept JPEG, HEIC/HEIF, and PNG, up to 50 MB and 50
-  megapixels per source file (50 MP covers every current phone camera,
-  including 48 MP iPhones). Video, unsupported formats, and over-limit files
-  are rejected with a clear message; oversized panoramas can be downsized
+  megapixels per source file. The megapixel cap is forward-looking rather
+  than binding: the administrator's current devices produce 12.2 MP images,
+  and a 48.8 MP fixture measured about 12.5 seconds end-to-end, so the limit
+  is comfortable. Dimensions are read from container/EXIF headers and checked
+  *before* full decode, so an oversized file is rejected without first
+  exhausting memory. Video, unsupported formats, and over-limit files are
+  rejected with a clear message; oversized panoramas can be downsized
   manually before upload.
 - The admin browser normalizes each accepted file to a sanitized,
   full-resolution sRGB JPEG at quality 92 with 4:4:4 chroma subsampling for
   original-size download, compositing transparent PNG pixels on white. It also
   produces responsive sRGB WebP derivatives at quality 82: approximately
   400 px thumbnails, 1,280 px standard display images, and 2,560 px
-  large-lightbox images. All output is sRGB; wide-gamut source color is
-  converted rather than preserved.
-- EXIF orientation is applied to image pixels before encoding, so all
-  derivatives and original-size downloads are physically upright.
+  large-lightbox images. Wide-gamut sources — Display P3 is the common case
+  for Apple devices — are genuinely converted to sRGB by a matrix
+  transformation applied in linear light, not merely relabelled, so stored
+  pixel values agree with the sRGB profile the files declare.
+- All derivatives and original-size downloads are physically upright, but the
+  rule that achieves this is decode-path dependent and must not be
+  generalized. libheif already applies the HEIF `irot` property during
+  decode, so EXIF orientation must be *ignored* for HEIC sources — Apple
+  writes a redundant `Orientation: 6` that would otherwise rotate the image a
+  second time. Images decoded via `createImageBitmap` (with an explicit
+  `imageOrientation: 'none'`) must have EXIF orientation applied.
 - Because every artifact is re-encoded from decoded pixels, GPS and all other
   EXIF metadata are absent from every stored file. Capture date/time is
-  retained only in the catalog. The untouched source file is never uploaded
-  and remains only on the administrator's computer (and in its own archives).
+  retained only in the catalog; this was verified against real fixtures
+  carrying genuine GPS coordinates. The untouched source file is never
+  uploaded and remains only on the administrator's computer (and in its own
+  archives).
+- The sanitized full-resolution JPEG is frequently *larger* than the HEIC
+  source it came from (quality 92 at 4:4:4 versus HEVC compression). This is
+  expected, not a defect. Measured storage is roughly 2-5 MB per photo across
+  all four artifacts — about 0.9 GB/year at 300 photos/year, comfortably
+  inside R2's 10 GB free tier for several years.
 - Exact-content duplicates are detected with a source-byte content hash and
   rejected by default, with a link to the existing photo. Re-dropping a
   folder that was partially uploaded is therefore safe and is the standard
@@ -189,8 +217,11 @@ queue with overall and per-file status rather than an arbitrary batch limit.
 
 1. The admin app registers the batch; the server assigns it a global batch
    sequence number.
-2. For each file, the browser decodes and validates it, extracts metadata,
-   computes the content hash, and encodes the four final artifacts.
+2. For each file in turn, the browser validates and decodes it, extracts
+   metadata, computes the content hash, and encodes the four final artifacts.
+   Decoding and encoding are strictly serial — one file at a time — because
+   several simultaneous large decodes risk exhausting memory; only the
+   uploads themselves run concurrently.
 3. Files whose hash already exists in the catalog are marked
    “already uploaded – skipped,” with a link to the existing photo, and are
    not uploaded.
@@ -301,14 +332,28 @@ metadata.
 
 ## Implementation validation
 
-- Day-one spike: verify the browser WASM pipeline (libheif decode, mozjpeg and
-  libwebp encode) handles representative fixtures—48 MP iPhone HEIC, EXIF
-  orientation, PNG transparency, wide-gamut input, malformed files—with
-  acceptable speed and memory in current Chrome, Safari, and Firefox.
-- Day-one spike: verify R2 conditional (ETag-guarded) writes behave correctly
-  through both the S3 API (Netlify functions) and Worker R2 bindings. If
-  either path fails, fall back to routing all catalog mutations through a
-  single Worker endpoint.
+Both original day-one spikes have been executed against real fixtures.
+Results, measurements, and the defects they exposed are recorded in
+[spike-findings-handoff.md](spike-findings-handoff.md) and
+[decisions.md](decisions.md).
+
+- **Browser pipeline: resolved.** The WASM pipeline correctly handles real
+  Apple HEIC (including Apple's tiled `grid` encoding), EXIF orientation, PNG
+  alpha, GPS stripping, and malformed input in both Chromium and WebKit, at
+  roughly 4-5.5 seconds per 12.2 MP photo and 12.5 seconds at 48.8 MP. The
+  full-resolution JPEG encode dominates that time; decode is comparatively
+  cheap.
+- **R2 conditional writes: confirmed at the API level; live check deferred.**
+  Both write surfaces support ETag-guarded writes but signal conflicts
+  differently. No Cloudflare account exists yet, so verifying real behaviour
+  under concurrent writers moves to the Phase 1 account-setup checklist
+  rather than blocking design.
+- Run one manual pass in real Safari, as opposed to Playwright's WebKit,
+  before launch.
+- Check per-file memory release across a sustained batch in Chromium and
+  Safari before attempting large batches.
+- Bound the color-conversion error with a highly saturated wide-gamut
+  fixture; the existing measurement used a low-saturation scene.
 - Validate current Netlify/Cloudflare free-tier limits, supported cron
   features, and pricing during account setup; the site must run at $0/month.
 - Implement and test the exact `launchd`/`rclone` configuration before launch.
