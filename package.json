@@ -20,7 +20,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test"
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test",
+    "dev:harness": "vite --config vite.harness.config.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1121.0",

@@ -240,6 +240,8 @@ export default {
     // The cron just changed the catalog; the next request must not serve a
     // cached copy that still contains purged photos.
     resetCatalogCache();
+    // Operational summary; visible in `wrangler tail` and the Cloudflare log.
+    // eslint-disable-next-line no-console
     console.log('Maintenance complete', JSON.stringify(report));
   },
 };

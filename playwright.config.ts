@@ -27,10 +27,20 @@ export default defineConfig({
       testMatch: /mobile\.spec\.ts/,
     },
   ],
-  webServer: {
-    command: 'npm run dev:display',
-    url: 'http://localhost:5173/dev-display-path/',
-    reuseExistingServer: !process.env.CI,
-    stdout: 'ignore',
-  },
+  webServer: [
+    {
+      command: 'npm run dev:display',
+      url: 'http://localhost:5173/dev-display-path/',
+      reuseExistingServer: !process.env.CI,
+      stdout: 'ignore',
+    },
+    {
+      // The pipeline needs a real engine: createImageBitmap, OffscreenCanvas,
+      // and WebAssembly cannot be exercised meaningfully under a DOM shim.
+      command: 'npm run dev:harness',
+      url: 'http://localhost:5175/',
+      reuseExistingServer: !process.env.CI,
+      stdout: 'ignore',
+    },
+  ],
 });
