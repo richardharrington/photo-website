@@ -242,3 +242,7 @@ review flagged.
   (libheif composited a real 48-tile Apple grid correctly), but the gap is
   now an explicit item in design.md's validation list rather than an
   unrecorded residual risk.
+- **Real-Safari manual pass waived by the owner.** The pre-launch manual
+  check in real Safari (as opposed to Playwright's WebKit) is dropped;
+  automated WebKit coverage is accepted as the extent of Safari
+  verification.

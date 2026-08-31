@@ -349,8 +349,6 @@ from the working tree and survives in git history.
   differently. No Cloudflare account exists yet, so verifying real behaviour
   under concurrent writers moves to the Phase 1 account-setup checklist
   rather than blocking design.
-- Run one manual pass in real Safari, as opposed to Playwright's WebKit,
-  before launch.
 - Check per-file memory release across a sustained batch in Chromium and
   Safari before attempting large batches.
 - Bound the color-conversion error with a highly saturated wide-gamut
