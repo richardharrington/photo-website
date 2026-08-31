@@ -219,6 +219,31 @@ describe('signed URLs', () => {
     );
   });
 
+  it('refuses every signed URL when the signing key is not set', async () => {
+    // A missing secret is a deployment fault. Unguarded, Web Crypto rejects
+    // the zero-length HMAC key with a DataError and Cloudflare turns that
+    // into a 1101 error page — which happened in production. Fail closed and
+    // say so in the log instead, the way the Netlify gate does.
+    const path = await signedPath(LIVE, 'full');
+    const console_ = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    for (const key of ['', undefined as unknown as string]) {
+      const { env } = makeEnv();
+      const response = await worker.fetch(get(path), {
+        ...env,
+        ASSET_SIGNING_KEY: key,
+      });
+
+      expect(response.status).toBe(404);
+      expect(await response.text()).toBe('Not Found');
+    }
+
+    expect(console_).toHaveBeenCalledWith(
+      'ASSET_SIGNING_KEY is not set; refusing every signed URL.',
+    );
+    console_.mockRestore();
+  });
+
   it('keeps a signed response out of caches', async () => {
     const { env } = makeEnv();
     const response = await worker.fetch(get(await signedPath(LIVE, 'full')), env);

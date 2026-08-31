@@ -165,6 +165,18 @@ async function handleSigned(
 ): Promise<Response> {
   if (!isRendition(rendition)) return notFound();
 
+  // Fail closed, the way the Netlify gate does for its own shared secret. An
+  // unset key is a deployment fault, not a request fault: without it no
+  // signature can be verified, so nothing may be served. Left unguarded it is
+  // worse than useless — Web Crypto rejects a zero-length HMAC key with a
+  // DataError, which reaches the visitor as a Cloudflare 1101 page and tells
+  // the operator nothing at all.
+  if (!env.ASSET_SIGNING_KEY) {
+    // eslint-disable-next-line no-console
+    console.error('ASSET_SIGNING_KEY is not set; refusing every signed URL.');
+    return notFound();
+  }
+
   const expiresAt = Number(url.searchParams.get('exp'));
   const signature = url.searchParams.get('sig') ?? '';
   if (!Number.isFinite(expiresAt) || signature === '') return notFound();
