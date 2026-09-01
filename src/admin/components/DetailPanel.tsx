@@ -13,7 +13,10 @@ interface DetailPanelProps {
 }
 
 /**
- * Per-photo curation: date, time, caption, information, download, delete.
+ * Per-photo curation: download, delete, date, time, caption, information.
+ *
+ * Download, Delete, and the [x] close all sit in the header, above the
+ * preview, so no control is ever below the fold.
  *
  * Bulk metadata editing is deliberately out of scope; date, time, and caption
  * are per-photo only.
@@ -25,6 +28,7 @@ export function DetailPanel({ photo, onClose, onSaved, onTrash }: DetailPanelPro
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const panelRef = useRef<HTMLElement>(null);
 
   // Switching photos must reset the form, not carry the previous edit over.
   //
@@ -48,6 +52,30 @@ export function DetailPanel({ photo, onClose, onSaved, onTrash }: DetailPanelPro
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose]);
+
+  /**
+   * Click anywhere outside to close.
+   *
+   * A click on another thumbnail is left alone on purpose: the grid's own
+   * handler switches the panel to that photo, which is one click rather than
+   * the close-then-reopen a blanket rule would force. Bound on pointerdown so
+   * the panel is gone before the click lands, and unsaved edits are discarded
+   * silently — the same as Escape.
+   *
+   * There is nothing outside the panel to click on a narrow phone, where it
+   * covers the viewport; `[x]` is the way out there.
+   */
+  useEffect(() => {
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target as Element | null;
+      if (!target) return;
+      if (panelRef.current?.contains(target)) return;
+      if (target.closest('[data-photo-id]')) return;
+      onClose();
+    }
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
   }, [onClose]);
 
   async function save() {
@@ -94,12 +122,34 @@ export function DetailPanel({ photo, onClose, onSaved, onTrash }: DetailPanelPro
   }
 
   return (
-    <aside className="detail" aria-label={`Details for ${photo.originalFilename}`}>
+    <aside
+      ref={panelRef}
+      className="detail"
+      aria-label={`Details for ${photo.originalFilename}`}
+    >
       <div className="detail__header">
         <h2 className="detail__title">{photo.originalFilename}</h2>
-        <button type="button" onClick={onClose} aria-label="Close details">
-          Close
-        </button>
+        {/* Every control at the top, so none of them is ever scrolled past. */}
+        <div className="detail__header-actions">
+          <button type="button" onClick={() => void download()}>
+            Download
+          </button>
+          <button
+            type="button"
+            className="detail__delete"
+            onClick={() => onTrash(photo.id)}
+          >
+            Delete
+          </button>
+          <button
+            type="button"
+            className="detail__close"
+            onClick={onClose}
+            aria-label="Close details"
+          >
+            [x]
+          </button>
+        </div>
       </div>
 
       <img
@@ -176,19 +226,6 @@ export function DetailPanel({ photo, onClose, onSaved, onTrash }: DetailPanelPro
           {photo.derivatives.full.width} &times; {photo.derivatives.full.height}
         </dd>
       </dl>
-
-      <div className="detail__footer">
-        <button type="button" onClick={() => void download()}>
-          Download original size
-        </button>
-        <button
-          type="button"
-          className="detail__delete"
-          onClick={() => onTrash(photo.id)}
-        >
-          Delete
-        </button>
-      </div>
     </aside>
   );
 }

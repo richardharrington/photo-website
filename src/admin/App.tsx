@@ -12,8 +12,6 @@ import { DetailPanel } from './components/DetailPanel.tsx';
 import { Confirm, UndoBanner } from './components/Confirm.tsx';
 import { TrashView } from './components/TrashView.tsx';
 import { UploadPanel } from './components/Upload.tsx';
-import { EMPTY_SELECTION, pruneToVisible, selectedIds } from './selection.ts';
-import type { SelectionState } from './selection.ts';
 import type {
   GroupResponse,
   HierarchyResponse,
@@ -46,14 +44,12 @@ export function App() {
   const route = parseAdminRoute(path, __APP_BASE__);
 
   const [reloadKey, setReloadKey] = useState(0);
-  const [selection, setSelection] = useState<SelectionState>(EMPTY_SELECTION);
   const [openPhoto, setOpenPhoto] = useState<PublicPhoto | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [undo, setUndo] = useState<{ ids: string[]; message: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(() => {
-    setSelection(EMPTY_SELECTION);
     setOpenPhoto(null);
     setReloadKey((key) => key + 1);
   }, []);
@@ -136,10 +132,8 @@ export function App() {
             route={route}
             hierarchy={hierarchy}
             reloadKey={reloadKey}
-            selection={selection}
-            onSelectionChange={setSelection}
+            openPhotoId={openPhoto?.id ?? null}
             onOpenPhoto={setOpenPhoto}
-            onTrashSelection={(ids) => void startTrash({ kind: 'ids', photoIds: ids })}
             onTrashGroup={(query) => void startTrash(query)}
             onReload={reload}
           />
@@ -185,10 +179,9 @@ interface BrowseViewProps {
   route: AdminRoute;
   hierarchy: ReturnType<typeof useResource<HierarchyResponse>>;
   reloadKey: number;
-  selection: SelectionState;
-  onSelectionChange: (selection: SelectionState) => void;
+  /** The photo the detail panel is showing, so the grid can mark it. */
+  openPhotoId: string | null;
   onOpenPhoto: (photo: PublicPhoto) => void;
-  onTrashSelection: (ids: string[]) => void;
   onTrashGroup: (query: SelectionQuery) => void;
   onReload: () => void;
 }
@@ -322,10 +315,8 @@ function GroupLinks({
 function GridView({
   route,
   group,
-  selection,
-  onSelectionChange,
+  openPhotoId,
   onOpenPhoto,
-  onTrashSelection,
   onTrashGroup,
 }: BrowseViewProps & { group: ReturnType<typeof useResource<GroupResponse | null>> }) {
   if (group.status === 'loading') return <p className="state">Loading…</p>;
@@ -340,12 +331,6 @@ function GridView({
   if (!group.data) return null;
 
   const photos = group.data.photos;
-  // A selection must never outlive the photos it names.
-  const live = pruneToVisible(
-    selection,
-    photos.map((photo) => photo.id),
-  );
-  const chosen = selectedIds(live);
   const query = groupQuery(route);
 
   const title =
@@ -358,14 +343,6 @@ function GridView({
       <div className="admin__toolbar">
         <h1 className="layout__title">{title}</h1>
         <div className="admin__toolbar-actions">
-          <span aria-live="polite">{chosen.length} selected</span>
-          <button
-            type="button"
-            disabled={chosen.length === 0}
-            onClick={() => onTrashSelection(chosen)}
-          >
-            Delete selected
-          </button>
           {query ? (
             <button
               type="button"
@@ -383,8 +360,7 @@ function GridView({
       ) : (
         <AdminGrid
           photos={photos}
-          selection={live}
-          onSelectionChange={onSelectionChange}
+          openPhotoId={openPhotoId}
           onOpen={(photoId) => {
             const photo = photos.find((candidate) => candidate.id === photoId);
             if (photo) onOpenPhoto(photo);

@@ -1,9 +1,9 @@
 /*
  * Admin styles.
  *
- * Laptop-oriented: the grid, marquee selection, and side detail panel assume a
- * pointer and a wide viewport. Mobile viewing is responsive, but touch-specific
- * bulk selection is out of scope for the first release.
+ * Laptop-oriented: the grid and the side detail panel assume a pointer and a
+ * wide viewport. Mobile viewing is responsive. There is no bulk selection in
+ * the grid; see src/admin/selection.ts.
  */
 
 .admin {
@@ -197,15 +197,12 @@ button:disabled {
 /* Admin grid ------------------------------------------------------------- */
 
 .admin-grid {
-  position: relative;
   list-style: none;
   margin: 0;
   padding: 0.25rem;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
   gap: 0.75rem;
-  /* The marquee drags on this element, so text selection must not fight it. */
-  user-select: none;
   min-height: 12rem;
 }
 
@@ -224,7 +221,8 @@ button:disabled {
   background: var(--bg-raised);
 }
 
-.admin-grid__tile--selected {
+/* The photo the detail panel is showing. There is no selection in this grid. */
+.admin-grid__tile--open {
   border-color: var(--focus);
 }
 
@@ -244,13 +242,6 @@ button:disabled {
   white-space: nowrap;
 }
 
-.admin-grid__marquee {
-  position: absolute;
-  border: 1px solid var(--focus);
-  background: color-mix(in srgb, var(--focus) 18%, transparent);
-  pointer-events: none;
-}
-
 /* Detail panel ----------------------------------------------------------- */
 
 .detail {
@@ -267,10 +258,19 @@ button:disabled {
   z-index: 5;
 }
 
+/* Wraps rather than crushing the filename: on a narrow panel the controls
+   drop to their own line, which is still above the preview. */
 .detail__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.detail__header-actions {
+  display: flex;
+  align-items: center;
   gap: 0.5rem;
 }
 
@@ -283,6 +283,11 @@ button:disabled {
 
 .detail__preview {
   width: 100%;
+  /* Capped so the metadata form stays close to the top of the panel. A
+     portrait photo at this width would otherwise be about 500px tall and
+     push the date, time, and caption fields off a short window. */
+  max-height: 40vh;
+  object-fit: contain;
   margin: var(--space) 0;
   border-radius: 4px;
 }
@@ -342,13 +347,21 @@ button:disabled {
   }
 }
 
-.detail__footer {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: var(--space);
-  padding-top: var(--space);
-  border-top: 1px solid var(--border);
+/* Reads as the text it is, rather than as another button competing with
+   Download and Delete just below it. */
+.detail__close {
+  padding: 0 0.25rem;
+  border: none;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--font);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.detail__close:hover {
+  color: var(--fg);
 }
 
 .detail__delete {

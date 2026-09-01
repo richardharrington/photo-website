@@ -1,50 +1,16 @@
 /**
- * Grid selection.
+ * Trash selection.
  *
- * Laptop-oriented by design: a normal click opens the detail panel, dragging
- * on empty grid area draws a marquee, and modifier-click adds or removes one
- * photo. Touch-specific bulk selection is explicitly out of scope for the
- * first release.
+ * Only the trash view selects: a click toggles a tile, and the toolbar acts
+ * on whatever is toggled, because that is the only route to Restore and
+ * Delete permanently.
+ *
+ * The photo grid deliberately has no selection. It once had marquee dragging
+ * and modifier-click, which never worked — a plain click opened the detail
+ * panel instead of selecting, so nothing could ever be selected and "Delete
+ * selected" was permanently disabled. Bulk deletion is "Delete this whole
+ * group"; single deletion is the detail panel's own Delete.
  */
-
-export interface Rect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-export function rectFromPoints(
-  from: { x: number; y: number },
-  to: { x: number; y: number },
-): Rect {
-  return {
-    left: Math.min(from.x, to.x),
-    top: Math.min(from.y, to.y),
-    width: Math.abs(to.x - from.x),
-    height: Math.abs(to.y - from.y),
-  };
-}
-
-/** Any overlap counts, so a marquee grazing a thumbnail selects it. */
-export function intersects(a: Rect, b: Rect): boolean {
-  return (
-    a.left < b.left + b.width &&
-    a.left + a.width > b.left &&
-    a.top < b.top + b.height &&
-    a.top + a.height > b.top
-  );
-}
-
-/**
- * A drag shorter than this is a click that wobbled, not a marquee. Without it,
- * every click would clear the selection through a zero-area marquee.
- */
-export const MARQUEE_THRESHOLD_PX = 4;
-
-export function isMarquee(rect: Rect): boolean {
-  return rect.width >= MARQUEE_THRESHOLD_PX || rect.height >= MARQUEE_THRESHOLD_PX;
-}
 
 export interface SelectionState {
   ids: ReadonlySet<string>;
@@ -59,28 +25,12 @@ export function toggle(state: SelectionState, id: string): SelectionState {
   return { ids };
 }
 
-export function replace(ids: Iterable<string>): SelectionState {
-  return { ids: new Set(ids) };
-}
-
-/** Marquee result. Additive when a modifier is held, replacing otherwise. */
-export function applyMarquee(
-  state: SelectionState,
-  hitIds: Iterable<string>,
-  additive: boolean,
-): SelectionState {
-  if (!additive) return replace(hitIds);
-  const ids = new Set(state.ids);
-  for (const id of hitIds) ids.add(id);
-  return { ids };
-}
-
 /**
- * Selection is by ID, and IDs that have left the grid are dropped.
+ * Selection is by ID, and IDs that have left the list are dropped.
  *
- * Called after a trash or restore so the selection cannot keep referring to
- * photos that are no longer shown — which would let a later bulk action cover
- * something the administrator can no longer see.
+ * Called after a restore or a permanent delete so the selection cannot keep
+ * referring to photos that are no longer shown — which would let a later bulk
+ * action cover something the administrator can no longer see.
  */
 export function pruneToVisible(
   state: SelectionState,
@@ -89,10 +39,6 @@ export function pruneToVisible(
   const visible = new Set(visibleIds);
   const ids = new Set([...state.ids].filter((id) => visible.has(id)));
   return { ids };
-}
-
-export function selectedCount(state: SelectionState): number {
-  return state.ids.size;
 }
 
 export function selectedIds(state: SelectionState): string[] {

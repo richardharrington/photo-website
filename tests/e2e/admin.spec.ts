@@ -66,76 +66,73 @@ test.describe('browsing and filenames', () => {
   });
 });
 
-test.describe('selection', () => {
-  test('modifier-click adds and removes photos', async ({ page }) => {
+test.describe('the detail panel', () => {
+  test('a click opens the panel and marks that thumbnail', async ({ page }) => {
+    // The grid has no selection: a click does this and nothing else.
     await page.goto(`${BASE}/2026/08/02`);
     const tiles = page.locator('.admin-grid__tile');
     await expect(tiles).toHaveCount(6);
 
-    await tiles.nth(0).click({ modifiers: ['ControlOrMeta'] });
-    await expect(page.getByText('1 selected')).toBeVisible();
+    await tiles.nth(0).click();
 
-    await tiles.nth(1).click({ modifiers: ['ControlOrMeta'] });
-    await expect(page.getByText('2 selected')).toBeVisible();
-
-    // Clicking again removes it.
-    await tiles.nth(0).click({ modifiers: ['ControlOrMeta'] });
-    await expect(page.getByText('1 selected')).toBeVisible();
+    await expect(page.getByRole('complementary')).toBeVisible();
+    await expect(page.locator('.admin-grid__tile--open')).toHaveCount(1);
+    await expect(tiles.nth(0)).toHaveClass(/admin-grid__tile--open/);
   });
 
-  test('a plain click opens the detail panel instead of selecting', async ({
-    page,
-  }) => {
+  test('offers Download and Delete without scrolling', async ({ page }) => {
+    // The point of moving them above the form: both are reachable on arrival.
     await page.goto(`${BASE}/2026/08/02`);
     await page.locator('.admin-grid__tile').first().click();
 
-    await expect(page.getByRole('complementary')).toBeVisible();
-    await expect(page.getByText('0 selected')).toBeVisible();
+    const panel = page.getByRole('complementary');
+    await expect(panel.getByRole('button', { name: 'Download' })).toBeInViewport();
+    await expect(panel.getByRole('button', { name: 'Delete' })).toBeInViewport();
   });
 
-  test('dragging on empty grid area marquee-selects', async ({ page }) => {
+  test('[x] closes it', async ({ page }) => {
     await page.goto(`${BASE}/2026/08/02`);
-    await expect(page.locator('.admin-grid__tile')).toHaveCount(6);
+    await page.locator('.admin-grid__tile').first().click();
+    await expect(page.getByRole('complementary')).toBeVisible();
 
-    const grid = page.locator('.admin-grid');
-    const box = (await grid.boundingBox())!;
+    await page.getByRole('button', { name: 'Close details' }).click();
 
-    // Start below the tiles, in empty grid space, and drag up across them.
-    await page.mouse.move(box.x + 4, box.y + box.height - 4);
-    await page.mouse.down();
-    await page.mouse.move(box.x + box.width / 2, box.y + 20, { steps: 10 });
-    await page.mouse.up();
-
-    await expect(page.getByText(/[1-9]\d* selected/)).toBeVisible();
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    await expect(page.locator('.admin-grid__tile--open')).toHaveCount(0);
   });
 
-  test('clicking empty grid area clears the selection', async ({ page }) => {
+  test('clicking outside closes it', async ({ page }) => {
+    await page.goto(`${BASE}/2026/08/02`);
+    await page.locator('.admin-grid__tile').first().click();
+    await expect(page.getByRole('complementary')).toBeVisible();
+
+    await page.locator('.layout__title').click();
+
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+  });
+
+  test('clicking another thumbnail switches rather than closing', async ({ page }) => {
     await page.goto(`${BASE}/2026/08/02`);
     const tiles = page.locator('.admin-grid__tile');
-    await expect(tiles).toHaveCount(6);
-    await tiles.nth(0).click({ modifiers: ['ControlOrMeta'] });
-    await expect(page.getByText('1 selected')).toBeVisible();
+    await tiles.nth(0).click();
+    const first = await page.locator('.detail__title').textContent();
 
-    const box = (await page.locator('.admin-grid').boundingBox())!;
-    await page.mouse.click(box.x + 4, box.y + box.height - 4);
+    await tiles.nth(1).click();
 
-    await expect(page.getByText('0 selected')).toBeVisible();
+    await expect(page.getByRole('complementary')).toBeVisible();
+    await expect(page.locator('.detail__title')).not.toHaveText(first!);
+    await expect(page.locator('.admin-grid__tile--open')).toHaveCount(1);
+    await expect(tiles.nth(1)).toHaveClass(/admin-grid__tile--open/);
   });
 
-  test('a drag too short to be a marquee selects nothing', async ({ page }) => {
-    // Without a movement threshold, a click that wobbled by a pixel would
-    // hit-test and select whatever happened to be under the cursor.
+  test('Escape closes it', async ({ page }) => {
     await page.goto(`${BASE}/2026/08/02`);
-    await expect(page.locator('.admin-grid__tile')).toHaveCount(6);
+    await page.locator('.admin-grid__tile').first().click();
+    await expect(page.getByRole('complementary')).toBeVisible();
 
-    const box = (await page.locator('.admin-grid').boundingBox())!;
-    await page.mouse.move(box.x + 4, box.y + 4);
-    await page.mouse.down();
-    await page.mouse.move(box.x + 6, box.y + 5);
-    await page.mouse.up();
+    await page.keyboard.press('Escape');
 
-    await expect(page.getByText('0 selected')).toBeVisible();
-    await expect(page.locator('.admin-grid__tile--selected')).toHaveCount(0);
+    await expect(page.getByRole('complementary')).toHaveCount(0);
   });
 });
 
@@ -185,16 +182,14 @@ test.describe('delete, confirm, and undo', () => {
   test('states the resolved count and moves the photo to the trash', async ({
     page,
   }) => {
+    // Single-photo deletion is the detail panel's own Delete; the grid has
+    // no selection and no bulk button beside the whole-group one.
     await page.goto(`${BASE}/2026/08/15`);
+    await page.locator('.admin-grid__tile').first().click();
     await page
-      .locator('.admin-grid__tile')
-      .first()
-      .click({
-        modifiers: ['ControlOrMeta'],
-      });
-    await expect(page.getByText('1 selected')).toBeVisible();
-
-    await page.getByRole('button', { name: 'Delete selected' }).click();
+      .getByRole('complementary')
+      .getByRole('button', { name: 'Delete' })
+      .click();
 
     const dialog = page.getByRole('alertdialog');
     await expect(dialog).toBeVisible();
@@ -221,13 +216,11 @@ test.describe('delete, confirm, and undo', () => {
 
   test('cancelling changes nothing', async ({ page }) => {
     await page.goto(`${BASE}/2026/08/15`);
+    await page.locator('.admin-grid__tile').first().click();
     await page
-      .locator('.admin-grid__tile')
-      .first()
-      .click({
-        modifiers: ['ControlOrMeta'],
-      });
-    await page.getByRole('button', { name: 'Delete selected' }).click();
+      .getByRole('complementary')
+      .getByRole('button', { name: 'Delete' })
+      .click();
 
     await page.getByRole('button', { name: 'Cancel' }).click();
     await expect(page.getByRole('alertdialog')).toHaveCount(0);
@@ -301,8 +294,11 @@ test.describe('trash', () => {
       .locator('.admin-grid__item')
       .filter({ hasText: 'IMG_20260802_190000.HEIC' })
       .locator('.admin-grid__tile');
-    await restored.click({ modifiers: ['ControlOrMeta'] });
-    await page.getByRole('button', { name: 'Delete selected' }).click();
+    await restored.click();
+    await page
+      .getByRole('complementary')
+      .getByRole('button', { name: 'Delete' })
+      .click();
     await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
     await expect(page.getByRole('status')).toContainText('1 photo deleted.');
   });
