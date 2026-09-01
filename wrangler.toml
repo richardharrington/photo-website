@@ -7,6 +7,10 @@ workers_dev = true
 [triggers]
 crons = ["17 4 * * *"]
 
+[observability.logs]
+enabled = true
+invocation_logs = true
+
 [[r2_buckets]]
 binding = "PHOTOS"
 bucket_name = "family-photos"
