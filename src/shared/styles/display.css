@@ -105,34 +105,47 @@
 
 /* Day grid --------------------------------------------------------------- */
 
+/* Masonry, via multi-column layout.
+   Tiles keep their own aspect ratio and pack tight, with none of the gaps a
+   grid leaves under a short tile in a tall row. The cost is reading order:
+   columns run top to bottom, so within one day the photos read down a column
+   rather than across a row. Acceptable because a day is its own section and
+   rarely long enough for that to disorient.
+   `grid-template-rows: masonry` would be the direct expression of this, but
+   it is not broadly supported. */
 .photo-grid {
   list-style: none;
   padding: 0;
   margin: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
-  gap: 0.5rem;
+  column-width: 9rem;
+  column-gap: 0.5rem;
 }
 
+.photo-grid__item {
+  /* Without this a tile is sliced in half across a column boundary. */
+  break-inside: avoid;
+  margin: 0 0 0.5rem;
+}
+
+/* No fixed aspect: each tile takes its photo's shape, so nothing is cropped.
+   Space is still reserved before load, from the width and height attributes
+   on the image itself. */
 .photo-grid__link {
   display: block;
-  /* Square tiles keep rows aligned and reserve their space before any image
-     loads, so the grid never reflows. */
-  aspect-ratio: 1;
   border-radius: 2px;
   overflow: hidden;
   background: var(--bg-raised);
 }
 
 .photo-grid__image {
+  display: block;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  height: auto;
 }
 
 @media (min-width: 40rem) {
   .photo-grid {
-    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    column-width: 11rem;
   }
 }
 

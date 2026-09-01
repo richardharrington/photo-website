@@ -15,10 +15,19 @@ interface PhotoGridProps {
  * actually scrolled to; larger renditions are requested only when a photo
  * opens.
  *
- * Tiles are square and crop to fill. A grid that inherited each photo's own
- * aspect ratio left rows visibly ragged, and a uniform grid also reserves its
- * space before any image arrives, so nothing reflows as thumbnails load. The
- * lightbox shows the whole uncropped photo.
+ * Tiles keep each photo's own aspect ratio and are laid out as masonry. They
+ * were square and cropped to fill, which kept rows aligned but cut the top and
+ * bottom off every portrait photo — on a phone camera roll that is most of
+ * them, and a beheaded thumbnail is worse than an uneven column.
+ *
+ * The layout is CSS columns rather than a grid, so nothing is left with the
+ * dead space a grid puts under a short tile in a tall row. It does mean the
+ * photos read down a column rather than across a row, which is tolerable
+ * because each day is its own section.
+ *
+ * Space is still reserved before any image arrives: the width and height
+ * attributes on the element give the browser the ratio up front, so the
+ * layout does not reflow as thumbnails load.
  */
 export function PhotoGrid({ photos }: PhotoGridProps) {
   return (

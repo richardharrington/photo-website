@@ -12,8 +12,9 @@ interface AdminGridProps {
 /**
  * The admin grid.
  *
- * One difference from the viewer's grid, from design.md: every thumbnail
- * shows its original filename. A click opens the detail panel, and that is
+ * Two differences from the viewer's grid: every thumbnail shows its original
+ * filename (design.md), and the tile is a button rather than a link. The
+ * masonry layout is shared; see PhotoGrid for why. A click opens the detail panel, and that is
  * the only thing a click does — see selection.ts for why the marquee and
  * modifier-click selection that used to live here is gone.
  */

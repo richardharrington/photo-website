@@ -196,13 +196,14 @@ button:disabled {
 
 /* Admin grid ------------------------------------------------------------- */
 
+/* Masonry, matching the viewer's grid; see display.css for the reasoning and
+   for what it costs in reading order. */
 .admin-grid {
   list-style: none;
   margin: 0;
   padding: 0.25rem;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
-  gap: 0.75rem;
+  column-width: 9rem;
+  column-gap: 0.75rem;
   min-height: 12rem;
 }
 
@@ -210,14 +211,19 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+  /* Keeps a thumbnail and its filename together in one column. */
+  break-inside: avoid;
+  margin: 0 0 0.75rem;
 }
 
+/* No fixed aspect: the tile takes the photo's own shape, so nothing is
+   cropped and nothing is letterboxed. Rows come out ragged as a result. */
 .admin-grid__tile {
+  display: block;
   padding: 0;
   border: 2px solid transparent;
   border-radius: 3px;
   overflow: hidden;
-  aspect-ratio: 1;
   background: var(--bg-raised);
 }
 
@@ -227,9 +233,12 @@ button:disabled {
 }
 
 .admin-grid__image {
+  display: block;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  /* The width and height attributes on the element give the browser the
+     aspect ratio up front, so the space is still reserved before the image
+     arrives and the grid does not reflow as thumbnails load. */
+  height: auto;
   pointer-events: none;
 }
 
