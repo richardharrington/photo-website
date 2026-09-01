@@ -6,7 +6,7 @@
  * resources it does not need. This is the entire router.
  */
 
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 
 type Listener = () => void;
 
@@ -45,8 +45,14 @@ export function useLocationPath(): string {
  * Props for an internal link: a real `href` so the link is copyable,
  * middle-clickable, and openable in a new tab, with a click handler that keeps
  * ordinary navigation client-side.
+ *
+ * `replace` is for links that name where you already are — the viewer's
+ * timeline headings, which exist to make a section's URL copyable rather than
+ * to move anywhere. Pushing there would fill the history with entries for
+ * scrolling around one page.
  */
-export function useLinkProps(to: string) {
+export function useLinkProps(to: string, options: { replace?: boolean } = {}) {
+  const { replace = false } = options;
   const onClick = useCallback(
     (event: React.MouseEvent<HTMLAnchorElement>) => {
       // Let the browser handle anything that is not a plain left click.
@@ -61,17 +67,10 @@ export function useLinkProps(to: string) {
         return;
       }
       event.preventDefault();
-      navigate(to);
+      navigate(to, { replace });
     },
-    [to],
+    [to, replace],
   );
 
   return { href: to, onClick };
-}
-
-/** Restore the window to the top when the route changes. */
-export function useScrollToTopOnChange(key: string): void {
-  useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [key]);
 }

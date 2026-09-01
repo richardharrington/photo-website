@@ -19,6 +19,7 @@ import {
   dayResponse,
   hierarchyResponse,
   photoResponse,
+  timelineResponse,
   toPublicPhoto,
   undatedResponse,
 } from '../src/shared/display-api.ts';
@@ -186,6 +187,14 @@ async function handleDisplay(route: string, res: ServerResponse): Promise<boolea
       res,
       200,
       hierarchyResponse(catalog, process.env.SITE_TITLE ?? 'Family Photos'),
+    );
+    return true;
+  }
+  if (route === '/timeline') {
+    sendJson(
+      res,
+      200,
+      timelineResponse(catalog, process.env.SITE_TITLE ?? 'Family Photos'),
     );
     return true;
   }

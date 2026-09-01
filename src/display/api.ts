@@ -8,11 +8,7 @@
 
 import { appRoutes } from '../shared/urls.ts';
 import { NotFoundError } from '../shared/ui/useResource.ts';
-import type {
-  GroupResponse,
-  HierarchyResponse,
-  PhotoResponse,
-} from '../shared/display-api.ts';
+import type { PhotoResponse, TimelineResponse } from '../shared/display-api.ts';
 
 export const routes = appRoutes(__APP_BASE__);
 
@@ -20,10 +16,6 @@ export interface DownloadLink {
   url: string;
   expiresAt: string;
   filename: string;
-}
-
-function pad2(value: number): string {
-  return String(value).padStart(2, '0');
 }
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -42,12 +34,14 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
 }
 
 export const displayApi = {
-  hierarchy: (signal?: AbortSignal) => getJson<HierarchyResponse>('/hierarchy', signal),
-
-  day: (year: number, month: number, day: number, signal?: AbortSignal) =>
-    getJson<GroupResponse>(`/day/${year}/${pad2(month)}/${pad2(day)}`, signal),
-
-  undated: (signal?: AbortSignal) => getJson<GroupResponse>('/undated', signal),
+  /**
+   * The whole library, in one request at page load.
+   *
+   * The viewer is a single scrolling page, so there is nothing left for
+   * `/hierarchy`, `/day`, or `/undated` to answer; those routes stay on the
+   * server for the admin app, which still browses level by level.
+   */
+  timeline: (signal?: AbortSignal) => getJson<TimelineResponse>('/timeline', signal),
 
   photo: (id: string, signal?: AbortSignal) =>
     getJson<PhotoResponse>(`/photo/${id}`, signal),

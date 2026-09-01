@@ -11,11 +11,8 @@ import type { PublicPhoto } from '../../shared/display-api.ts';
 
 interface LightboxProps {
   photo: PublicPhoto;
-  /** Position within the group, and its size, for "3 of 24". */
-  index: number;
-  total: number;
   /**
-   * Every photo ID in the group, in display order.
+   * Every photo ID in the library, in display order.
    *
    * Passing the whole list rather than a precomputed previous/next is what
    * makes rapid navigation correct. Stepping resolves the current position
@@ -25,9 +22,25 @@ interface LightboxProps {
    * back to the photo already shown.
    */
   orderedIds: readonly string[];
-  /** Where Escape and the close button return to. */
-  groupHref: string;
-  groupLabel: string;
+  /** Where Escape and the back link return to, and what that link says. */
+  backHref: string;
+  backLabel: string;
+  /** Runs instead of a plain navigation, so the timeline can be told where to land. */
+  onClose: () => void;
+}
+
+/**
+ * Neighbour images already asked for, kept alive so the browser cannot collect
+ * a request that has not finished — and so arrowing back and forth over the
+ * same pair does not re-issue it.
+ */
+const preloaded = new Map<string, HTMLImageElement>();
+
+function preload(photoId: string): void {
+  if (preloaded.has(photoId)) return;
+  const image = new Image();
+  image.src = derivativeUrl(__WORKER_BASE_URL__, photoId, 'display-1280');
+  preloaded.set(photoId, image);
 }
 
 function captureLine(photo: PublicPhoto): string | null {
@@ -37,20 +50,28 @@ function captureLine(photo: PublicPhoto): string | null {
   return captureTime ? `${date} at ${formatCaptureTimeForViewer(captureTime)}` : date;
 }
 
+/**
+ * A single photo, filling the screen over the timeline.
+ *
+ * There is no header bar, no rules, and no "3 of 24": with the whole library
+ * in one ordered list, a position within it says nothing useful, and every
+ * pixel of chrome is a pixel not showing the photograph. What is left sits in
+ * the corners — the way back at the top left, the two actions at the bottom
+ * left — with the photo's box running exactly between them. The capture date
+ * and the filename live one click away, in the info panel.
+ */
 export function Lightbox({
   photo,
-  index,
-  total,
   orderedIds,
-  groupHref,
-  groupLabel,
+  backHref,
+  backLabel,
+  onClose,
 }: LightboxProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
   const [showInfo, setShowInfo] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
-
-  const close = useCallback(() => navigate(groupHref), [groupHref]);
 
   /** Move by one position from wherever the URL currently is. */
   const step = useCallback(
@@ -69,7 +90,7 @@ export function Lightbox({
   const hasNext = currentPosition !== -1 && currentPosition < orderedIds.length - 1;
 
   // Move focus into the dialog when it opens, so a keyboard user is not left
-  // behind on the grid.
+  // behind on the timeline.
   useLayoutEffect(() => {
     dialogRef.current?.focus();
   }, [photo.id]);
@@ -83,7 +104,7 @@ export function Lightbox({
       switch (event.key) {
         case 'Escape':
           event.preventDefault();
-          close();
+          onClose();
           break;
         case 'ArrowLeft':
           event.preventDefault();
@@ -100,7 +121,7 @@ export function Lightbox({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [close, step]);
+  }, [onClose, step]);
 
   // The page behind the lightbox must not scroll while it is open.
   useEffect(() => {
@@ -110,6 +131,39 @@ export function Lightbox({
       document.body.style.overflow = previous;
     };
   }, []);
+
+  /**
+   * Fetch the neighbours once this photo is on screen, so holding an arrow key
+   * lands on a warm cache. Waiting for the current image keeps the preload
+   * from competing with it for the connection; `complete` covers the case where
+   * it was already cached and no load event is coming.
+   */
+  useEffect(() => {
+    const image = imageRef.current;
+    if (!image) return;
+
+    let cancelled = false;
+    const start = () => {
+      if (cancelled) return;
+      const position = orderedIds.indexOf(photo.id);
+      if (position === -1) return;
+      for (const neighbour of [orderedIds[position - 1], orderedIds[position + 1]]) {
+        if (neighbour) preload(neighbour);
+      }
+    };
+
+    if (image.complete) {
+      start();
+      return;
+    }
+    image.addEventListener('load', start, { once: true });
+    image.addEventListener('error', start, { once: true });
+    return () => {
+      cancelled = true;
+      image.removeEventListener('load', start);
+      image.removeEventListener('error', start);
+    };
+  }, [photo.id, orderedIds]);
 
   async function onDownload() {
     setDownloadError(null);
@@ -139,21 +193,16 @@ export function Lightbox({
       tabIndex={-1}
       ref={dialogRef}
     >
-      <div className="lightbox__bar">
-        <a
-          href={groupHref}
-          className="lightbox__close"
-          onClick={(e) => {
-            e.preventDefault();
-            close();
-          }}
-        >
-          <span aria-hidden="true">&larr;</span> Back to {groupLabel}
-        </a>
-        <span className="lightbox__position">
-          {index + 1} of {total}
-        </span>
-      </div>
+      <a
+        href={backHref}
+        className="lightbox__back"
+        onClick={(e) => {
+          e.preventDefault();
+          onClose();
+        }}
+      >
+        <span aria-hidden="true">&larr;</span> Back to {backLabel}
+      </a>
 
       <div className="lightbox__stage">
         <button
@@ -169,6 +218,7 @@ export function Lightbox({
         <img
           className="lightbox__image"
           key={photo.id}
+          ref={imageRef}
           src={derivativeUrl(__WORKER_BASE_URL__, photo.id, 'display-1280')}
           srcSet={derivativeSrcSet(__WORKER_BASE_URL__, photo.id, [
             {
@@ -195,32 +245,9 @@ export function Lightbox({
         </button>
       </div>
 
-      <div className="lightbox__details">
-        {photo.caption ? <p className="lightbox__caption">{photo.caption}</p> : null}
-        {capture ? <p className="lightbox__capture">{capture}</p> : null}
-
-        <div className="lightbox__actions">
-          <button type="button" onClick={onDownload} disabled={downloading}>
-            {downloading ? 'Preparing download…' : 'Download original size'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowInfo((shown) => !shown)}
-            aria-expanded={showInfo}
-            aria-controls="photo-information"
-          >
-            Photo information
-          </button>
-        </div>
-
-        {downloadError ? (
-          <p className="lightbox__error" role="alert">
-            {downloadError}
-          </p>
-        ) : null}
-
+      <div className="lightbox__foot">
         {showInfo ? (
-          <dl className="photo-info" id="photo-information">
+          <dl className="photo-info lightbox__info" id="photo-information">
             <dt>Original filename</dt>
             <dd>{photo.originalFilename}</dd>
             <dt>Capture date</dt>
@@ -237,6 +264,32 @@ export function Lightbox({
             </dd>
           </dl>
         ) : null}
+
+        <div className="lightbox__bottom">
+          <div className="lightbox__actions">
+            <button type="button" onClick={onDownload} disabled={downloading}>
+              {downloading ? 'Preparing download…' : 'Download'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowInfo((shown) => !shown)}
+              aria-expanded={showInfo}
+              aria-controls="photo-information"
+            >
+              Photo info
+            </button>
+          </div>
+
+          {downloadError ? (
+            <p className="lightbox__error" role="alert">
+              {downloadError}
+            </p>
+          ) : null}
+
+          {/* The only hand-written words about a photograph; they stay on
+              screen while everything else moves behind a button. */}
+          {photo.caption ? <p className="lightbox__caption">{photo.caption}</p> : null}
+        </div>
       </div>
     </div>
   );

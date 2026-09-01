@@ -9,6 +9,16 @@ interface PhotoGridProps {
 }
 
 /**
+ * The element ID of a photo's tile.
+ *
+ * Closing the photo view scrolls to this rather than to the day's heading, so
+ * a photo reached by arrowing deep into a long day is where it was left.
+ */
+export function tileAnchor(photoId: string): string {
+  return `photo-${photoId}`;
+}
+
+/**
  * The day grid.
  *
  * Thumbnails are `loading="lazy"`, so a long day costs one request per photo
@@ -35,7 +45,7 @@ export function PhotoGrid({ photos }: PhotoGridProps) {
       {photos.map((photo) => {
         const thumb = photo.derivatives.thumb;
         return (
-          <li key={photo.id} className="photo-grid__item">
+          <li key={photo.id} id={tileAnchor(photo.id)} className="photo-grid__item">
             <Link to={routes.photo(photo.id)} className="photo-grid__link">
               <img
                 className="photo-grid__image"

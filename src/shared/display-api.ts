@@ -65,6 +65,42 @@ export interface HierarchyResponse {
   total: number;
 }
 
+export interface TimelineDay {
+  day: number;
+  count: number;
+  photos: PublicPhoto[];
+}
+export interface TimelineMonth {
+  month: number;
+  count: number;
+  days: TimelineDay[];
+}
+export interface TimelineYear {
+  year: number;
+  count: number;
+  months: TimelineMonth[];
+}
+
+/**
+ * The whole library in one response: the same tree as `HierarchyResponse`, with
+ * every photo included.
+ *
+ * The viewer is a single scrolling page, so it needs the entire structure
+ * before it can lay itself out. Sending it all at once is what makes the
+ * layout *final* at first paint — every rendition's pixel dimensions are here,
+ * so nothing reflows as thumbnails arrive and an anchor scroll computed at load
+ * time is still correct a second later. At the design's scale this is tens of
+ * kilobytes now and a couple of megabytes after a decade; the images were
+ * always the heavy part, and `loading="lazy"` keeps those proportional to
+ * scrolling.
+ */
+export interface TimelineResponse {
+  title: string;
+  years: TimelineYear[];
+  undated: { count: number; photos: PublicPhoto[] };
+  total: number;
+}
+
 export interface GroupResponse {
   group: GroupRef;
   photos: PublicPhoto[];
@@ -111,6 +147,37 @@ export function hierarchyResponse(catalog: Catalog, title: string): HierarchyRes
       })),
     })),
     undated: { count: hierarchy.undated.count },
+    total: hierarchy.total,
+  };
+}
+
+/**
+ * Built from the same `liveHierarchy` as `hierarchyResponse`, so trashed
+ * photos are excluded and every ordering rule — newest-first years, months and
+ * days, time-of-day within a day, upload order for undated — comes along
+ * unchanged rather than being restated here.
+ */
+export function timelineResponse(catalog: Catalog, title: string): TimelineResponse {
+  const hierarchy = liveHierarchy(catalog);
+  return {
+    title,
+    years: hierarchy.years.map((year) => ({
+      year: year.year,
+      count: year.count,
+      months: year.months.map((month) => ({
+        month: month.month,
+        count: month.count,
+        days: month.days.map((day) => ({
+          day: day.day,
+          count: day.count,
+          photos: day.photos.map(toPublicPhoto),
+        })),
+      })),
+    })),
+    undated: {
+      count: hierarchy.undated.count,
+      photos: hierarchy.undated.photos.map(toPublicPhoto),
+    },
     total: hierarchy.total,
   };
 }

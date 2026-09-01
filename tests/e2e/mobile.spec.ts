@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
 
 /**
  * The viewer is responsive on current mobile Safari/Chrome. Admin workflows
@@ -7,49 +9,79 @@ import { test, expect } from '@playwright/test';
 
 const BASE = '/dev-display-path';
 
-test('the day grid fits the viewport without horizontal scrolling', async ({
+function overflows(page: Page) {
+  return page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth + 1,
+  );
+}
+
+test('the timeline fits the viewport without horizontal scrolling', async ({
   page,
 }) => {
   await page.goto(`${BASE}/2026/08/02`);
-  await expect(page.locator('.photo-grid__item')).toHaveCount(6);
+  await expect(page.locator('#d-2026-08-02 .photo-grid__item')).toHaveCount(6);
 
-  const overflows = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth + 1,
-  );
-  expect(overflows).toBe(false);
+  expect(await overflows(page)).toBe(false);
 });
 
-test('the lightbox is usable on a phone', async ({ page }) => {
-  await page.goto(`${BASE}/2026/08/02`);
-  await page.locator('.photo-grid__link').first().click();
+test('a deep URL still lands on its section at phone width', async ({ page }) => {
+  await page.goto(`${BASE}/2025/12/25`);
+
+  const day = page.locator('#d-2025-12-25');
+  const onScreen = await day.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    return box.top >= 0 && box.top < window.innerHeight;
+  });
+  expect(onScreen).toBe(true);
+});
+
+test('the photo view puts its controls below the photo, not over it', async ({
+  page,
+}) => {
+  // This spec also runs under the two desktop projects, which get the corner
+  // layout instead; that one is asserted in display.spec.ts.
+  test.skip(
+    (page.viewportSize()?.width ?? 0) >= 640,
+    'the stacked layout is below the 40rem breakpoint',
+  );
+
+  await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['beach-early']}`);
 
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText('1 of 6');
 
   // Touch targets stay reachable at phone width.
   const next = page.getByRole('button', { name: 'Next photo' });
-  await expect(next).toBeVisible();
   const box = await next.boundingBox();
   expect(box?.width ?? 0).toBeGreaterThanOrEqual(40);
   expect(box?.height ?? 0).toBeGreaterThanOrEqual(40);
 
-  await next.click();
-  await expect(dialog).toContainText('2 of 6');
+  // The two buttons sit side by side in a footer row under the image rather
+  // than floating over a photo that spans the whole width of the screen.
+  const image = (await page.locator('.lightbox__image').boundingBox())!;
+  const download = (await page
+    .getByRole('button', { name: 'Download', exact: true })
+    .boundingBox())!;
+  const info = (await page.getByRole('button', { name: 'Photo info' }).boundingBox())!;
 
-  const overflows = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth + 1,
-  );
-  expect(overflows).toBe(false);
+  expect(download.y).toBeGreaterThanOrEqual(image.y + image.height - 1);
+  expect(Math.abs(download.y - info.y)).toBeLessThan(2);
+  expect(info.x).toBeGreaterThan(download.x);
+
+  await next.click();
+  await expect(dialog).toBeVisible();
+  expect(await overflows(page)).toBe(false);
 });
 
-test('navigation works at phone width', async ({ page }) => {
-  await page.goto(`${BASE}/`);
+test('closing the photo view returns to its tile at phone width', async ({ page }) => {
+  const id = FIXTURE_PHOTO_IDS['snowdrops']!;
+  await page.goto(`${BASE}/photo/${id}`);
+  await page.getByRole('link', { name: /Back to March 1, 2026/ }).click();
 
-  await page.getByRole('link', { name: /^2026/ }).click();
-  await page.getByRole('link', { name: /^August/ }).click();
-  await page.getByRole('link', { name: /^August 2, 2026/ }).click();
-
-  await expect(page).toHaveURL(`${BASE}/2026/08/02`);
-  await expect(page.locator('.photo-grid__item')).toHaveCount(6);
+  await expect(page).toHaveURL(`${BASE}/2026/03/01`);
+  const inView = await page.locator(`#photo-${id}`).evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    return box.top >= 0 && box.top < window.innerHeight;
+  });
+  expect(inView).toBe(true);
 });

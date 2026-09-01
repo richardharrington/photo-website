@@ -271,7 +271,10 @@ Functions return generic 404 for an unavailable/unauthorized resource.
 
 ### Display API
 
-- hierarchy/group queries for year, month, day, and Undated;
+- the whole timeline in one response, which is all the viewer reads
+  (decisions.md #25–26);
+- hierarchy/group queries for year, month, day, and Undated, which the admin
+  app still browses level by level;
 - photo detail and sibling navigation;
 - short-lived signed download URL for a photo's full-resolution JPEG.
 

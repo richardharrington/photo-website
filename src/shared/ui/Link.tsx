@@ -4,6 +4,8 @@ import { useLinkProps } from './navigation.ts';
 interface LinkProps {
   to: string;
   className?: string;
+  /** Replace the current history entry instead of pushing a new one. */
+  replace?: boolean;
   children: ReactNode;
   'aria-label'?: string;
 }
@@ -13,8 +15,8 @@ interface LinkProps {
  * middle-clicked, and opened in a new tab; the click handler keeps ordinary
  * navigation client-side.
  */
-export function Link({ to, className, children, ...rest }: LinkProps) {
-  const props = useLinkProps(to);
+export function Link({ to, className, replace, children, ...rest }: LinkProps) {
+  const props = useLinkProps(to, { replace: replace ?? false });
   return (
     <a {...props} className={className} aria-label={rest['aria-label']}>
       {children}

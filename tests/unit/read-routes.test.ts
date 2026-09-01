@@ -29,6 +29,18 @@ describe('readRoute', () => {
     expect(body.years.length).toBeGreaterThan(0);
   });
 
+  it('serves the whole timeline', async () => {
+    const response = readRoute(catalog, '/timeline');
+    expect(response?.status).toBe(200);
+    const body = (await response!.json()) as {
+      years: { months: { days: { photos: unknown[] }[] }[] }[];
+      undated: { photos: unknown[] };
+    };
+    expect(body.years.length).toBeGreaterThan(0);
+    expect(body.years[0]!.months[0]!.days[0]!.photos.length).toBeGreaterThan(0);
+    expect(body.undated.photos.length).toBeGreaterThan(0);
+  });
+
   it('serves the undated group', async () => {
     const response = readRoute(catalog, '/undated');
     expect(response?.status).toBe(200);

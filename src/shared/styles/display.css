@@ -37,39 +37,10 @@
   margin: 0 0 calc(var(--space) * 1.5);
 }
 
-.layout__subtitle {
-  color: var(--fg-muted);
-  margin: -0.75rem 0 var(--space);
-}
-
-.breadcrumbs ol {
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0;
-  margin: 0 0 var(--space);
-  font-size: 0.875rem;
-  color: var(--fg-muted);
-}
-
-.breadcrumbs li + li::before {
-  content: '/';
-  margin-right: 0.5rem;
-  color: var(--fg-muted);
-}
-
-.breadcrumbs a {
-  color: var(--fg-muted);
-  text-decoration: none;
-}
-
-.breadcrumbs a:hover {
-  color: var(--fg);
-  text-decoration: underline;
-}
-
 /* Group indexes ---------------------------------------------------------- */
+
+/* The viewer has no index pages any more; these belong to the admin app's own
+   month and day lists, which still browse level by level. */
 
 .group-list {
   list-style: none;
@@ -101,6 +72,92 @@
   color: var(--fg-muted);
   font-size: 0.875rem;
   font-variant-numeric: tabular-nums;
+}
+
+/* Timeline --------------------------------------------------------------- */
+
+/* The year and month headings pin to the top while scrolling, so a page
+   holding years of photographs always says where you are. Their heights are
+   variables because three things must agree on them: the month heading's
+   sticky offset, and the scroll-margin that keeps an anchored section from
+   landing underneath them. */
+:root {
+  --timeline-year-height: 2.5rem;
+  --timeline-month-height: 2rem;
+  --timeline-stack-height: calc(
+    var(--timeline-year-height) + var(--timeline-month-height)
+  );
+}
+
+.timeline__year {
+  scroll-margin-top: 0;
+}
+
+.timeline__month {
+  scroll-margin-top: var(--timeline-year-height);
+}
+
+.timeline__day,
+.photo-grid__item {
+  scroll-margin-top: var(--timeline-stack-height);
+}
+
+.timeline__year-heading,
+.timeline__month-heading {
+  /* Opaque, and above the photographs, or the images scroll through them. */
+  position: sticky;
+  z-index: 1;
+  background: var(--bg);
+  margin: 0;
+  display: flex;
+  align-items: center;
+}
+
+.timeline__year-heading {
+  top: 0;
+  height: var(--timeline-year-height);
+  font-size: 1.5rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline__month-heading {
+  top: var(--timeline-year-height);
+  height: var(--timeline-month-height);
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+
+.timeline__day-heading {
+  margin: var(--space) 0 0.5rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+.timeline__anchor {
+  display: flex;
+  align-items: baseline;
+  gap: 0.625rem;
+  width: 100%;
+  color: inherit;
+  text-decoration: none;
+}
+
+.timeline__anchor:hover {
+  text-decoration: underline;
+}
+
+.timeline__count {
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.timeline__month + .timeline__month,
+.timeline__year + .timeline__year {
+  margin-top: calc(var(--space) * 1.5);
 }
 
 /* Day grid --------------------------------------------------------------- */
@@ -162,40 +219,45 @@
   margin: 0 0 0.5rem;
 }
 
-/* Lightbox --------------------------------------------------------------- */
+/* Photo view ------------------------------------------------------------- */
 
-.lightbox {
+/*
+ * The photo view is opaque and covers the timeline, which stays mounted
+ * behind it so closing is a reveal rather than a re-render.
+ *
+ * Narrow screens first: the photo on top, a slim row of controls below it, no
+ * overlays on the image. A portrait photo spans the whole width of a phone, so
+ * anything floating over it would need a scrim and would cover the photograph.
+ * Wider screens move the controls into the corners — see the breakpoint below.
+ */
+.lightbox,
+.photo-overlay {
   position: fixed;
   inset: 0;
   z-index: 10;
   background: var(--bg);
+}
+
+.photo-overlay {
+  overflow-y: auto;
+}
+
+.lightbox {
   display: flex;
   flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
 }
 
-.lightbox__bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space);
-  padding: 0.75rem var(--space);
-  border-bottom: 1px solid var(--border);
-}
-
-.lightbox__close {
+.lightbox__back {
+  flex: none;
   color: var(--fg);
   text-decoration: none;
   font-size: 0.9375rem;
 }
 
-.lightbox__close:hover {
+.lightbox__back:hover {
   text-decoration: underline;
-}
-
-.lightbox__position {
-  color: var(--fg-muted);
-  font-size: 0.875rem;
-  font-variant-numeric: tabular-nums;
 }
 
 .lightbox__stage {
@@ -204,7 +266,6 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: var(--space);
 }
 
 .lightbox__image {
@@ -236,41 +297,36 @@
   cursor: default;
 }
 
-.lightbox__details {
-  padding: var(--space);
-  border-top: 1px solid var(--border);
-  max-height: 40vh;
-  overflow-y: auto;
+.lightbox__foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
 }
 
-.lightbox__caption {
-  margin: 0 0 0.5rem;
-  /* Captions are plain text with line breaks; preserve them without
-     interpreting any markup. */
-  white-space: pre-wrap;
-}
-
-.lightbox__capture {
-  margin: 0 0 0.75rem;
-  color: var(--fg-muted);
-  font-size: 0.9375rem;
+.lightbox__bottom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem var(--space);
 }
 
 .lightbox__actions {
   display: flex;
-  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
 .lightbox__actions button {
   font: inherit;
-  font-size: 0.9375rem;
-  padding: 0.5rem 0.875rem;
+  font-size: 0.875rem;
+  padding: 0.4375rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg-raised);
   color: var(--fg);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .lightbox__actions button:disabled {
@@ -278,11 +334,96 @@
   cursor: default;
 }
 
-.lightbox__error {
-  margin: 0.75rem 0 0;
-  color: var(--fg);
+.lightbox__caption {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.875rem;
+  max-width: 34rem;
+  /* Captions are plain text with line breaks; preserve them without
+     interpreting any markup. */
+  white-space: pre-wrap;
 }
 
+.lightbox__error {
+  margin: 0;
+  color: var(--fg);
+  font-size: 0.875rem;
+}
+
+/* The details that used to sit in a footer band under every photo. As a
+   panel they cost nothing until asked for, and it opens upward from the
+   button that opens it. */
+.lightbox__info {
+  margin: 0;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 0.875rem;
+  max-width: 24rem;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+@media (min-width: 40rem) {
+  /* The corners hold the chrome and the photo's box runs between them: its top
+     edge level with the back link, its bottom edge level with the bottom of
+     the Photo info button. */
+  .lightbox {
+    display: block;
+    padding: 0;
+  }
+
+  .lightbox__back {
+    position: absolute;
+    top: var(--space);
+    left: var(--space);
+    z-index: 2;
+  }
+
+  .lightbox__stage {
+    position: absolute;
+    inset: var(--space);
+  }
+
+  .lightbox__foot {
+    position: absolute;
+    left: var(--space);
+    bottom: var(--space);
+    z-index: 2;
+    max-width: calc(100% - var(--space) * 2);
+  }
+
+  .lightbox__bottom {
+    align-items: flex-end;
+    flex-wrap: nowrap;
+  }
+
+  /* Download above Photo info, so the button the photo is aligned to is the
+     lower of the two. */
+  .lightbox__actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .lightbox__actions button {
+    font-size: 0.9375rem;
+    padding: 0.5rem 0.875rem;
+  }
+
+  /* These two sit over the photograph here, so they need the same surface the
+     buttons beside them have; muted text alone is unreadable against a light
+     picture. */
+  .lightbox__caption,
+  .lightbox__error {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.375rem 0.625rem;
+  }
+}
+
+/* Shared with the admin detail panel; the photo view's own panel resets the
+   margin, which only the admin layout needs. */
 .photo-info {
   margin: var(--space) 0 0;
   display: grid;

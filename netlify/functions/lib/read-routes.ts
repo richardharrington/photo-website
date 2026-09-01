@@ -16,6 +16,7 @@ import {
   dayResponse,
   hierarchyResponse,
   photoResponse,
+  timelineResponse,
   undatedResponse,
 } from '../../../src/shared/display-api.ts';
 import type { Catalog } from '../../../src/shared/catalog.ts';
@@ -34,6 +35,12 @@ const PHOTO_ROUTE = /^\/photo\/([0-9a-f]{32})$/;
 export function readRoute(catalog: Catalog, path: string): Response | null {
   if (path === '/hierarchy') {
     return json(hierarchyResponse(catalog, process.env.SITE_TITLE ?? 'Family Photos'));
+  }
+
+  // The viewer's whole page, in one request. The admin app keeps browsing
+  // through `/hierarchy` and `/day`, which is why both survive alongside it.
+  if (path === '/timeline') {
+    return json(timelineResponse(catalog, process.env.SITE_TITLE ?? 'Family Photos'));
   }
 
   if (path === '/undated') return json(undatedResponse(catalog));

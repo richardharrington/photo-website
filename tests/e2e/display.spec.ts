@@ -1,126 +1,240 @@
 import { test, expect } from '@playwright/test';
+import type { Locator } from '@playwright/test';
 import { FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
 
 const BASE = '/dev-display-path';
 
-test.describe('browsing the hierarchy', () => {
-  test('navigates year to month to day to photo', async ({ page }) => {
+/** True when the element's box is inside the viewport, top and bottom. */
+async function isInViewport(locator: Locator) {
+  return locator.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    return box.top >= 0 && box.top < window.innerHeight && box.bottom > 0;
+  });
+}
+
+test.describe('the timeline', () => {
+  test('shows years, months, days, and their photos on one page', async ({ page }) => {
     await page.goto(`${BASE}/`);
 
     await expect(page.getByRole('heading', { name: 'Family Photos' })).toBeVisible();
-    // Newest year first.
-    const groups = page.locator('.group-list__link');
-    await expect(groups.first()).toContainText('2026');
 
-    await page.getByRole('link', { name: /^2026/ }).click();
-    await expect(page).toHaveURL(`${BASE}/2026`);
-    await expect(page.getByRole('heading', { name: '2026' })).toBeVisible();
+    // Newest first, with no click needed to reach any of it.
+    await expect(page.locator('.timeline__year-heading')).toHaveText([
+      /2026/,
+      /2025/,
+      /Undated/,
+    ]);
+    await expect(page.locator('.timeline__month-heading')).toHaveText([
+      /August/,
+      /March/,
+      /December/,
+    ]);
+    await expect(page.locator('.timeline__day-heading')).toHaveText([
+      /August 15/,
+      /August 2/,
+      /March 1/,
+      /December 26/,
+      /December 25/,
+    ]);
 
-    await page.getByRole('link', { name: /^August/ }).click();
-    await expect(page).toHaveURL(`${BASE}/2026/08`);
-    await expect(page.getByRole('heading', { name: 'August 2026' })).toBeVisible();
-
-    await page.getByRole('link', { name: /^August 2, 2026/ }).click();
-    await expect(page).toHaveURL(`${BASE}/2026/08/02`);
-
-    const thumbnails = page.locator('.photo-grid__item');
-    await expect(thumbnails).toHaveCount(6);
+    // Every live photo in the library is on the page: 12 of the 13 fixtures,
+    // the thirteenth being trashed.
+    await expect(page.locator('.photo-grid__item')).toHaveCount(12);
   });
 
-  test('shows counts on index pages and no photos', async ({ page }) => {
-    await page.goto(`${BASE}/2026/08`);
-
-    await expect(page.getByText('6 photos')).toBeVisible();
-    await expect(page.getByText('1 photo', { exact: true })).toBeVisible();
-    // Index pages never carry representative thumbnails.
-    await expect(page.locator('.photo-grid')).toHaveCount(0);
-  });
-
-  test('lists Undated alongside the years', async ({ page }) => {
+  test('shows counts beside the headings', async ({ page }) => {
     await page.goto(`${BASE}/`);
-    await page.getByRole('link', { name: /^Undated/ }).click();
 
-    await expect(page).toHaveURL(`${BASE}/undated`);
-    await expect(page.locator('.photo-grid__item')).toHaveCount(2);
+    const august = page.locator('#m-2026-08 .timeline__month-heading');
+    await expect(august).toContainText('7 photos');
+    await expect(page.locator('#d-2026-08-15 .timeline__day-heading')).toContainText(
+      '1 photo',
+    );
+  });
+
+  test('lands scrolled to the section a deep URL names', async ({ page }) => {
+    await page.goto(`${BASE}/2026/03/01`);
+
+    const day = page.locator('#d-2026-03-01');
+    await expect(day).toBeVisible();
+    expect(await isInViewport(day)).toBe(true);
+
+    // It is the same page, not a filtered one: August is still above it.
+    await expect(page.locator('#d-2026-08-02')).toHaveCount(1);
+    expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+  });
+
+  test('anchors the undated group at the end', async ({ page }) => {
+    await page.goto(`${BASE}/undated`);
+
+    const undated = page.locator('#undated');
+    expect(await isInViewport(undated)).toBe(true);
+    await expect(undated.locator('.photo-grid__item')).toHaveCount(2);
+  });
+
+  test('the base path starts at the top', async ({ page }) => {
+    await page.goto(`${BASE}/`);
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+  });
+
+  test('clicking a heading rewrites the URL without adding history', async ({
+    page,
+  }) => {
+    await page.goto(`${BASE}/`);
+    const before = await page.evaluate(() => window.history.length);
+
+    await page.locator('#d-2026-03-01 .timeline__anchor').click();
+    await expect(page).toHaveURL(`${BASE}/2026/03/01`);
+
+    // replaceState, so scrolling around the page does not fill up the history.
+    expect(await page.evaluate(() => window.history.length)).toBe(before);
+  });
+
+  test('the year and month headings stay pinned while scrolling', async ({ page }) => {
+    await page.goto(`${BASE}/2025/12/25`);
+
+    const year = page.locator('#y-2025 .timeline__year-heading');
+    const top = await year.evaluate((node) => node.getBoundingClientRect().top);
+    expect(top).toBeLessThan(4);
   });
 });
 
-test.describe('the lightbox', () => {
-  test('opens a photo, navigates within the day, and closes', async ({ page }) => {
-    await page.goto(`${BASE}/2026/08/02`);
-    await page.locator('.photo-grid__link').first().click();
+test.describe('the photo view', () => {
+  test('arrows across day, month, and year boundaries', async ({ page }) => {
+    // The last photo of August 15th; the next one in display order is the
+    // first of August 2nd — a different day.
+    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['market']}`);
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('1 of 6');
-    await expect(dialog).toContainText('First one down to the beach.');
-
-    // Previous is unavailable at the start of the group; navigation does not
-    // wrap around.
-    await expect(page.getByRole('button', { name: 'Previous photo' })).toBeDisabled();
+    await expect(
+      page.getByRole('link', { name: /Back to August 15, 2026/ }),
+    ).toBeVisible();
 
     await page.getByRole('button', { name: 'Next photo' }).click();
-    await expect(dialog).toContainText('2 of 6');
-
-    await page.getByRole('link', { name: /Back to August 2, 2026/ }).click();
-    await expect(page).toHaveURL(`${BASE}/2026/08/02`);
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(
+      page.getByRole('link', { name: /Back to August 2, 2026/ }),
+    ).toBeVisible();
   });
 
-  test('is keyboard navigable', async ({ page }) => {
+  test('disables the arrows only at the two ends of the library', async ({ page }) => {
+    const previous = page.getByRole('button', { name: 'Previous photo' });
+    const next = page.getByRole('button', { name: 'Next photo' });
+
+    // Newest photo in the library.
+    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['market']}`);
+    await expect(previous).toBeDisabled();
+    await expect(next).toBeEnabled();
+
+    // Last of the undated group, which sits after every dated photo.
+    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['undated-b']}`);
+    await expect(next).toBeDisabled();
+    await expect(previous).toBeEnabled();
+
+    // A day boundary is not an end.
+    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['snowdrops']}`);
+    await expect(previous).toBeEnabled();
+    await expect(next).toBeEnabled();
+  });
+
+  test('is keyboard navigable, and each press advances one photo', async ({ page }) => {
     await page.goto(`${BASE}/2026/08/02`);
-    await page.locator('.photo-grid__link').first().click();
+    await page.locator('#d-2026-08-02 .photo-grid__link').first().click();
 
     const dialog = page.getByRole('dialog');
-    await expect(dialog).toContainText('1 of 6');
+    await expect(dialog).toHaveAttribute('aria-label', 'First one down to the beach.');
 
     await page.keyboard.press('ArrowRight');
-    await expect(dialog).toContainText('2 of 6');
+    await expect(dialog).toHaveAttribute('aria-label', 'Photo from August 2, 2026');
 
+    // Consecutive presses with no wait between them. Deriving neighbours from
+    // an in-flight detail response made a fast second press navigate to the
+    // photo already shown, so holding the key moved one step and stopped.
     await page.keyboard.press('ArrowRight');
-    await expect(dialog).toContainText('3 of 6');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('ArrowRight');
+    await expect(dialog).toHaveAttribute(
+      'aria-label',
+      'Scanned from a print.\n\nNobody remembers who took it.',
+    );
+  });
 
-    await page.keyboard.press('ArrowLeft');
-    await expect(dialog).toContainText('2 of 6');
-
-    // Consecutive presses with no wait between them: each must advance one
-    // photo. Deriving neighbours from an in-flight detail response made a
-    // fast second press navigate to the photo already shown, so holding the
-    // key moved one step and stopped.
-    await page.keyboard.press('ArrowRight');
-    await page.keyboard.press('ArrowRight');
-    await page.keyboard.press('ArrowRight');
-    await expect(dialog).toContainText('5 of 6');
+  test('closing returns to the timeline with the photo tile in view', async ({
+    page,
+  }) => {
+    const id = FIXTURE_PHOTO_IDS['christmas']!;
+    await page.goto(`${BASE}/photo/${id}`);
+    await expect(page.getByRole('dialog')).toBeVisible();
 
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    await expect(page).toHaveURL(`${BASE}/2026/08/02`);
+    await expect(page).toHaveURL(`${BASE}/2025/12/25`);
+
+    const tile = page.locator(`#photo-${id}`);
+    expect(await isInViewport(tile)).toBe(true);
   });
 
-  test('opens directly from a deep link and shows its group behind it', async ({
+  test('has no header bar, no position count, and no capture-time line', async ({
     page,
   }) => {
-    // A photo URL carries no date, so it survives a capture-date correction.
     await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['market']}`);
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('Saturday market.');
-    await expect(dialog).toContainText('August 15, 2026');
-    await expect(dialog).toContainText('1 of 1');
-
-    await page.keyboard.press('Escape');
-    await expect(page).toHaveURL(`${BASE}/2026/08/15`);
-    await expect(page.locator('.photo-grid__item')).toHaveCount(1);
+    await expect(dialog).not.toContainText(/\d+ of \d+/);
+    // The date survives only in the back link, which is where you are going,
+    // and in the info panel. There is no date line of its own.
+    await expect(dialog).not.toContainText('10:05 AM');
+    await expect(page.locator('.lightbox__bar')).toHaveCount(0);
+    await expect(page.locator('.lightbox__capture')).toHaveCount(0);
   });
 
-  test('shows the filename only in the photo information view', async ({ page }) => {
+  test('keeps the caption visible and moves the details into the info panel', async ({
+    page,
+  }) => {
     await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['market']}`);
 
+    await expect(page.locator('.lightbox__caption')).toHaveText('Saturday market.');
     await expect(page.getByText('IMG_20260815_100500.HEIC')).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Photo information' }).click();
-    await expect(page.getByText('IMG_20260815_100500.HEIC')).toBeVisible();
+    await page.getByRole('button', { name: 'Photo info' }).click();
+    const info = page.locator('#photo-information');
+    await expect(info).toContainText('IMG_20260815_100500.HEIC');
+    await expect(info).toContainText('August 15, 2026 at 10:05 AM');
+    await expect(info).toContainText('4032 × 3024');
+  });
+
+  test('offers a download without saying what size', async ({ page }) => {
+    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['market']}`);
+    await expect(
+      page.getByRole('button', { name: 'Download', exact: true }),
+    ).toBeVisible();
+  });
+
+  test('puts the chrome in the corners and the photo between them', async ({
+    page,
+  }) => {
+    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['market']}`);
+    await expect(page.locator('.lightbox__image')).toBeVisible();
+
+    const back = (await page.locator('.lightbox__back').boundingBox())!;
+    const image = (await page.locator('.lightbox__image').boundingBox())!;
+    const download = (await page
+      .getByRole('button', { name: 'Download', exact: true })
+      .boundingBox())!;
+    const info = (await page
+      .getByRole('button', { name: 'Photo info' })
+      .boundingBox())!;
+
+    // The photo's box runs from the back link's top edge to the bottom of the
+    // Photo info button.
+    expect(Math.abs(image.y - back.y)).toBeLessThan(2);
+    expect(Math.abs(image.y + image.height - (info.y + info.height))).toBeLessThan(2);
+
+    // Download sits above Photo info, both against the left edge.
+    expect(download.y + download.height).toBeLessThanOrEqual(info.y + 1);
+    expect(Math.abs(download.x - info.x)).toBeLessThan(2);
+    expect(download.x).toBeLessThan(image.x + image.width / 2);
   });
 
   test('preserves line breaks in a caption without interpreting markup', async ({
@@ -140,8 +254,9 @@ test.describe('ordering', () => {
   }) => {
     await page.goto(`${BASE}/2026/08/02`);
 
-    await expect(page.locator('.photo-grid__item')).toHaveCount(6);
-    const alts = await page
+    const day = page.locator('#d-2026-08-02');
+    await expect(day.locator('.photo-grid__item')).toHaveCount(6);
+    const alts = await day
       .locator('.photo-grid__image')
       .evaluateAll((nodes) => nodes.map((node) => (node as HTMLImageElement).alt));
 
@@ -167,7 +282,7 @@ test.describe('trashed and unknown resources', () => {
     await expect(page.getByRole('heading', { name: 'Not found' })).toBeVisible();
   });
 
-  test('a malformed route 404s rather than showing an empty group', async ({
+  test('a malformed route 404s rather than showing an empty section', async ({
     page,
   }) => {
     for (const path of [
@@ -184,14 +299,21 @@ test.describe('trashed and unknown resources', () => {
     }
   });
 
-  test('a real but empty day 404s', async ({ page }) => {
-    await page.goto(`${BASE}/2026/08/03`);
-    await expect(page.getByRole('heading', { name: 'Not found' })).toBeVisible();
+  test('a well-formed route for a section with no photos 404s', async ({ page }) => {
+    for (const path of [`${BASE}/2026/08/03`, `${BASE}/2026/01`, `${BASE}/2019`]) {
+      await page.goto(path);
+      await expect(
+        page.getByRole('heading', { name: 'Not found' }),
+        path,
+      ).toBeVisible();
+      // And it shows the 404 alone, not the timeline with a 404 on top.
+      await expect(page.locator('.photo-grid__item')).toHaveCount(0);
+    }
   });
 });
 
 test.describe('images', () => {
-  test('requests thumbnails in the grid and larger renditions in the lightbox', async ({
+  test('requests thumbnails in the grid and larger renditions in the photo view', async ({
     page,
   }) => {
     const requested: string[] = [];
@@ -203,22 +325,48 @@ test.describe('images', () => {
     // Poll rather than assert once: "visible" can resolve before the image
     // request has actually been issued and recorded.
     await expect.poll(() => requested.some((url) => url.endsWith('/thumb'))).toBe(true);
-    // The grid asks for thumbnails only; larger renditions wait for a click.
+    // The timeline asks for thumbnails only; larger renditions wait for a click.
     expect(requested.some((url) => url.includes('display-'))).toBe(false);
 
-    await page.locator('.photo-grid__link').first().click();
+    await page.locator('#d-2026-08-15 .photo-grid__link').first().click();
     await expect(page.locator('.lightbox__image')).toBeVisible();
     await expect
       .poll(() => requested.some((url) => url.includes('display-')))
       .toBe(true);
   });
 
+  test('preloads the neighbouring photos once the current one has rendered', async ({
+    page,
+  }) => {
+    const requested: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/p/')) requested.push(request.url());
+    });
+
+    // Mid-library, so it has a neighbour on each side.
+    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['snowdrops']}`);
+    await expect(page.locator('.lightbox__image')).toBeVisible();
+
+    // The photo before it is the last of August 2nd; the one after is the
+    // first of the previous year — both across section boundaries.
+    for (const seed of ['beach-scan-2', 'early-start']) {
+      await expect
+        .poll(() =>
+          requested.some(
+            (url) =>
+              url.includes(FIXTURE_PHOTO_IDS[seed]!) && url.endsWith('/display-1280'),
+          ),
+        )
+        .toBe(true);
+    }
+  });
+
   test('never requests a trashed photo derivative', async ({ page }) => {
     const requested: string[] = [];
     page.on('request', (request) => requested.push(request.url()));
 
-    await page.goto(`${BASE}/2026/08/02`);
-    await expect(page.locator('.photo-grid__item')).toHaveCount(6);
+    await page.goto(`${BASE}/`);
+    await expect(page.locator('.photo-grid__item')).toHaveCount(12);
 
     expect(requested.some((url) => url.includes(FIXTURE_PHOTO_IDS['deleted']!))).toBe(
       false,

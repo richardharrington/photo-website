@@ -246,3 +246,82 @@ review flagged.
   check in real Safari (as opposed to Playwright's WebKit) is dropped;
   automated WebKit coverage is accepted as the extent of Safari
   verification.
+
+## The one-page timeline — 2026-09-01
+
+Reaching a photo took four clicks (year, month, day, photo). The viewer is now
+a single scrolling page holding the whole library, and the photo view was
+reworked around it. The scope was the viewer alone: no admin, Worker, or
+API-contract change beyond one added read route.
+
+25. **All photo metadata arrives in one request at page load.** No batched
+    fetching and no scroll spinner. At the design's scale — around 300 photos
+    a year — the whole library's metadata is tens of kilobytes now and one to
+    two megabytes after a decade, and the images were always the heavy part.
+    What this buys is not just simplicity: the metadata carries every
+    rendition's pixel dimensions, so the entire page lays out **finally** at
+    first paint and never reflows. That is what makes anchor scrolling and
+    return-from-photo exact rather than approximate, with nothing to measure,
+    retry, or observe. `loading="lazy"` keeps image traffic proportional to
+    what is actually scrolled past.
+
+26. **One new read route, `/timeline`; every existing route is unchanged.**
+    The admin app consumes `/hierarchy`, `/day`, `/undated`, and the
+    `PhotoResponse` shape, so leaving them alone is what keeps this change
+    viewer-only. `timelineResponse` is built from the same `liveHierarchy`
+    as `hierarchyResponse`, so trash exclusion and every ordering rule come
+    along rather than being restated.
+
+27. **The old deep URLs all stay valid and scroll the page to their section.**
+    `/2026`, `/2026/03`, `/2026/03/01`, and `/undated` are stable and
+    shareable by design; bookmarks keep working. Headings are anchor links
+    that `replaceState` to their own route, so a section's URL is copyable
+    without scrolling filling the history. Scrolling alone never changes the
+    URL — no scrollspy. The browser's own scroll restoration is turned off,
+    because it would fight the route's anchor.
+
+28. **A well-formed URL naming a section with no photos is still the site
+    404.** `/2026/03/09` on a day with nothing in it shows the same 404 as a
+    mistyped address, exactly as the index pages did. An empty **Undated**
+    group remains the one exception: it is a fixed part of the page, not a
+    section that exists only when populated.
+
+29. **The timeline stays mounted beneath the photo view.** It is rendered as
+    a sibling of the lightbox rather than being torn down and rebuilt around
+    it, so closing is a reveal at the position the reader left, not a
+    re-render. Both read one shared resource, so opening a photo costs one
+    request for that photo's own detail and nothing else.
+
+30. **Arrow navigation traverses the whole library, not one day.** Dated
+    photos day by day, then undated; the arrows disable only at the two
+    global ends. This is the core "less clicking" request, and it needs no
+    API change now that the client holds the whole ordered list. Neighbours
+    are still resolved from `window.location` at press time rather than from
+    a captured render, which is what keeps a held-down arrow key advancing
+    (see #21's sibling defect in the earlier lightbox). After the current
+    photo renders, both neighbours' `display-1280` renditions are prefetched.
+
+31. **Closing the photo view returns to the photo's own tile, not the day's
+    heading.** After arrowing deep into a long day, landing on the heading
+    would mean finding the photo again by eye. It is a one-shot request in
+    module state, consumed by the timeline on its next render, deliberately
+    not a `location.hash` — a hash is part of the URL people copy, and this
+    is a transient detail of one navigation.
+
+32. **The photo view lost its chrome.** No header bar, no rules, no "3 of 24"
+    (a position in a list of thousands says nothing), and no visible date
+    line. The way back sits top-left, **Download** above **Photo info**
+    bottom-left, and the photo's box runs exactly between them. Captions are
+    the only hand-written content and stay on screen; date, filename, and
+    dimensions moved into an overlay panel one click away. Below the 40rem
+    breakpoint the controls become a slim footer row under the photo instead:
+    a portrait photo spans a phone's full width, so anything floating over it
+    would need a scrim and would cover the photograph.
+
+33. **No virtualization.** Every image in the library is in the DOM, and that
+    is deliberate at this scale. Virtualizing would trade exact anchors and
+    exact back-navigation for a problem this library does not have.
+
+34. **A table of contents or jump-to-date side nav is deferred, not
+    rejected.** The pinned year and month headings and the anchor routes are
+    its foundation; building it is a later project.

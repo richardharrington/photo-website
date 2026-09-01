@@ -241,23 +241,33 @@ queue with overall and per-file status rather than an arbitrary batch limit.
   typography, generous spacing, and no decorative UI competing with images.
   It follows the viewer’s system light/dark preference; there is no manual
   theme toggle initially. The configurable initial title is **Family Photos**.
-- Navigation is newest-first: **year -> month -> day -> photo grid**.
-- Group index pages show years, months, or days and their photo counts only;
-  photos appear only in their chronological day grid and are not repeated as
-  representative thumbnails.
+- The whole library is **one newest-first scrolling page**: year headings,
+  month headings beneath them, day headings beneath those, and a masonry block
+  of photos under each day. There are no index pages and no navigation between
+  levels — reaching any photo is a scroll, not four clicks. The current year and
+  month headings pin to the top of the viewport while scrolling.
+- Counts appear beside each year, month, and day heading. Photos appear once,
+  in their own day's block, and are never repeated as representative thumbnails
+  on a heading.
 - Individual years, months, days, and photos have stable deep URLs below the
-  opaque display base. A photo’s ID-based detail URL is independent of its date,
-  so date corrections do not break bookmarks. A trashed or permanently deleted
-  photo URL returns a generic 404. There are no social widgets; sharing is
-  copying a URL.
-- Day grids lazy-load thumbnails as a viewer scrolls; larger derivatives are
+  opaque display base. A year, month, or day URL renders the same page scrolled
+  to that section; clicking a heading rewrites the address bar to its URL
+  without adding a history entry. A photo’s ID-based detail URL is independent
+  of its date, so date corrections do not break bookmarks. A well-formed URL for
+  a section with no photos, and a trashed or permanently deleted photo URL,
+  return a generic 404. There are no social widgets; sharing is copying a URL.
+- The page lazy-loads thumbnails as a viewer scrolls; larger derivatives are
   requested only when a photo opens. Derivative URLs are stable, so browsers
   cache images across visits.
-- Selecting a photo opens a full-size lightbox with non-empty caption and
-  capture date/time, previous/next navigation within the day, and a
-  full-resolution sanitized-JPEG download action. Group labels use unambiguous
-  text dates; viewer time presentation uses local-style hours/minutes, while
-  admin information retains seconds/milliseconds.
+- Selecting a photo opens it full-size over the timeline, which stays where it
+  was underneath. The photo view carries no header bar and no position count:
+  the way back at the top left, **Download** and **Photo info** at the bottom
+  left, and the caption when there is one. Capture date and time, original
+  filename, and full-size dimensions live in the Photo info panel. Previous and
+  next traverse the whole library in display order, stopping only at its two
+  ends, and prefetch their own neighbours. Labels use unambiguous text dates;
+  viewer time presentation uses local-style hours/minutes, while admin
+  information retains seconds/milliseconds.
 - Within a day, photos with capture times sort chronologically. Date-only
   photos follow, ordered by upload batch and then by their position in the
   batch's selection/drop order; ingestion time is never presented as a capture
