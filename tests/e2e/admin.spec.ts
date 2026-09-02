@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
+import { SCRATCH_DAYS } from '../../fixtures/catalog.ts';
 
 /**
  * The admin app, against the local fixture server.
@@ -9,6 +10,16 @@ import type { Page } from '@playwright/test';
  */
 
 const BASE = 'http://localhost:5174/dev-admin-path';
+
+/*
+ * In order, not in parallel. `fullyParallel` otherwise spreads this file's
+ * tests across workers, and several of them trash a photo and put it back —
+ * one test's temporary delete became another's failed count. Serial covers
+ * one project; the per-project scratch day below covers the other axis, since
+ * Chromium and WebKit run this file against the same fixture process at the
+ * same time.
+ */
+test.describe.configure({ mode: 'serial' });
 
 /** Trash a photo, then put it back, so the fixture is left as it was found. */
 async function withTrashed(
@@ -178,13 +189,35 @@ test.describe('metadata editing', () => {
   });
 });
 
+/**
+ * Everything destructive happens on this project's own scratch day — three
+ * photos plus one in the trash, and nothing else in the fixture counts
+ * anything in July.
+ *
+ * One day per project, because the fixture store is a single process shared
+ * by every Playwright worker: two projects running the same destructive test
+ * at the same moment would race on the same photos even though each puts
+ * everything back. See fixtures/catalog.ts.
+ */
+function scratch() {
+  const day = SCRATCH_DAYS[test.info().project.name === 'webkit' ? 1 : 0]!;
+  const [year, month, date] = day.split('-');
+  return {
+    path: `${BASE}/${year}/${month}/${date}`,
+    /** The trashed photo on that day, which only this project restores. */
+    trashedFile: `IMG_${day.replaceAll('-', '')}_211900.HEIC`,
+    /** How that day reads in the interface, e.g. "July 4, 2026". */
+    dayLabel: `July ${Number(date)}, ${year}`,
+  };
+}
+
 test.describe('delete, confirm, and undo', () => {
   test('states the resolved count and moves the photo to the trash', async ({
     page,
   }) => {
     // Single-photo deletion is the detail panel's own Delete, which needs no
     // selection at all.
-    await page.goto(`${BASE}/2026/08/15`);
+    await page.goto(scratch().path);
     await page.locator('.admin-grid__tile').first().click();
     await page
       .getByRole('complementary')
@@ -210,12 +243,12 @@ test.describe('delete, confirm, and undo', () => {
     );
 
     // Undo put it back.
-    await page.goto(`${BASE}/2026/08/15`);
-    await expect(page.locator('.admin-grid__item')).toHaveCount(1);
+    await page.goto(scratch().path);
+    await expect(page.locator('.admin-grid__item')).toHaveCount(3);
   });
 
   test('cancelling changes nothing', async ({ page }) => {
-    await page.goto(`${BASE}/2026/08/15`);
+    await page.goto(scratch().path);
     await page.locator('.admin-grid__tile').first().click();
     await page
       .getByRole('complementary')
@@ -224,23 +257,23 @@ test.describe('delete, confirm, and undo', () => {
 
     await page.getByRole('button', { name: 'Cancel' }).click();
     await expect(page.getByRole('alertdialog')).toHaveCount(0);
-    await expect(page.locator('.admin-grid__item')).toHaveCount(1);
+    await expect(page.locator('.admin-grid__item')).toHaveCount(3);
   });
 
   test('deletes a whole day through Select all, stating the count', async ({
     page,
   }) => {
-    await page.goto(`${BASE}/2026/08/02`);
+    await page.goto(scratch().path);
     await page.getByRole('button', { name: 'Select all', exact: true }).click();
     await page.getByRole('button', { name: 'Delete selected' }).click();
 
     const dialog = page.getByRole('alertdialog');
-    await expect(dialog).toContainText('6 photos');
+    await expect(dialog).toContainText('3 photos');
     await page.getByRole('button', { name: 'Cancel' }).click();
   });
 
   test('deletes exactly the selected photos', async ({ page }) => {
-    await page.goto(`${BASE}/2026/08/02`);
+    await page.goto(scratch().path);
     const tiles = page.locator('.admin-grid__tile');
     await tiles.nth(0).click({ modifiers: ['ControlOrMeta'] });
     await tiles.nth(1).click({ modifiers: ['ControlOrMeta'] });
@@ -254,8 +287,8 @@ test.describe('delete, confirm, and undo', () => {
       async () => {
         await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
         await expect(page.getByRole('status')).toContainText('2 photos deleted.');
-        // The other four are untouched, and nothing is left selected.
-        await expect(page.locator('.admin-grid__item')).toHaveCount(4);
+        // The third is untouched, and nothing is left selected.
+        await expect(page.locator('.admin-grid__item')).toHaveCount(1);
         await expect(page.getByRole('button', { name: 'Delete selected' })).toHaveCount(
           0,
         );
@@ -266,12 +299,12 @@ test.describe('delete, confirm, and undo', () => {
       },
     );
 
-    await page.goto(`${BASE}/2026/08/02`);
-    await expect(page.locator('.admin-grid__item')).toHaveCount(6);
+    await page.goto(scratch().path);
+    await expect(page.locator('.admin-grid__item')).toHaveCount(3);
   });
 
   test('Escape dismisses the confirmation', async ({ page }) => {
-    await page.goto(`${BASE}/2026/08/02`);
+    await page.goto(scratch().path);
     await page.getByRole('button', { name: 'Select all', exact: true }).click();
     await page.getByRole('button', { name: 'Delete selected' }).click();
     await expect(page.getByRole('alertdialog')).toBeVisible();
@@ -413,14 +446,15 @@ test.describe('trash', () => {
   test('lists trashed photos with what is needed to identify them', async ({
     page,
   }) => {
+    const { trashedFile, dayLabel } = scratch();
     await page.goto(`${BASE}/trash`);
 
-    const item = page.locator('.trash__item').first();
+    // This project's own trashed photo: the other project's sits beside it.
+    const item = page.locator('.trash__item').filter({ hasText: trashedFile });
     await expect(item).toBeVisible();
     // Thumbnail, filename, original grouping date, and time remaining.
     await expect(item.locator('img')).toBeVisible();
-    await expect(item).toContainText('IMG_20260802_190000.HEIC');
-    await expect(item).toContainText('August 2, 2026');
+    await expect(item).toContainText(dayLabel);
     await expect(item).toContainText(/Removed on \w+ \d+, \d{4}/);
   });
 
@@ -432,7 +466,11 @@ test.describe('trash', () => {
 
   test('requires an explicit confirmation to delete permanently', async ({ page }) => {
     await page.goto(`${BASE}/trash`);
-    await page.locator('.trash__tile').first().click();
+    await page
+      .locator('.trash__item')
+      .filter({ hasText: scratch().trashedFile })
+      .locator('.trash__tile')
+      .click();
 
     await page.getByRole('button', { name: 'Delete permanently' }).click();
 
@@ -442,20 +480,23 @@ test.describe('trash', () => {
   });
 
   test('restores a photo back into its day', async ({ page }) => {
+    const { path, trashedFile } = scratch();
+    const mine = page.locator('.trash__item').filter({ hasText: trashedFile });
+
     await page.goto(`${BASE}/trash`);
-    await page.locator('.trash__tile').first().click();
+    await mine.locator('.trash__tile').click();
     await page.getByRole('button', { name: 'Restore' }).click();
 
-    await expect(page.locator('.trash__item')).toHaveCount(0);
+    await expect(mine).toHaveCount(0);
 
     // It is back in the day it belongs to.
-    await page.goto(`${BASE}/2026/08/02`);
-    await expect(page.locator('.admin-grid__item')).toHaveCount(7);
+    await page.goto(path);
+    await expect(page.locator('.admin-grid__item')).toHaveCount(4);
 
     // Put the fixture back the way it was.
     const restored = page
       .locator('.admin-grid__item')
-      .filter({ hasText: 'IMG_20260802_190000.HEIC' })
+      .filter({ hasText: trashedFile })
       .locator('.admin-grid__tile');
     await restored.click();
     await page

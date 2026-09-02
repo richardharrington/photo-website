@@ -24,7 +24,39 @@ interface Spec {
   source?: PhotoRecord['timestampSource'];
 }
 
+/**
+ * The scratch days: July 4th and 5th, 2026 exist to be broken.
+ *
+ * Every end-to-end test that trashes, restores, or permanently deletes
+ * something works on one of these, and nothing else in the fixture asserts a
+ * count in July. There is one day per browser project because the fixture
+ * store is a single process shared by every Playwright worker: two projects
+ * running the same destructive test at the same moment is a race, and it was
+ * one — a temporary delete failed a count assertion two projects away.
+ *
+ * Three live photos each, so a bulk delete can take some and leave some, plus
+ * a trashed one, so each project has something in the trash to restore that no
+ * other project will restore out from under it.
+ */
+export const SCRATCH_DAYS = ['2026-07-04', '2026-07-05'] as const;
+
+const SCRATCH_SPECS: Spec[] = SCRATCH_DAYS.flatMap((date, day) =>
+  ['21:03:11', '21:07:45', '21:14:02', '21:19:00'].map((time, index) => ({
+    seed: index === 3 ? `deleted-${day}` : `scratch-${day}-${'abc'[index]}`,
+    date,
+    time,
+    filename: `IMG_${date.replaceAll('-', '')}_${time.replaceAll(':', '')}.HEIC`,
+    batch: 7 + day,
+    index,
+    landscape: index % 2 === 0,
+    caption: index === 0 ? 'First rocket up.' : null,
+    // The fourth is trashed: in the catalog, out of every display route.
+    trashed: index === 3 ? '2026-08-20T12:00:00.000Z' : null,
+  })),
+);
+
 const SPECS: Spec[] = [
+  ...SCRATCH_SPECS,
   // A busy day, out of chronological order in the source list on purpose.
   {
     seed: 'beach-late',
@@ -146,18 +178,6 @@ const SPECS: Spec[] = [
     index: 0,
     source: 'none',
   },
-  // Trashed: must not appear in any display route, but is still in the
-  // catalog and still blocks a duplicate upload of the same bytes.
-  {
-    seed: 'deleted',
-    date: '2026-08-02',
-    time: '19:00:00',
-    caption: 'Blurry, deleted.',
-    filename: 'IMG_20260802_190000.HEIC',
-    batch: 1,
-    index: 5,
-    trashed: '2026-08-20T12:00:00.000Z',
-  },
 ];
 
 function toRecord(spec: Spec): PhotoRecord {
@@ -188,7 +208,7 @@ function toRecord(spec: Spec): PhotoRecord {
 }
 
 export function fixtureCatalog(): Catalog {
-  return makeCatalog(SPECS.map(toRecord), { batchCounter: 6 });
+  return makeCatalog(SPECS.map(toRecord), { batchCounter: 8 });
 }
 
 export const FIXTURE_PHOTO_IDS = Object.fromEntries(

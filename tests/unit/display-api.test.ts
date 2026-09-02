@@ -33,7 +33,7 @@ describe('timelineResponse', () => {
     expect(timeline.years.map((year) => year.year)).toEqual([2026, 2025]);
 
     const y2026 = timeline.years[0]!;
-    expect(y2026.months.map((month) => month.month)).toEqual([8, 3]);
+    expect(y2026.months.map((month) => month.month)).toEqual([8, 7, 3]);
     expect(y2026.months[0]!.days.map((day) => day.day)).toEqual([15, 2]);
   });
 
@@ -63,9 +63,9 @@ describe('timelineResponse', () => {
 
   it('excludes trashed photos everywhere', () => {
     const ids = flatten().map((photo) => photo.id);
-    expect(ids).not.toContain(FIXTURE_PHOTO_IDS['deleted']);
-    // The trashed photo would otherwise sit at the end of August 2nd.
-    expect(timeline.years[0]!.months[0]!.days[1]!.count).toBe(6);
+    expect(ids).not.toContain(FIXTURE_PHOTO_IDS['deleted-0']);
+    // The trashed photo would otherwise sit at the end of July 4th.
+    expect(timeline.years[0]!.months[1]!.days[0]!.count).toBe(3);
   });
 
   it('counts agree at every level and with the photos actually present', () => {

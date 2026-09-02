@@ -26,20 +26,23 @@ test.describe('the timeline', () => {
     ]);
     await expect(page.locator('.timeline__month-heading')).toHaveText([
       /August/,
+      /July/,
       /March/,
       /December/,
     ]);
     await expect(page.locator('.timeline__day-heading')).toHaveText([
       /August 15/,
       /August 2/,
+      /July 5/,
+      /July 4/,
       /March 1/,
       /December 26/,
       /December 25/,
     ]);
 
-    // Every live photo in the library is on the page: 12 of the 13 fixtures,
-    // the thirteenth being trashed.
-    await expect(page.locator('.photo-grid__item')).toHaveCount(12);
+    // Every live photo in the library is on the page: 18 of the 20 fixtures,
+    // the other two being trashed.
+    await expect(page.locator('.photo-grid__item')).toHaveCount(18);
   });
 
   test('counts the months and the years, but not the days', async ({ page }) => {
@@ -338,7 +341,7 @@ test.describe('ordering', () => {
 
 test.describe('trashed and unknown resources', () => {
   test('a trashed photo is a generic 404, not a tombstone', async ({ page }) => {
-    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['deleted']}`);
+    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['deleted-0']}`);
 
     await expect(page.getByRole('heading', { name: 'Not found' })).toBeVisible();
     // Nothing hints that this ID ever existed.
@@ -415,9 +418,9 @@ test.describe('images', () => {
     await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['snowdrops']}`);
     await expect(page.locator('.lightbox__image')).toBeVisible();
 
-    // The photo before it is the last of August 2nd; the one after is the
+    // The photo before it is the last of July 4th; the one after is the
     // first of the previous year — both across section boundaries.
-    for (const seed of ['beach-scan-2', 'early-start']) {
+    for (const seed of ['scratch-0-c', 'early-start']) {
       await expect
         .poll(() =>
           requested.some(
@@ -434,10 +437,12 @@ test.describe('images', () => {
     page.on('request', (request) => requested.push(request.url()));
 
     await page.goto(`${BASE}/`);
-    await expect(page.locator('.photo-grid__item')).toHaveCount(12);
+    await expect(page.locator('.photo-grid__item')).toHaveCount(18);
 
-    expect(requested.some((url) => url.includes(FIXTURE_PHOTO_IDS['deleted']!))).toBe(
-      false,
-    );
+    for (const seed of ['deleted-0', 'deleted-1']) {
+      expect(requested.some((url) => url.includes(FIXTURE_PHOTO_IDS[seed]!))).toBe(
+        false,
+      );
+    }
   });
 });

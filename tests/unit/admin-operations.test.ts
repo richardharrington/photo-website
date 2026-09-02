@@ -309,23 +309,29 @@ describe('resolveSelection', () => {
   const catalog = fixtureCatalog();
 
   it('resolves a day to its live photo IDs', () => {
-    const ids = resolveSelection(catalog, {
+    expect(
+      resolveSelection(catalog, { kind: 'day', year: 2026, month: 8, day: 2 }),
+    ).toHaveLength(6);
+
+    // July 4th holds the trashed photo, which a day selection never covers.
+    const july = resolveSelection(catalog, {
       kind: 'day',
       year: 2026,
-      month: 8,
-      day: 2,
+      month: 7,
+      day: 4,
     });
-
-    expect(ids).toHaveLength(6);
-    // The trashed photo on that day is not included.
-    expect(ids).not.toContain(FIXTURE_PHOTO_IDS['deleted']);
+    expect(july).toHaveLength(3);
+    expect(july).not.toContain(FIXTURE_PHOTO_IDS['deleted-0']);
   });
 
   it('resolves a month and a year', () => {
     expect(
       resolveSelection(catalog, { kind: 'month', year: 2026, month: 8 }),
     ).toHaveLength(7);
-    expect(resolveSelection(catalog, { kind: 'year', year: 2026 })).toHaveLength(8);
+    expect(
+      resolveSelection(catalog, { kind: 'month', year: 2026, month: 7 }),
+    ).toHaveLength(6);
+    expect(resolveSelection(catalog, { kind: 'year', year: 2026 })).toHaveLength(14);
   });
 
   it('resolves the undated group', () => {
@@ -337,7 +343,7 @@ describe('resolveSelection', () => {
       kind: 'ids',
       photoIds: [
         FIXTURE_PHOTO_IDS['market']!,
-        FIXTURE_PHOTO_IDS['deleted']!,
+        FIXTURE_PHOTO_IDS['deleted-0']!,
         testPhotoId('nope'),
       ],
     });
@@ -390,11 +396,11 @@ describe('resolveTrashedSelection', () => {
   it('keeps only IDs that are actually in the trash', () => {
     const catalog = fixtureCatalog();
     const ids = resolveTrashedSelection(catalog, [
-      FIXTURE_PHOTO_IDS['deleted']!,
+      FIXTURE_PHOTO_IDS['deleted-0']!,
       FIXTURE_PHOTO_IDS['market']!,
       testPhotoId('nope'),
     ]);
 
-    expect(ids).toEqual([FIXTURE_PHOTO_IDS['deleted']]);
+    expect(ids).toEqual([FIXTURE_PHOTO_IDS['deleted-0']]);
   });
 });

@@ -12,7 +12,7 @@ import type { Catalog } from '../../src/shared/catalog.ts';
 
 const KEY = 'worker-test-signing-key';
 const LIVE = FIXTURE_PHOTO_IDS['market']!;
-const TRASHED = FIXTURE_PHOTO_IDS['deleted']!;
+const TRASHED = FIXTURE_PHOTO_IDS['deleted-0']!;
 const UNKNOWN = 'f'.repeat(32);
 
 /**

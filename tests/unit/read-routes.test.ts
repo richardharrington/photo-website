@@ -60,7 +60,7 @@ describe('readRoute', () => {
   });
 
   it('404s a trashed photo rather than exposing it', () => {
-    const id = FIXTURE_PHOTO_IDS['deleted']!;
+    const id = FIXTURE_PHOTO_IDS['deleted-0']!;
     expect(readRoute(catalog, `/photo/${id}`)?.status).toBe(404);
   });
 
