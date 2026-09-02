@@ -439,7 +439,7 @@
   .lightbox__meta {
     align-items: flex-end;
     text-align: right;
-    gap: 1.0rem;
+    gap: 1rem;
   }
 
   .lightbox__caption,

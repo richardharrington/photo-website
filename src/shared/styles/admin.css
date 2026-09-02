@@ -220,6 +220,8 @@ button:disabled {
    cropped and nothing is letterboxed. Rows come out ragged as a result. */
 .admin-grid__tile {
   display: block;
+  /* Holds the selected tile's wash. */
+  position: relative;
   padding: 0;
   border: 2px solid transparent;
   border-radius: 3px;
@@ -227,9 +229,23 @@ button:disabled {
   background: var(--bg-raised);
 }
 
-/* The photo the detail panel is showing. There is no selection in this grid. */
+/* The photo the detail panel is showing. */
 .admin-grid__tile--open {
   border-color: var(--focus);
+}
+
+/* Selected for a bulk delete. A wash over the thumbnail as well as a border:
+   the open tile already owns the border, both states can land on the same
+   tile, and a selection has to be readable at a glance across many tiles. */
+.admin-grid__tile--selected {
+  border-color: var(--focus);
+}
+
+.admin-grid__tile--selected::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--focus) 25%, transparent);
 }
 
 .admin-grid__image {

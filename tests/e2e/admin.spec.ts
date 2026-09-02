@@ -68,7 +68,7 @@ test.describe('browsing and filenames', () => {
 
 test.describe('the detail panel', () => {
   test('a click opens the panel and marks that thumbnail', async ({ page }) => {
-    // The grid has no selection: a click does this and nothing else.
+    // An unmodified click; the selection gestures are covered further down.
     await page.goto(`${BASE}/2026/08/02`);
     const tiles = page.locator('.admin-grid__tile');
     await expect(tiles).toHaveCount(6);
@@ -182,8 +182,8 @@ test.describe('delete, confirm, and undo', () => {
   test('states the resolved count and moves the photo to the trash', async ({
     page,
   }) => {
-    // Single-photo deletion is the detail panel's own Delete; the grid has
-    // no selection and no bulk button beside the whole-group one.
+    // Single-photo deletion is the detail panel's own Delete, which needs no
+    // selection at all.
     await page.goto(`${BASE}/2026/08/15`);
     await page.locator('.admin-grid__tile').first().click();
     await page
@@ -227,22 +227,185 @@ test.describe('delete, confirm, and undo', () => {
     await expect(page.locator('.admin-grid__item')).toHaveCount(1);
   });
 
-  test('offers a whole-group delete with the group count', async ({ page }) => {
+  test('deletes a whole day through Select all, stating the count', async ({
+    page,
+  }) => {
     await page.goto(`${BASE}/2026/08/02`);
-    await page.getByRole('button', { name: 'Delete this whole group' }).click();
+    await page.getByRole('button', { name: 'Select all', exact: true }).click();
+    await page.getByRole('button', { name: 'Delete selected' }).click();
 
     const dialog = page.getByRole('alertdialog');
     await expect(dialog).toContainText('6 photos');
     await page.getByRole('button', { name: 'Cancel' }).click();
   });
 
+  test('deletes exactly the selected photos', async ({ page }) => {
+    await page.goto(`${BASE}/2026/08/02`);
+    const tiles = page.locator('.admin-grid__tile');
+    await tiles.nth(0).click({ modifiers: ['ControlOrMeta'] });
+    await tiles.nth(1).click({ modifiers: ['ControlOrMeta'] });
+
+    await page.getByRole('button', { name: 'Delete selected' }).click();
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText('2 photos');
+
+    await withTrashed(
+      page,
+      async () => {
+        await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
+        await expect(page.getByRole('status')).toContainText('2 photos deleted.');
+        // The other four are untouched, and nothing is left selected.
+        await expect(page.locator('.admin-grid__item')).toHaveCount(4);
+        await expect(page.getByRole('button', { name: 'Delete selected' })).toHaveCount(
+          0,
+        );
+      },
+      async () => {
+        await page.getByRole('button', { name: 'Undo' }).click();
+        await expect(page.getByRole('status')).toHaveCount(0);
+      },
+    );
+
+    await page.goto(`${BASE}/2026/08/02`);
+    await expect(page.locator('.admin-grid__item')).toHaveCount(6);
+  });
+
   test('Escape dismisses the confirmation', async ({ page }) => {
     await page.goto(`${BASE}/2026/08/02`);
-    await page.getByRole('button', { name: 'Delete this whole group' }).click();
+    await page.getByRole('button', { name: 'Select all', exact: true }).click();
+    await page.getByRole('button', { name: 'Delete selected' }).click();
     await expect(page.getByRole('alertdialog')).toBeVisible();
 
     await page.keyboard.press('Escape');
     await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  });
+});
+
+test.describe('selecting in the grid', () => {
+  const selected = (page: Page) => page.locator('.admin-grid__tile[data-selected]');
+
+  test('shows only the toolbar buttons that have something to act on', async ({
+    page,
+  }) => {
+    await page.goto(`${BASE}/2026/08/02`);
+    // "Select all" is a substring of "Deselect all", so every one of these
+    // has to be an exact match.
+    const deleteSelected = page.getByRole('button', { name: 'Delete selected' });
+    const selectAll = page.getByRole('button', { name: 'Select all', exact: true });
+    const deselectAll = page.getByRole('button', { name: 'Deselect all' });
+
+    // Nothing selected: only Select all.
+    await expect(deleteSelected).toHaveCount(0);
+    await expect(selectAll).toBeVisible();
+    await expect(deselectAll).toHaveCount(0);
+
+    // Some selected: all three, in that order left to right.
+    await page
+      .locator('.admin-grid__tile')
+      .nth(0)
+      .click({ modifiers: ['ControlOrMeta'] });
+    await expect(page.locator('.admin__toolbar-actions button')).toHaveText([
+      'Delete selected',
+      'Select all',
+      'Deselect all',
+    ]);
+
+    // All selected: nothing left to select.
+    await selectAll.click();
+    await expect(selected(page)).toHaveCount(6);
+    await expect(page.locator('.admin__toolbar-actions button')).toHaveText([
+      'Delete selected',
+      'Deselect all',
+    ]);
+
+    await deselectAll.click();
+    await expect(selected(page)).toHaveCount(0);
+    await expect(page.locator('.admin__toolbar-actions button')).toHaveText([
+      'Select all',
+    ]);
+  });
+
+  test('modifier-click selects a tile instead of opening it', async ({ page }) => {
+    await page.goto(`${BASE}/2026/08/02`);
+    const tiles = page.locator('.admin-grid__tile');
+
+    await tiles.nth(2).click({ modifiers: ['ControlOrMeta'] });
+    await expect(selected(page)).toHaveCount(1);
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+
+    // And clicking it again takes it back out.
+    await tiles.nth(2).click({ modifiers: ['ControlOrMeta'] });
+    await expect(selected(page)).toHaveCount(0);
+  });
+
+  test('shift-click selects the range from the last tile toggled', async ({ page }) => {
+    await page.goto(`${BASE}/2026/08/02`);
+    const tiles = page.locator('.admin-grid__tile');
+
+    await tiles.nth(1).click({ modifiers: ['ControlOrMeta'] });
+    await tiles.nth(4).click({ modifiers: ['Shift'] });
+    await expect(selected(page)).toHaveCount(4);
+
+    // The anchor stays put, so shrinking the range back is one more click.
+    await tiles.nth(2).click({ modifiers: ['Shift'] });
+    await expect(selected(page)).toHaveCount(4);
+  });
+
+  test('shift-click extends from the photo the panel is showing', async ({ page }) => {
+    // Click one, shift-click another: the gesture people actually use, and
+    // the plain click is what sets the anchor it measures from.
+    await page.goto(`${BASE}/2026/08/02`);
+    const tiles = page.locator('.admin-grid__tile');
+
+    await tiles.nth(0).click();
+    await tiles.nth(3).click({ modifiers: ['Shift'] });
+
+    await expect(selected(page)).toHaveCount(4);
+  });
+
+  test('a second selected photo closes the detail panel', async ({ page }) => {
+    await page.goto(`${BASE}/2026/08/02`);
+    const tiles = page.locator('.admin-grid__tile');
+    const panel = page.getByRole('complementary');
+
+    await tiles.nth(0).click();
+    await expect(panel).toBeVisible();
+
+    // One photo selected still leaves the panel describing one photo.
+    await tiles.nth(1).click({ modifiers: ['ControlOrMeta'] });
+    await expect(panel).toBeVisible();
+
+    // A second makes it describe the wrong one.
+    await tiles.nth(2).click({ modifiers: ['ControlOrMeta'] });
+    await expect(panel).toHaveCount(0);
+    await expect(selected(page)).toHaveCount(2);
+  });
+
+  test('a plain click opens the detail panel and drops the selection', async ({
+    page,
+  }) => {
+    await page.goto(`${BASE}/2026/08/02`);
+    await page.getByRole('button', { name: 'Select all', exact: true }).click();
+    await expect(selected(page)).toHaveCount(6);
+
+    // The way out of a selection that caught the wrong photos.
+    await page.locator('.admin-grid__tile').first().click();
+    await expect(selected(page)).toHaveCount(0);
+    await expect(page.getByRole('complementary')).toBeVisible();
+  });
+
+  test('leaves the selection behind when the day changes', async ({ page }) => {
+    // Client-side navigation, which keeps the app mounted: a day's selection
+    // must not follow along to the next day.
+    await page.goto(`${BASE}/2026/08`);
+    await page.getByRole('link', { name: /August 2, 2026/ }).click();
+    await page.getByRole('button', { name: 'Select all', exact: true }).click();
+    await expect(selected(page)).toHaveCount(6);
+
+    await page.goBack();
+    await page.getByRole('link', { name: /August 15, 2026/ }).click();
+    await expect(page.locator('.admin-grid__item')).toHaveCount(1);
+    await expect(selected(page)).toHaveCount(0);
   });
 });
 

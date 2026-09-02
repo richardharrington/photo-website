@@ -317,7 +317,7 @@ API-contract change beyond one added read route.
     that stack's bottom and the back link. The caption and date are plain text
     sharing the buttons' right edge, not bordered surfaces; a button-looking
     caption invites a click that does nothing. That shared edge sits a fixed
-    8px short of the picture, which takes a measurement: the picture is
+    20px short of the picture, which takes a measurement: the picture is
     centred inside an `img` box stretched to the space available, so its
     visible left edge follows from the aspect ratio and the window, and no
     stylesheet can name it. The component publishes it as `--photo-left`; the
@@ -337,3 +337,42 @@ API-contract change beyond one added read route.
 34. **A table of contents or jump-to-date side nav is deferred, not
     rejected.** The pinned year and month headings and the anchor routes are
     its foundation; building it is a later project.
+
+35. **Grid selection is modifier-click and shift-click, and nothing else.**
+    Marquee dragging was specified, built, and removed: a plain click opens the
+    detail panel, so a drag that began on a tile could never be told from a
+    click, and the selection it was supposed to feed stayed permanently empty.
+    Command-click (Control elsewhere) to toggle one photo and Shift-click to
+    reach back to the last one toggled are the gestures every file manager
+    already teaches, they need no empty space to start in, and they reach the
+    same actions. Masonry runs top to bottom within a column, so a shift-range
+    is not always the rectangle it looks like; the selected tiles say plainly
+    what it caught, which is enough. A shift-click adds to the selection rather
+    than replacing it, so it can never take away a photo picked out by hand,
+    and the anchor stays where it was so several shift-clicks in a row all
+    measure from the same tile. An unmodified click clears the selection as
+    well as opening the panel, which is what makes that safe to be additive:
+    a range that caught too much is always one plain click from being started
+    over. That click still leaves its own tile as the anchor, so shift-clicking
+    after it reaches back to the photo on screen in the panel — without that,
+    the commonest gesture of all (click one, shift-click another) found no
+    anchor and selected a single tile, which is what a modifier-click does.
+    A second selected photo closes the panel: it speaks for one photograph,
+    and it would be describing the wrong one.
+
+36. **"Delete this whole group" became "Select all" plus "Delete selected".**
+    One button that deletes everything on the page is a wide blast radius
+    reached in a single click, and it could not express "all but these two".
+    Select all reaches the same photos in one click and shows what it caught
+    before anything destructive is offered. Every bulk action still resolves
+    through the same preview/confirm token path (#12), now with an explicit ID
+    list rather than a group query. The cost is that emptying a whole month is
+    now a day at a time.
+
+    The toolbar row — Delete selected, Select all, Deselect all — never shows a
+    disabled button. Each is present exactly when it has something to act on
+    and absent otherwise, and the row is right-aligned so the survivors close
+    the gap. A greyed-out button asks the reader to work out why it is dead;
+    an absent one asks nothing. Select all and Deselect all are two buttons
+    rather than one that renames itself, because a control whose label changes
+    under the cursor has to be re-read before every click.

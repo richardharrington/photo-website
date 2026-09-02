@@ -254,8 +254,8 @@ test.describe('the photo view', () => {
         Number(img.getAttribute('width')) / Number(img.getAttribute('height'));
       return box.left + (box.width - Math.min(box.width, box.height * ratio)) / 2;
     });
-    expect(pictureLeft - right(info)).toBeGreaterThan(4);
-    expect(pictureLeft - right(info)).toBeLessThan(12);
+    expect(pictureLeft - right(info)).toBeGreaterThan(16);
+    expect(pictureLeft - right(info)).toBeLessThan(24);
   });
 
   test('preserves line breaks in a caption without interpreting markup', async ({

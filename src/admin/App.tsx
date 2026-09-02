@@ -12,6 +12,17 @@ import { DetailPanel } from './components/DetailPanel.tsx';
 import { Confirm, UndoBanner } from './components/Confirm.tsx';
 import { TrashView } from './components/TrashView.tsx';
 import { UploadPanel } from './components/Upload.tsx';
+import {
+  allSelected,
+  anchorOn,
+  EMPTY_SELECTION,
+  extendTo,
+  pruneToVisible,
+  selectAll,
+  selectedIds,
+  toggle,
+} from './selection.ts';
+import type { SelectionState } from './selection.ts';
 import type {
   GroupResponse,
   HierarchyResponse,
@@ -21,22 +32,6 @@ import type { SelectionQuery } from '../shared/admin-operations.ts';
 
 function pad2(value: number): string {
   return String(value).padStart(2, '0');
-}
-
-/** The selection a group page's "delete this whole group" action refers to. */
-function groupQuery(route: AdminRoute): SelectionQuery | null {
-  switch (route.kind) {
-    case 'year':
-      return { kind: 'year', year: route.year };
-    case 'month':
-      return { kind: 'month', year: route.year, month: route.month };
-    case 'day':
-      return { kind: 'day', year: route.year, month: route.month, day: route.day };
-    case 'undated':
-      return { kind: 'undated' };
-    default:
-      return null;
-  }
 }
 
 export function App() {
@@ -134,7 +129,7 @@ export function App() {
             reloadKey={reloadKey}
             openPhotoId={openPhoto?.id ?? null}
             onOpenPhoto={setOpenPhoto}
-            onTrashGroup={(query) => void startTrash(query)}
+            onTrash={(query) => void startTrash(query)}
             onReload={reload}
           />
         )}
@@ -181,8 +176,9 @@ interface BrowseViewProps {
   reloadKey: number;
   /** The photo the detail panel is showing, so the grid can mark it. */
   openPhotoId: string | null;
-  onOpenPhoto: (photo: PublicPhoto) => void;
-  onTrashGroup: (query: SelectionQuery) => void;
+  /** Opens the detail panel, or closes it when passed null. */
+  onOpenPhoto: (photo: PublicPhoto | null) => void;
+  onTrash: (query: SelectionQuery) => void;
   onReload: () => void;
 }
 
@@ -217,7 +213,12 @@ function BrowseView(props: BrowseViewProps) {
 
       {!isGrid && route.kind !== 'not-found' ? <IndexView {...props} /> : null}
 
-      {isGrid ? <GridView {...props} group={group} /> : null}
+      {/* Keyed by the route: a day's selection has no meaning on the next day,
+          and remounting is a surer reset than clearing it on every path a
+          navigation can take. */}
+      {isGrid ? (
+        <GridView key={JSON.stringify(route)} {...props} group={group} />
+      ) : null}
     </>
   );
 }
@@ -317,8 +318,10 @@ function GridView({
   group,
   openPhotoId,
   onOpenPhoto,
-  onTrashGroup,
+  onTrash,
 }: BrowseViewProps & { group: ReturnType<typeof useResource<GroupResponse | null>> }) {
+  const [selection, setSelection] = useState<SelectionState>(EMPTY_SELECTION);
+
   if (group.status === 'loading') return <p className="state">Loading…</p>;
   if (group.status === 'not-found') return <p className="state">Not found.</p>;
   if (group.status === 'error') {
@@ -331,7 +334,21 @@ function GridView({
   if (!group.data) return null;
 
   const photos = group.data.photos;
-  const query = groupQuery(route);
+  const ids = photos.map((photo) => photo.id);
+
+  // Everything works from the pruned selection, never the raw state: a delete
+  // takes photos out of the grid without touching it, and a bulk action must
+  // never reach a photo the administrator can no longer see.
+  const visible = pruneToVisible(selection, ids);
+  const chosen = selectedIds(visible);
+  const everythingChosen = allSelected(visible, ids);
+
+  // The detail panel speaks for one photograph. Once a second is selected it
+  // is describing the wrong thing, so selecting closes it.
+  const select = (next: SelectionState) => {
+    setSelection(next);
+    if (next.ids.size > 1) onOpenPhoto(null);
+  };
 
   const title =
     route.kind === 'day'
@@ -342,14 +359,27 @@ function GridView({
     <>
       <div className="admin__toolbar">
         <h1 className="layout__title">{title}</h1>
+        {/* A button that can do nothing is absent rather than disabled, and the
+            row is right-aligned so the rest slide over to fill the gap. Each
+            one is present exactly when there is something for it to act on. */}
         <div className="admin__toolbar-actions">
-          {query ? (
+          {chosen.length > 0 ? (
             <button
               type="button"
-              disabled={photos.length === 0}
-              onClick={() => onTrashGroup(query)}
+              className="detail__delete"
+              onClick={() => onTrash({ kind: 'ids', photoIds: chosen })}
             >
-              Delete this whole group
+              Delete selected
+            </button>
+          ) : null}
+          {photos.length > 0 && !everythingChosen ? (
+            <button type="button" onClick={() => select(selectAll(ids))}>
+              Select all
+            </button>
+          ) : null}
+          {chosen.length > 0 ? (
+            <button type="button" onClick={() => select(EMPTY_SELECTION)}>
+              Deselect all
             </button>
           ) : null}
         </div>
@@ -361,11 +391,21 @@ function GridView({
         <AdminGrid
           photos={photos}
           openPhotoId={openPhotoId}
+          selectedIds={visible.ids}
           onOpen={(photoId) => {
+            // An unmodified click collapses the selection, the way it does in
+            // a file manager: it is the one gesture that always gets out of a
+            // selection gone wrong, and a shift-range that caught too much is
+            // one click from being started over. The tile stays the anchor,
+            // so a shift-click after it reaches back to the photo the panel
+            // is showing.
+            setSelection(anchorOn(photoId));
             const photo = photos.find((candidate) => candidate.id === photoId);
             if (photo) onOpenPhoto(photo);
             else navigate(routes.photo(photoId));
           }}
+          onToggle={(photoId) => select(toggle(visible, photoId))}
+          onExtend={(photoId) => select(extendTo(visible, ids, photoId))}
         />
       )}
     </>

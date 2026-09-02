@@ -292,10 +292,16 @@ The admin extends the display hierarchy and adds curation controls.
 - Every thumbnail in the main admin grid shows the original filename. A
   persistent **Trash** navigation link with an item count leads to recovery and
   permanent-deletion controls.
-- Normal click opens the detail panel. On laptop/desktop, dragging on empty
-  grid area creates a marquee selection; modifier-click adds/removes individual
-  photos from it.
-- Bulk delete is available for selected photos and whole day/month/year groups.
+- Normal click opens the detail panel and clears the selection. Modifier-click
+  (Command, or Control away from a Mac) selects a photo instead, and shift-click
+  extends the selection from the last photo modifier-clicked. There is no
+  marquee dragging.
+- Above the grid, right-aligned, sit **Delete selected**, **Select all**, and
+  **Deselect all**, in that order. None of them is ever shown disabled: each
+  appears only while it has something to act on — Select all whenever a photo
+  is unselected, the other two whenever a photo is selected — and the rest
+  shift right to close the gap.
+- Bulk delete is available for selected photos, and is the only bulk action.
   The confirmation states the selected count and applies to the exact photos
   shown at confirmation time. Bulk metadata edits are out of scope; date, time,
   and caption edits are per-photo only.

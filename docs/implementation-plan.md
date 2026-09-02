@@ -335,7 +335,8 @@ The Worker runs a daily cron task that:
 3. Build admin layout, always-large upload drop target, the browser pipeline
    and upload queue (per-file states: processing, uploading, done, skipped,
    failed+retry), detail panel, and metadata form.
-4. Build desktop marquee/modifier selection and delete confirmations/Undo.
+4. Build desktop modifier/shift selection, Select all, and delete
+   confirmations/Undo. (Marquee dragging was dropped; see decisions.md #35.)
 5. Build Trash list, restore/permanent-delete flows, catalog export, and audit
    visibility where useful.
 
