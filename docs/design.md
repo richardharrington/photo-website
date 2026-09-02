@@ -261,9 +261,10 @@ queue with overall and per-file status rather than an arbitrary batch limit.
   cache images across visits.
 - Selecting a photo opens it full-size over the timeline, which stays where it
   was underneath. The photo view carries no header bar and no position count:
-  the way back at the top left, **Download** and **Photo info** at the bottom
-  left, and the caption when there is one. Capture date and time, original
-  filename, and full-size dimensions live in the Photo info panel. Previous and
+  the way back at the top left, and at the bottom left one right-aligned stack
+  of caption (when there is one), capture date (when the photo has one),
+  **Download**, and **Photo info**. Clock time, original filename, and
+  full-size dimensions live in the Photo info panel. Previous and
   next traverse the whole library in display order, stopping only at its two
   ends, and prefetch their own neighbours. Labels use unambiguous text dates;
   viewer time presentation uses local-style hours/minutes, while admin

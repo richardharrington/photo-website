@@ -76,7 +76,7 @@ test('the photo view puts its controls below the photo, not over it', async ({
 test('closing the photo view returns to its tile at phone width', async ({ page }) => {
   const id = FIXTURE_PHOTO_IDS['snowdrops']!;
   await page.goto(`${BASE}/photo/${id}`);
-  await page.getByRole('link', { name: /Back to March 1, 2026/ }).click();
+  await page.getByRole('link', { name: /Lightbox/ }).click();
 
   await expect(page).toHaveURL(`${BASE}/2026/03/01`);
   const inView = await page.locator(`#photo-${id}`).evaluate((node) => {

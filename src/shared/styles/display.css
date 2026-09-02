@@ -312,6 +312,19 @@
   gap: 0.5rem var(--space);
 }
 
+.lightbox__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.lightbox__date {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.875rem;
+}
+
 .lightbox__actions {
   display: flex;
   gap: 0.5rem;
@@ -376,8 +389,9 @@
   .lightbox__back {
     position: absolute;
     top: var(--space);
-    left: var(--space);
+    left: calc(var(--space) + 5px);
     z-index: 2;
+    font-size: 1.0625rem;
   }
 
   .lightbox__stage {
@@ -385,24 +399,58 @@
     inset: var(--space);
   }
 
+  /*
+   * The stack ends a fixed 20px short of the picture, wherever the picture
+   * happens to start: `--photo-left` is measured and published by the
+   * component, because the margin beside a centred photograph depends on its
+   * aspect ratio and on the window. The left edge is the page margin, so a
+   * picture wide enough to leave no room crowds the caption into wrapping
+   * rather than pushing it off the screen.
+   */
   .lightbox__foot {
     position: absolute;
     left: var(--space);
+    right: calc(100% - var(--photo-left, 100%) + 20px);
     bottom: var(--space);
     z-index: 2;
-    max-width: calc(100% - var(--space) * 2);
   }
 
-  .lightbox__bottom {
+  /* Caption, date, Download, Photo info: one column whose items share a right
+     edge, so the stack ends on a clean line rather than a ragged one. Download
+     is above Photo info so the button the photo's bottom edge is aligned to is
+     the lower of the two. */
+  .lightbox__foot,
+  .lightbox__bottom,
+  .lightbox__actions {
     align-items: flex-end;
+  }
+
+  .lightbox__bottom,
+  .lightbox__actions {
+    flex-direction: column;
     flex-wrap: nowrap;
   }
 
-  /* Download above Photo info, so the button the photo is aligned to is the
-     lower of the two. */
-  .lightbox__actions {
-    flex-direction: column;
-    align-items: flex-start;
+  /* Between the date and Download; the two buttons stay a pair. */
+  .lightbox__bottom {
+    gap: 3.5rem;
+  }
+
+  .lightbox__meta {
+    align-items: flex-end;
+    text-align: right;
+    gap: 1.0rem;
+  }
+
+  .lightbox__caption,
+  .lightbox__date {
+    font-size: 1rem;
+  }
+
+  /* Narrow enough that a long caption becomes a short column beside the
+     photograph rather than a line running away from it. */
+  .lightbox__caption {
+    max-width: 9.5rem;
   }
 
   .lightbox__actions button {
@@ -410,10 +458,20 @@
     padding: 0.5rem 0.875rem;
   }
 
-  /* These two sit over the photograph here, so they need the same surface the
-     buttons beside them have; muted text alone is unreadable against a light
-     picture. */
-  .lightbox__caption,
+  /* Out of flow, so opening it cannot widen the column and shove that shared
+     right edge sideways. Being out of flow, it would otherwise shrink to the
+     width of that narrow column and set the filename one letter per line, so
+     it sizes to its own content instead, up to the 24rem cap above. */
+  .lightbox__info {
+    position: absolute;
+    left: 0;
+    bottom: 100%;
+    margin-bottom: 0.5rem;
+    width: max-content;
+  }
+
+  /* An error can land over the photograph itself, so it keeps the surface the
+     buttons have; the caption and the date are plain text on the background. */
   .lightbox__error {
     background: var(--bg-raised);
     border: 1px solid var(--border);

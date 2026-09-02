@@ -308,15 +308,27 @@ API-contract change beyond one added read route.
     not a `location.hash` — a hash is part of the URL people copy, and this
     is a transient detail of one navigation.
 
-32. **The photo view lost its chrome.** No header bar, no rules, no "3 of 24"
-    (a position in a list of thousands says nothing), and no visible date
-    line. The way back sits top-left, **Download** above **Photo info**
-    bottom-left, and the photo's box runs exactly between them. Captions are
-    the only hand-written content and stay on screen; date, filename, and
-    dimensions moved into an overlay panel one click away. Below the 40rem
-    breakpoint the controls become a slim footer row under the photo instead:
-    a portrait photo spans a phone's full width, so anything floating over it
-    would need a scrim and would cover the photograph.
+32. **The photo view lost its chrome.** No header bar, no rules, and no
+    "3 of 24" — a position in a list of thousands says nothing. The way back
+    sits top-left and reads "← Lightbox", static text: it follows the photo
+    currently shown, so a label naming the day would rewrite itself under the
+    cursor on every arrow press. Bottom-left is one stack — caption, date,
+    **Download**, **Photo info** — and the photo's box runs exactly between
+    that stack's bottom and the back link. The caption and date are plain text
+    sharing the buttons' right edge, not bordered surfaces; a button-looking
+    caption invites a click that does nothing. That shared edge sits a fixed
+    8px short of the picture, which takes a measurement: the picture is
+    centred inside an `img` box stretched to the space available, so its
+    visible left edge follows from the aspect ratio and the window, and no
+    stylesheet can name it. The component publishes it as `--photo-left`; the
+    stack's left edge stays at the page margin, so a picture wide enough to
+    leave no room wraps the caption instead of pushing it off screen. Clock
+    time, filename, and
+    dimensions stay in the panel one click away, which is positioned out of
+    flow so opening it cannot shove that shared edge sideways. Below the 40rem
+    breakpoint the whole lot becomes a slim footer row under the photo
+    instead: a portrait photo spans a phone's full width, so anything floating
+    over it would need a scrim and would cover the photograph.
 
 33. **No virtualization.** Every image in the library is in the DOM, and that
     is deliberate at this scale. Virtualizing would trade exact anchors and

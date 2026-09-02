@@ -12,7 +12,6 @@ import type { ReactNode } from 'react';
 import { navigate } from '../../shared/ui/navigation.ts';
 import { useResource } from '../../shared/ui/useResource.ts';
 import type { Resource } from '../../shared/ui/useResource.ts';
-import { formatCaptureDate } from '../../shared/datetime.ts';
 import { displayApi, routes } from '../api.ts';
 import { Layout } from '../components/Layout.tsx';
 import { ErrorState, Loading, NotFound } from '../components/States.tsx';
@@ -26,20 +25,10 @@ import type {
   TimelineResponse,
 } from '../../shared/display-api.ts';
 
-function pad2(value: number): string {
-  return String(value).padStart(2, '0');
-}
-
 function groupHref(group: GroupRef): string {
   return group.kind === 'undated'
     ? routes.undated()
     : routes.day(group.year, group.month, group.day);
-}
-
-function groupLabel(group: GroupRef): string {
-  return group.kind === 'undated'
-    ? 'Undated'
-    : formatCaptureDate(`${group.year}-${pad2(group.month)}-${pad2(group.day)}`);
 }
 
 interface TimelineIndex {
@@ -161,10 +150,9 @@ export function PhotoPage({ id, timeline }: PhotoPageProps) {
     <Lightbox
       photo={shown}
       orderedIds={orderedIds}
-      backHref={backHref}
       // Derived from the photo currently shown, so it follows the arrows
       // across a day boundary.
-      backLabel={groupLabel(group)}
+      backHref={backHref}
       onClose={close}
     />
   );

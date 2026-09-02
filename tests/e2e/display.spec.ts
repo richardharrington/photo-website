@@ -107,14 +107,10 @@ test.describe('the photo view', () => {
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await expect(
-      page.getByRole('link', { name: /Back to August 15, 2026/ }),
-    ).toBeVisible();
+    await expect(page.locator('.lightbox__date')).toHaveText('August 15, 2026');
 
     await page.getByRole('button', { name: 'Next photo' }).click();
-    await expect(
-      page.getByRole('link', { name: /Back to August 2, 2026/ }),
-    ).toBeVisible();
+    await expect(page.locator('.lightbox__date')).toHaveText('August 2, 2026');
   });
 
   test('disables the arrows only at the two ends of the library', async ({ page }) => {
@@ -182,9 +178,11 @@ test.describe('the photo view', () => {
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await expect(dialog).not.toContainText(/\d+ of \d+/);
-    // The date survives only in the back link, which is where you are going,
-    // and in the info panel. There is no date line of its own.
+    // The day is named, the clock time is not: it belongs to the info panel.
     await expect(dialog).not.toContainText('10:05 AM');
+    // The way back does not name the day either — it would rewrite itself
+    // under the cursor on every arrow press.
+    await expect(page.locator('.lightbox__back')).toHaveText(/^←?\s*Lightbox$/);
     await expect(page.locator('.lightbox__bar')).toHaveCount(0);
     await expect(page.locator('.lightbox__capture')).toHaveCount(0);
   });
@@ -219,6 +217,8 @@ test.describe('the photo view', () => {
 
     const back = (await page.locator('.lightbox__back').boundingBox())!;
     const image = (await page.locator('.lightbox__image').boundingBox())!;
+    const caption = (await page.locator('.lightbox__caption').boundingBox())!;
+    const date = (await page.locator('.lightbox__date').boundingBox())!;
     const download = (await page
       .getByRole('button', { name: 'Download', exact: true })
       .boundingBox())!;
@@ -231,10 +231,31 @@ test.describe('the photo view', () => {
     expect(Math.abs(image.y - back.y)).toBeLessThan(2);
     expect(Math.abs(image.y + image.height - (info.y + info.height))).toBeLessThan(2);
 
-    // Download sits above Photo info, both against the left edge.
+    // Caption, date, Download, Photo info: one stack, in that order.
+    const right = (box: { x: number; width: number }) => box.x + box.width;
+    expect(caption.y + caption.height).toBeLessThanOrEqual(date.y + 1);
+    expect(date.y + date.height).toBeLessThanOrEqual(download.y + 1);
     expect(download.y + download.height).toBeLessThanOrEqual(info.y + 1);
-    expect(Math.abs(download.x - info.x)).toBeLessThan(2);
+
+    // Sharing one right edge is the whole point of the stack.
+    for (const box of [caption, date, download]) {
+      expect(Math.abs(right(box) - right(info))).toBeLessThan(2);
+    }
     expect(download.x).toBeLessThan(image.x + image.width / 2);
+
+    // And that edge sits just short of the picture. `object-fit: contain`
+    // centres the picture inside the img element's box, so the visible left
+    // edge is derived here the same way the component derives it — from the
+    // element's box and its aspect ratio, not from the element's box alone.
+    const pictureLeft = await page.locator('.lightbox__image').evaluate((node) => {
+      const img = node as HTMLImageElement;
+      const box = img.getBoundingClientRect();
+      const ratio =
+        Number(img.getAttribute('width')) / Number(img.getAttribute('height'));
+      return box.left + (box.width - Math.min(box.width, box.height * ratio)) / 2;
+    });
+    expect(pictureLeft - right(info)).toBeGreaterThan(4);
+    expect(pictureLeft - right(info)).toBeLessThan(12);
   });
 
   test('preserves line breaks in a caption without interpreting markup', async ({
