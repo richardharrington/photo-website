@@ -240,11 +240,13 @@ export function TimelinePage({ resource, target }: TimelinePageProps) {
                         className="timeline__anchor"
                       >
                         {/* The year is the enclosing heading; repeating it on
-                            every day would be noise. */}
+                            every day would be noise. Nor is there a count: a
+                            day's photographs are all on screen beneath it, so
+                            the number only clutters the smallest heading of
+                            the three. Months and years still carry theirs. */}
                         <span>
                           {monthName(month.month)} {day.day}
                         </span>
-                        <span className="timeline__count">{photoCount(day.count)}</span>
                       </Link>
                     </h4>
                     <PhotoGrid photos={day.photos} />

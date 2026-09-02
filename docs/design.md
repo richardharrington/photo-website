@@ -245,10 +245,15 @@ queue with overall and per-file status rather than an arbitrary batch limit.
   month headings beneath them, day headings beneath those, and a masonry block
   of photos under each day. There are no index pages and no navigation between
   levels — reaching any photo is a scroll, not four clicks. The current year and
-  month headings pin to the top of the viewport while scrolling.
-- Counts appear beside each year, month, and day heading. Photos appear once,
-  in their own day's block, and are never repeated as representative thumbnails
-  on a heading.
+  month headings pin to the top of the viewport while scrolling; a month slides
+  up behind its year rather than over it.
+- The three levels are told apart by size before they are read — 32px, 20px,
+  14px — and by a rule under the year headings only. A month and a day get
+  none: their own photographs are the boundary.
+- Counts appear beside each year and month heading, but not beside a day: a
+  day's photographs are all on screen beneath it. Photos appear once, in their
+  own day's block, and are never repeated as representative thumbnails on a
+  heading.
 - Individual years, months, days, and photos have stable deep URLs below the
   opaque display base. A year, month, or day URL renders the same page scrolled
   to that section; clicking a heading rewrites the address bar to its URL

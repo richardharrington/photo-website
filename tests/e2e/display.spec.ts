@@ -42,14 +42,50 @@ test.describe('the timeline', () => {
     await expect(page.locator('.photo-grid__item')).toHaveCount(12);
   });
 
-  test('shows counts beside the headings', async ({ page }) => {
+  test('counts the months and the years, but not the days', async ({ page }) => {
     await page.goto(`${BASE}/`);
 
     const august = page.locator('#m-2026-08 .timeline__month-heading');
     await expect(august).toContainText('7 photos');
-    await expect(page.locator('#d-2026-08-15 .timeline__day-heading')).toContainText(
-      '1 photo',
-    );
+    await expect(
+      page.locator('#y-2026 .timeline__year-heading .timeline__count'),
+    ).toHaveCount(1);
+
+    // A day's photographs are all on screen beneath its heading, so the
+    // number would only clutter the smallest heading of the three.
+    await expect(page.locator('#d-2026-08-15 .timeline__count')).toHaveCount(0);
+  });
+
+  test('separates the three heading levels by size, and rules only the year', async ({
+    page,
+  }) => {
+    await page.goto(`${BASE}/`);
+
+    const sizeOf = (selector: string) =>
+      page
+        .locator(selector)
+        .first()
+        .evaluate((node) => {
+          const style = getComputedStyle(node);
+          return {
+            font: parseFloat(style.fontSize),
+            rule: parseFloat(style.borderBottomWidth),
+          };
+        });
+
+    const year = await sizeOf('.timeline__year-heading');
+    const month = await sizeOf('.timeline__month-heading');
+    const day = await sizeOf('.timeline__day-heading');
+
+    // Each level is decisively smaller than the one above, not a shade.
+    expect(year.font).toBeGreaterThan(month.font * 1.4);
+    expect(month.font).toBeGreaterThan(day.font * 1.3);
+
+    // Only the year draws a line; a month and a day are bounded by their own
+    // photographs.
+    expect(year.rule).toBeGreaterThan(1);
+    expect(month.rule).toBe(0);
+    expect(day.rule).toBe(0);
   });
 
   test('lands scrolled to the section a deep URL names', async ({ page }) => {
@@ -96,6 +132,17 @@ test.describe('the timeline', () => {
     const year = page.locator('#y-2025 .timeline__year-heading');
     const top = await year.evaluate((node) => node.getBoundingClientRect().top);
     expect(top).toBeLessThan(4);
+
+    // A month heading slides up behind its year as the month runs out; both
+    // are opaque, so the year has to be the one that stays legible.
+    const layer = (selector: string) =>
+      page
+        .locator(selector)
+        .first()
+        .evaluate((node) => Number(getComputedStyle(node).zIndex));
+    expect(await layer('.timeline__year-heading')).toBeGreaterThan(
+      await layer('.timeline__month-heading'),
+    );
   });
 });
 

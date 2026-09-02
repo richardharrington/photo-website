@@ -82,8 +82,8 @@
    sticky offset, and the scroll-margin that keeps an anchored section from
    landing underneath them. */
 :root {
-  --timeline-year-height: 2.5rem;
-  --timeline-month-height: 2rem;
+  --timeline-year-height: 3rem;
+  --timeline-month-height: 2.25rem;
   --timeline-stack-height: calc(
     var(--timeline-year-height) + var(--timeline-month-height)
   );
@@ -113,26 +113,44 @@
   align-items: center;
 }
 
+/* The three levels are told apart by size before they are read: 32px, 20px,
+   14px, roughly a third smaller each step. Anything closer and a heading has
+   to be read to work out which level it is. Only the year carries a rule —
+   one under the month as well drew two lines across a screen that already
+   had enough of them, and a month is bounded well enough by its own
+   photographs. The rule sits inside the heading's fixed height
+   (`box-sizing: border-box`), so the sticky offsets below stay exact. */
 .timeline__year-heading {
   top: 0;
+  /* Above the month heading, which slides up behind it as its own month runs
+     out — the two are opaque, and the parent heading is the one to keep. */
+  z-index: 2;
   height: var(--timeline-year-height);
-  font-size: 1.5rem;
+  font-size: 2rem;
   font-weight: 600;
-  border-bottom: 1px solid var(--border);
+  letter-spacing: -0.01em;
+  border-bottom: 2px solid var(--border);
 }
 
 .timeline__month-heading {
   top: var(--timeline-year-height);
   height: var(--timeline-month-height);
-  font-size: 1.0625rem;
+  font-size: 1.25rem;
   font-weight: 600;
 }
 
 .timeline__day-heading {
   margin: var(--space) 0 0.5rem;
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   font-weight: 600;
   color: var(--fg-muted);
+}
+
+/* Air under the year's rule before its first month, so the two headings read
+   as one block rather than a pair of rules crowding each other. Only in flow:
+   pinned, the month still meets the year exactly. */
+.timeline__year-heading + .timeline__month {
+  margin-top: 0.75rem;
 }
 
 .timeline__anchor {
