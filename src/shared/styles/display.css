@@ -451,18 +451,18 @@
 
   /* Between the date and Download; the two buttons stay a pair. */
   .lightbox__bottom {
-    gap: 3.5rem;
+    gap: 3.625rem;
   }
 
   .lightbox__meta {
     align-items: flex-end;
     text-align: right;
-    gap: 1rem;
+    gap: 1.125rem;
   }
 
   .lightbox__caption,
   .lightbox__date {
-    font-size: 1rem;
+    font-size: 1.125rem;
   }
 
   /* Narrow enough that a long caption becomes a short column beside the
