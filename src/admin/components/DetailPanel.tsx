@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
-import { validatePhotoEdit } from '../../shared/validation.ts';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { altTextFor, validatePhotoEdit } from '../../shared/validation.ts';
 import { formatCaptureTimeForAdmin } from '../../shared/datetime.ts';
-import { derivativeUrl } from '../../shared/urls.ts';
+import { derivativeSrcSet, derivativeUrl } from '../../shared/urls.ts';
 import { adminApi } from '../api.ts';
 import type { PublicPhoto } from '../../shared/display-api.ts';
 
@@ -29,6 +29,17 @@ export function DetailPanel({ photo, onClose, onSaved, onTrash }: DetailPanelPro
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const panelRef = useRef<HTMLElement>(null);
+  const previewRef = useRef<HTMLButtonElement>(null);
+  const closeZoomRef = useRef<HTMLButtonElement>(null);
+
+  /**
+   * Which photo is being shown enlarged, rather than whether one is.
+   *
+   * Holding the ID means a panel that switches photos underneath the overlay
+   * cannot leave it showing the previous one.
+   */
+  const [zoomedId, setZoomedId] = useState<string | null>(null);
+  const zoomed = zoomedId === photo.id;
 
   // Switching photos must reset the form, not carry the previous edit over.
   //
@@ -46,13 +57,34 @@ export function DetailPanel({ photo, onClose, onSaved, onTrash }: DetailPanelPro
     setSaved(false);
   }, [photo.id, photo.captureDate, photo.captureTime, photo.caption]);
 
+  // Escape closes the enlarged photo first, and the panel only once there is
+  // no photo over it: one key, the topmost thing first.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onClose();
+      if (event.key !== 'Escape') return;
+      if (zoomed) setZoomedId(null);
+      else onClose();
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, [onClose, zoomed]);
+
+  // The page behind must not scroll under the overlay.
+  useEffect(() => {
+    if (!zoomed) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [zoomed]);
+
+  // Focus follows the overlay in and back out again, so a keyboard user is
+  // never left on a control that is now behind a scrim.
+  useLayoutEffect(() => {
+    if (zoomed) closeZoomRef.current?.focus();
+    else previewRef.current?.focus();
+  }, [zoomed]);
 
   /**
    * Click anywhere outside to close.
@@ -68,6 +100,9 @@ export function DetailPanel({ photo, onClose, onSaved, onTrash }: DetailPanelPro
    */
   useEffect(() => {
     function onPointerDown(event: PointerEvent) {
+      // The enlarged photo is over everything; outside it is its own business,
+      // not a click outside the panel.
+      if (zoomed) return;
       const target = event.target as Element | null;
       if (!target) return;
       if (panelRef.current?.contains(target)) return;
@@ -76,7 +111,7 @@ export function DetailPanel({ photo, onClose, onSaved, onTrash }: DetailPanelPro
     }
     document.addEventListener('pointerdown', onPointerDown);
     return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [onClose]);
+  }, [onClose, zoomed]);
 
   async function save() {
     // The same validator the API runs. Checking here too means an obvious
@@ -152,12 +187,67 @@ export function DetailPanel({ photo, onClose, onSaved, onTrash }: DetailPanelPro
         </div>
       </div>
 
-      <img
-        className="detail__preview"
-        src={derivativeUrl(__WORKER_BASE_URL__, photo.id, 'display-1280')}
-        alt=""
-        decoding="async"
-      />
+      {/* Neither a thumbnail nor a preview this size always settles whether a
+          photograph is worth keeping, so the preview opens a bigger one. */}
+      <button
+        type="button"
+        ref={previewRef}
+        className="detail__preview-button"
+        onClick={() => setZoomedId(photo.id)}
+        aria-label="Show this photo larger"
+      >
+        <img
+          className="detail__preview"
+          src={derivativeUrl(__WORKER_BASE_URL__, photo.id, 'display-1280')}
+          alt=""
+          decoding="async"
+        />
+      </button>
+
+      {zoomed ? (
+        <div
+          className="zoom"
+          // Only a click on the backdrop itself: one that lands on the picture
+          // or the [x] is not a click outside.
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setZoomedId(null);
+          }}
+        >
+          <div
+            className="zoom__figure"
+            role="dialog"
+            aria-modal="true"
+            aria-label={photo.originalFilename}
+          >
+            <img
+              className="zoom__image"
+              src={derivativeUrl(__WORKER_BASE_URL__, photo.id, 'display-1280')}
+              srcSet={derivativeSrcSet(__WORKER_BASE_URL__, photo.id, [
+                {
+                  rendition: 'display-1280',
+                  width: photo.derivatives['display-1280'].width,
+                },
+                {
+                  rendition: 'display-2560',
+                  width: photo.derivatives['display-2560'].width,
+                },
+              ])}
+              sizes="92vw"
+              alt={altTextFor(photo)}
+              decoding="async"
+            />
+            <button
+              type="button"
+              ref={closeZoomRef}
+              className="zoom__close"
+              onClick={() => setZoomedId(null)}
+              aria-label="Close the enlarged photo"
+            >
+              [x]
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       <form
         className="detail__form"

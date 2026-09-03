@@ -376,3 +376,18 @@ API-contract change beyond one added read route.
     an absent one asks nothing. Select all and Deselect all are two buttons
     rather than one that renames itself, because a control whose label changes
     under the cursor has to be re-read before every click.
+
+37. **The enlarged photo is a layer, not a page.** Deciding whether to delete a
+    photograph often needs more than a thumbnail and a 24rem preview, but the
+    decision is made against the panel's own date, caption, and Delete button —
+    so the bigger picture opens over the admin rather than navigating away
+    from it, and closes back onto exactly the state it was opened from. It
+    renders inside the panel, which already holds a stacking context, so one
+    `z-index: 1` puts it over the panel and the grid alike with no competing
+    numbers elsewhere in the stylesheet. The box around the picture shrinks to
+    the picture, which is what lets the [x] hang on the photograph's own corner
+    instead of a letterboxed box's, and makes every pixel that is not the
+    photograph part of the backdrop that closes it. Escape closes the topmost
+    thing only: the enlarged photo first, the panel once there is nothing over
+    it, and while it is open a click outside is its business rather than a
+    click outside the panel.

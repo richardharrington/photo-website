@@ -147,6 +147,80 @@ test.describe('the detail panel', () => {
   });
 });
 
+test.describe('the enlarged photo', () => {
+  /** Open a photo's detail panel, then its preview. */
+  async function enlarge(page: Page) {
+    await page.goto(`${BASE}/2026/08/02`);
+    await page.locator('.admin-grid__tile').first().click();
+    await page.getByRole('button', { name: 'Show this photo larger' }).click();
+    await expect(page.locator('.zoom__image')).toBeVisible();
+  }
+
+  test('covers the window, dimming even the panel it was opened from', async ({
+    page,
+  }) => {
+    await enlarge(page);
+    const viewport = page.viewportSize()!;
+    const image = (await page.locator('.zoom__image').boundingBox())!;
+
+    // Most of the screen, but with a margin of page left showing all round.
+    expect(
+      Math.max(image.width / viewport.width, image.height / viewport.height),
+    ).toBeGreaterThan(0.8);
+    expect(image.width).toBeLessThan(viewport.width);
+    expect(image.height).toBeLessThan(viewport.height);
+
+    // The detail panel is fixed to the right edge; the backdrop is over it too.
+    const overPanel = await page.evaluate(
+      () =>
+        document.elementFromPoint(window.innerWidth - 40, window.innerHeight / 2)
+          ?.className,
+    );
+    expect(overPanel).toContain('zoom');
+  });
+
+  test('hangs the [x] on the corner of the photograph itself', async ({ page }) => {
+    await enlarge(page);
+    const image = (await page.locator('.zoom__image').boundingBox())!;
+    const close = (await page.locator('.zoom__close').boundingBox())!;
+
+    // Inside the picture's own top-right corner, not the window's: a letterboxed
+    // box stretched around the photo would put it somewhere out in the dark.
+    expect(close.x).toBeGreaterThan(image.x + image.width / 2);
+    expect(close.x + close.width).toBeLessThanOrEqual(image.x + image.width + 1);
+    expect(close.y).toBeGreaterThanOrEqual(image.y - 1);
+    expect(close.y).toBeLessThan(image.y + image.height / 2);
+  });
+
+  test('the [x] closes it and leaves the panel open', async ({ page }) => {
+    await enlarge(page);
+    await page.getByRole('button', { name: 'Close the enlarged photo' }).click();
+
+    await expect(page.locator('.zoom')).toHaveCount(0);
+    await expect(page.getByRole('complementary')).toBeVisible();
+  });
+
+  test('a click outside closes it and leaves the panel open', async ({ page }) => {
+    await enlarge(page);
+    // The corner of the backdrop, well clear of the photograph.
+    await page.locator('.zoom').click({ position: { x: 4, y: 4 } });
+
+    await expect(page.locator('.zoom')).toHaveCount(0);
+    await expect(page.getByRole('complementary')).toBeVisible();
+  });
+
+  test('Escape closes it, and only then the panel', async ({ page }) => {
+    await enlarge(page);
+
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.zoom')).toHaveCount(0);
+    await expect(page.getByRole('complementary')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+  });
+});
+
 test.describe('metadata editing', () => {
   test('saves a caption and a corrected date', async ({ page }) => {
     await page.goto(`${BASE}/2026/03/01`);

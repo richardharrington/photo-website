@@ -2,8 +2,8 @@
  * Admin styles.
  *
  * Laptop-oriented: the grid and the side detail panel assume a pointer and a
- * wide viewport. Mobile viewing is responsive. There is no bulk selection in
- * the grid; see src/admin/selection.ts.
+ * wide viewport, and selecting takes a modifier key. Mobile viewing is
+ * responsive; see src/admin/selection.ts.
  */
 
 .admin {
@@ -306,6 +306,18 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+/* The preview is a button: neither a thumbnail nor a 24rem preview always
+   settles whether a photograph is worth deleting. */
+.detail__preview-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  cursor: zoom-in;
+}
+
 .detail__preview {
   width: 100%;
   /* Capped so the metadata form stays close to the top of the panel. A
@@ -392,6 +404,47 @@ button:disabled {
 .detail__delete {
   border-color: #b91c1c;
   color: #b91c1c;
+}
+
+/* Enlarged photo --------------------------------------------------------- */
+
+/* Rendered inside the panel, so it is inside the panel's stacking context and
+   covers the panel and the grid alike without competing z-indexes. */
+.zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 72%);
+}
+
+/* Shrink-wraps the picture, so the [x] hangs on the corner of the photograph
+   itself rather than the corner of a box stretched around it — and so every
+   pixel that is not the photograph is backdrop, and closes on a click. */
+.zoom__figure {
+  position: relative;
+  line-height: 0;
+}
+
+/* As large as the window allows, less a margin of dimmed page all round, so
+   it reads as a photograph laid over the site rather than a new screen. */
+.zoom__image {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 92vw;
+  max-height: 92vh;
+  border-radius: 2px;
+}
+
+.zoom__close {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  line-height: 1;
+  padding: 0.25rem 0.5rem;
 }
 
 /* Confirmation and undo -------------------------------------------------- */

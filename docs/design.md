@@ -294,6 +294,11 @@ The admin extends the display hierarchy and adds curation controls.
 - Clicking a thumbnail opens a detail panel with editable date, time, caption,
   original filename/information, an original-size download action, and a delete
   action.
+- The panel's preview opens the photograph again at nearly full screen, over a
+  dimmed page, with an **[x]** on the picture's own top-right corner. A click
+  outside it, the [x], or Escape closes it and leaves the panel open. Neither a
+  thumbnail nor a panel-width preview always settles whether a photograph is
+  worth keeping, and that decision is what the panel is for.
 - Every thumbnail in the main admin grid shows the original filename. A
   persistent **Trash** navigation link with an item count leads to recovery and
   permanent-deletion controls.
