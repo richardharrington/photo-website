@@ -208,7 +208,30 @@ function scratch() {
     trashedFile: `IMG_${day.replaceAll('-', '')}_211900.HEIC`,
     /** How that day reads in the interface, e.g. "July 4, 2026". */
     dayLabel: `July ${Number(date)}, ${year}`,
+    /** Its earliest photo, and so the first tile in the grid. */
+    firstFile: `IMG_${day.replaceAll('-', '')}_210311.HEIC`,
   };
+}
+
+/** Delete the first photo of the scratch day, through the detail panel. */
+async function deleteFirstPhoto(page: Page): Promise<void> {
+  await page.goto(scratch().path);
+  await page.locator('.admin-grid__tile').first().click();
+  await page.getByRole('complementary').getByRole('button', { name: 'Delete' }).click();
+  await page
+    .getByRole('alertdialog')
+    .getByRole('button', { name: 'Delete', exact: true })
+    .click();
+  await expect(page.getByRole('status')).toContainText('1 photo deleted.');
+}
+
+/** Put a photo back from the trash, for tests whose undo offer has gone. */
+async function restoreFromTrash(page: Page, filename: string): Promise<void> {
+  await page.goto(`${BASE}/trash`);
+  const item = page.locator('.trash__item').filter({ hasText: filename });
+  await item.locator('.trash__tile').click();
+  await page.getByRole('button', { name: 'Restore' }).click();
+  await expect(item).toHaveCount(0);
 }
 
 test.describe('delete, confirm, and undo', () => {
@@ -301,6 +324,31 @@ test.describe('delete, confirm, and undo', () => {
 
     await page.goto(scratch().path);
     await expect(page.locator('.admin-grid__item')).toHaveCount(3);
+  });
+
+  test('the undo offer does not survive a navigation', async ({ page }) => {
+    const { firstFile } = scratch();
+    await deleteFirstPhoto(page);
+
+    // Client-side navigation, so the app itself stays mounted: the offer names
+    // photos that were on the page it was raised from.
+    await page.getByRole('link', { name: /^Trash/ }).click();
+    await expect(page.getByRole('status')).toHaveCount(0);
+
+    await restoreFromTrash(page, firstFile);
+  });
+
+  test('the undo offer withdraws itself after five seconds', async ({ page }) => {
+    const { firstFile } = scratch();
+    await deleteFirstPhoto(page);
+
+    const banner = page.getByRole('status');
+    await expect(banner).toBeVisible();
+    // Still there a moment later, then gone of its own accord.
+    await expect(banner).toBeVisible({ timeout: 2_000 });
+    await expect(banner).toHaveCount(0, { timeout: 8_000 });
+
+    await restoreFromTrash(page, firstFile);
   });
 
   test('Escape dismisses the confirmation', async ({ page }) => {

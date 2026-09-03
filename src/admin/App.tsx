@@ -41,8 +41,23 @@ export function App() {
   const [reloadKey, setReloadKey] = useState(0);
   const [openPhoto, setOpenPhoto] = useState<PublicPhoto | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
-  const [undo, setUndo] = useState<{ ids: string[]; message: string } | null>(null);
+  const [undo, setUndo] = useState<{
+    ids: string[];
+    message: string;
+    /** The view it was raised in; see below. */
+    path: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // The offer belongs to the page it was raised on — it names a count of
+  // photos that were on that page — so any navigation retires it. Adjusting
+  // state during render rather than in an effect is React's own answer to
+  // "this state belonged to a view we have left", and unlike merely hiding it
+  // the offer is gone for good rather than waiting to reappear on the way
+  // back.
+  if (undo && undo.path !== path) setUndo(null);
+
+  const dismissUndo = useCallback(() => setUndo(null), []);
 
   const reload = useCallback(() => {
     setOpenPhoto(null);
@@ -71,6 +86,7 @@ export function App() {
       setUndo({
         ids: result.trashed,
         message: `${result.count} photo${result.count === 1 ? '' : 's'} deleted.`,
+        path,
       });
       reload();
     } catch (cause) {
@@ -160,10 +176,13 @@ export function App() {
       ) : null}
 
       {undo ? (
+        // Keyed by what it would put back, so a second deletion raises a new
+        // banner with a fresh clock rather than inheriting the old one's.
         <UndoBanner
+          key={undo.ids.join(',')}
           message={undo.message}
           onUndo={() => void performUndo()}
-          onDismiss={() => setUndo(null)}
+          onDismiss={dismissUndo}
         />
       ) : null}
     </div>

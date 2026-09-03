@@ -90,16 +90,24 @@ interface UndoProps {
   onDismiss: () => void;
 }
 
+/** How long the offer stands before it withdraws itself. */
+const UNDO_VISIBLE_MS = 5_000;
+
 /**
  * The brief Undo shown after a successful trash operation.
  *
  * Restore is not itself gated behind a confirmation: it only ever puts photos
  * back, and making the safe direction slower than the destructive one would be
  * the wrong way round.
+ *
+ * Brief means brief: five seconds from the moment it appears, whatever else
+ * re-renders in between. That is why `onDismiss` has to be stable — a fresh
+ * closure on every parent render would restart this clock each time, and the
+ * banner would outstay its welcome by however long the page stayed busy.
  */
 export function UndoBanner({ message, onUndo, onDismiss }: UndoProps) {
   useEffect(() => {
-    const timer = setTimeout(onDismiss, 12_000);
+    const timer = setTimeout(onDismiss, UNDO_VISIBLE_MS);
     return () => clearTimeout(timer);
   }, [onDismiss]);
 
