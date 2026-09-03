@@ -163,6 +163,25 @@ test.describe('the photo view', () => {
     await expect(page.locator('.lightbox__date')).toHaveText('August 2, 2026');
   });
 
+  test('closes the info panel on the way to the next photo', async ({ page }) => {
+    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['market']}`);
+    const info = page.locator('.lightbox__info');
+
+    await page.getByRole('button', { name: 'Photo info' }).click();
+    await expect(info).toBeVisible();
+
+    // It names one photograph's file and dimensions; it must not follow the
+    // arrows onto another.
+    await page.getByRole('button', { name: 'Next photo' }).click();
+    await expect(info).toHaveCount(0);
+
+    // Same for the keyboard.
+    await page.getByRole('button', { name: 'Photo info' }).click();
+    await expect(info).toBeVisible();
+    await page.keyboard.press('ArrowRight');
+    await expect(info).toHaveCount(0);
+  });
+
   test('disables the arrows only at the two ends of the library', async ({ page }) => {
     const previous = page.getByRole('button', { name: 'Previous photo' });
     const next = page.getByRole('button', { name: 'Next photo' });

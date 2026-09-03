@@ -70,7 +70,16 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
   const dialogRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
-  const [showInfo, setShowInfo] = useState(false);
+  /**
+   * Which photo the info panel is open for, rather than whether it is open.
+   *
+   * The panel names one photograph's filename, clock time, and dimensions, so
+   * arrowing to the next one has to close it. Holding the ID closes it as a
+   * matter of arithmetic — no effect resetting a boolean after the fact, and
+   * so no frame in which the panel describes the wrong photograph.
+   */
+  const [infoFor, setInfoFor] = useState<string | null>(null);
+  const showInfo = infoFor === photo.id;
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
 
@@ -333,7 +342,7 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
             </button>
             <button
               type="button"
-              onClick={() => setShowInfo((shown) => !shown)}
+              onClick={() => setInfoFor(showInfo ? null : photo.id)}
               aria-expanded={showInfo}
               aria-controls="photo-information"
             >
