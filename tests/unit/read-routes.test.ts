@@ -5,12 +5,12 @@ import { fixtureCatalog, FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
 /**
  * The projections shared by the display and admin APIs.
  *
- * These shipped in `display.ts` alone, so the admin app — which browses
- * through the very same routes — 404ed on its first request in production
- * while working locally, because the fixture server falls through to its
- * display handler for unrecognised admin GETs. The contract worth pinning is
- * the two-valued return: `null` means "not a read route, keep looking", and a
- * 404 response means "a read route, but no such day or photo".
+ * These shipped in `display.ts` alone, so the admin app — which reads through
+ * the very same routes — 404ed on its first request in production while
+ * working locally, because the fixture server falls through to its display
+ * handler for unrecognised admin GETs. The contract worth pinning is the
+ * two-valued return: `null` means "not a read route, keep looking", and a 404
+ * response means "a read route, but no such photo".
  */
 
 const catalog = fixtureCatalog();
@@ -20,13 +20,6 @@ describe('readRoute', () => {
     for (const path of ['/trash', '/export', '/begin-batch', '/', '/photos']) {
       expect(readRoute(catalog, path)).toBeNull();
     }
-  });
-
-  it('serves the hierarchy', async () => {
-    const response = readRoute(catalog, '/hierarchy');
-    expect(response?.status).toBe(200);
-    const body = (await response!.json()) as { years: unknown[] };
-    expect(body.years.length).toBeGreaterThan(0);
   });
 
   it('serves the whole timeline', async () => {
@@ -39,18 +32,6 @@ describe('readRoute', () => {
     expect(body.years.length).toBeGreaterThan(0);
     expect(body.years[0]!.months[0]!.days[0]!.photos.length).toBeGreaterThan(0);
     expect(body.undated.photos.length).toBeGreaterThan(0);
-  });
-
-  it('serves the undated group', async () => {
-    const response = readRoute(catalog, '/undated');
-    expect(response?.status).toBe(200);
-    const body = (await response!.json()) as { photos: unknown[] };
-    expect(body.photos.length).toBeGreaterThan(0);
-  });
-
-  it('serves a day that has photos, and 404s one that does not', () => {
-    expect(readRoute(catalog, '/day/2026/08/02')?.status).toBe(200);
-    expect(readRoute(catalog, '/day/2019/01/01')?.status).toBe(404);
   });
 
   it('serves a live photo, and 404s an unknown one', () => {
@@ -66,5 +47,17 @@ describe('readRoute', () => {
 
   it('does not treat a malformed photo id as a read route', () => {
     expect(readRoute(catalog, '/photo/not-a-valid-id')).toBeNull();
+  });
+
+  /**
+   * The level-by-level projections are gone: both apps are one scrolling
+   * page, so nothing asks for a hierarchy, a day, or the undated group any
+   * more. They must be `null` — not a read route at all — so a stale client
+   * asking for one gets the same plain 404 as any other unknown path.
+   */
+  it('no longer recognises the hierarchy, day, or undated routes', () => {
+    for (const path of ['/hierarchy', '/undated', '/day/2026/08/02']) {
+      expect(readRoute(catalog, path), path).toBeNull();
+    }
   });
 });

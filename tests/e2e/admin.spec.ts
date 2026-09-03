@@ -1,9 +1,14 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { SCRATCH_DAYS } from '../../fixtures/catalog.ts';
+import { SCRATCH_DAYS, FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
 
 /**
  * The admin app, against the local fixture server.
+ *
+ * The admin is the viewer plus curation, so what is worth testing here is the
+ * curation: the selection, the edit form in the photo view, delete and undo,
+ * and the trash. That the timeline and the photo view work at all is
+ * display.spec.ts's job, and they are the same components.
  *
  * The fixture catalog is shared process state, so tests that mutate it undo
  * their change before finishing rather than relying on ordering.
@@ -21,39 +26,106 @@ const BASE = 'http://localhost:5174/dev-admin-path';
  */
 test.describe.configure({ mode: 'serial' });
 
-/** Trash a photo, then put it back, so the fixture is left as it was found. */
-async function withTrashed(
-  page: Page,
-  run: () => Promise<void>,
-  restore: () => Promise<void>,
-): Promise<void> {
-  try {
-    await run();
-  } finally {
-    await restore();
-  }
+/**
+ * Everything destructive happens on this project's own scratch day — three
+ * photos plus one in the trash, and nothing else in the fixture counts
+ * anything in July.
+ *
+ * One day per project, because the fixture store is a single process shared
+ * by every Playwright worker: two projects running the same destructive test
+ * at the same moment would race on the same photos even though each puts
+ * everything back. See fixtures/catalog.ts.
+ */
+function scratch() {
+  const project = test.info().project.name;
+  const index = project === 'webkit' ? 1 : 0;
+  const day = SCRATCH_DAYS[index]!;
+  const [year, month, date] = day.split('-');
+  return {
+    day,
+    /** The URL of the day's section of the one page. */
+    path: `${BASE}/${year}/${month}/${date}`,
+    anchor: `#d-${day}`,
+    /** The trashed photo on that day, which only this project restores. */
+    trashedFile: `IMG_${day.replaceAll('-', '')}_211900.HEIC`,
+    /** How that day reads in the interface, e.g. "July 4". */
+    dayHeading: `July ${Number(date)}`,
+    /** Its three live photos, earliest first, as the grid orders them. */
+    files: ['210311', '210745', '211402'].map(
+      (time) => `IMG_${day.replaceAll('-', '')}_${time}.HEIC`,
+    ),
+    ids: ['a', 'b', 'c'].map(
+      (letter) => FIXTURE_PHOTO_IDS[`scratch-${index}-${letter}`]!,
+    ),
+  };
 }
 
-test.describe('admin chrome', () => {
-  test('shows the upload target, trash count, and export link', async ({ page }) => {
+const selected = (page: Page) => page.locator('.photo-grid__link[data-selected]');
+const tiles = (page: Page, anchor: string) =>
+  page.locator(`${anchor} .photo-grid__link`);
+
+/** Confirm the dialog that is up, whatever its button is called. */
+async function confirmDelete(page: Page, label = 'Delete') {
+  await page
+    .getByRole('alertdialog')
+    .getByRole('button', { name: label, exact: true })
+    .click();
+}
+
+/** Put a photo back from the trash, for tests whose undo offer has gone. */
+async function restoreFromTrash(page: Page, filename: string): Promise<void> {
+  await page.goto(`${BASE}/trash`);
+  const item = page.locator('.photo-grid__item').filter({ hasText: filename });
+  await item.locator('.photo-grid__link').click({ modifiers: ['ControlOrMeta'] });
+  await page.getByRole('button', { name: 'Restore' }).click();
+  await expect(item).toHaveCount(0);
+}
+
+test.describe('the admin timeline', () => {
+  test('is the viewer, with an upload target, filenames, and Trash', async ({
+    page,
+  }) => {
     await page.goto(`${BASE}/`);
 
+    // The same one page, headings and all.
+    await expect(page.locator('.timeline__year-heading')).toHaveText([
+      /2026/,
+      /2025/,
+      /Undated/,
+    ]);
+    await expect(page.locator('.photo-grid__item')).toHaveCount(18);
+
+    // Above it, the upload target; in the header, what the viewer never has.
     await expect(page.getByRole('button', { name: /Add photos/ })).toBeVisible();
     await expect(page.getByRole('link', { name: /^Trash \(\d+\)$/ })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Export catalog' })).toBeVisible();
+
+    // Every thumbnail says which file it is; the viewer's never do.
+    await expect(page.getByText('IMG_20260802_081502.HEIC')).toBeVisible();
+    await expect(page.locator('.photo-grid__filename')).toHaveCount(18);
   });
 
-  test('keeps the drop target large and reachable on a populated library', async ({
-    page,
-  }) => {
+  test('keeps the drop target large on a populated library', async ({ page }) => {
     // design.md: prominent when the library is empty, and still large and easy
     // to target thereafter.
-    await page.goto(`${BASE}/2026/08/02`);
+    await page.goto(`${BASE}/`);
     const target = page.getByRole('button', { name: /Add photos/ });
 
     await expect(target).toBeVisible();
     const box = await target.boundingBox();
     expect(box?.height ?? 0).toBeGreaterThanOrEqual(100);
+  });
+
+  test('lands scrolled to the section a deep URL names', async ({ page }) => {
+    await page.goto(`${BASE}/2026/03/01`);
+
+    const onScreen = await page.locator('#d-2026-03-01').evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      return box.top >= 0 && box.top < window.innerHeight;
+    });
+    expect(onScreen).toBe(true);
+    // The same page, not a filtered one.
+    await expect(page.locator('#d-2026-08-02')).toHaveCount(1);
   });
 
   test('serves no admin path or admin code from the display build', async ({
@@ -66,574 +138,471 @@ test.describe('admin chrome', () => {
   });
 });
 
-test.describe('browsing and filenames', () => {
-  test('shows the original filename on every thumbnail', async ({ page }) => {
+test.describe('selecting', () => {
+  test('modifier-click selects without opening the photo', async ({ page }) => {
     await page.goto(`${BASE}/2026/08/02`);
+    const grid = tiles(page, '#d-2026-08-02');
 
-    await expect(page.locator('.admin-grid__item')).toHaveCount(6);
-    // The viewer deliberately does not show these; the admin always does.
-    await expect(page.getByText('IMG_20260802_081502.HEIC')).toBeVisible();
-    await expect(page.getByText('scan-0042.png')).toBeVisible();
-  });
-});
+    await grid.nth(2).click({ modifiers: ['ControlOrMeta'] });
+    await expect(selected(page)).toHaveCount(1);
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page).toHaveURL(`${BASE}/2026/08/02`);
 
-test.describe('the detail panel', () => {
-  test('a click opens the panel and marks that thumbnail', async ({ page }) => {
-    // An unmodified click; the selection gestures are covered further down.
-    await page.goto(`${BASE}/2026/08/02`);
-    const tiles = page.locator('.admin-grid__tile');
-    await expect(tiles).toHaveCount(6);
-
-    await tiles.nth(0).click();
-
-    await expect(page.getByRole('complementary')).toBeVisible();
-    await expect(page.locator('.admin-grid__tile--open')).toHaveCount(1);
-    await expect(tiles.nth(0)).toHaveClass(/admin-grid__tile--open/);
+    // And clicking it again takes it back out.
+    await grid.nth(2).click({ modifiers: ['ControlOrMeta'] });
+    await expect(selected(page)).toHaveCount(0);
   });
 
-  test('offers Download and Delete without scrolling', async ({ page }) => {
-    // The point of moving them above the form: both are reachable on arrival.
-    await page.goto(`${BASE}/2026/08/02`);
-    await page.locator('.admin-grid__tile').first().click();
+  test('shift-click extends across a day boundary', async ({ page }) => {
+    // One selection covers the library, not one day: the range runs from the
+    // last photo of August 15th into August 2nd.
+    await page.goto(`${BASE}/`);
+    await tiles(page, '#d-2026-08-15')
+      .first()
+      .click({ modifiers: ['ControlOrMeta'] });
+    await tiles(page, '#d-2026-08-02')
+      .nth(1)
+      .click({ modifiers: ['Shift'] });
 
-    const panel = page.getByRole('complementary');
-    await expect(panel.getByRole('button', { name: 'Download' })).toBeInViewport();
-    await expect(panel.getByRole('button', { name: 'Delete' })).toBeInViewport();
+    await expect(selected(page)).toHaveCount(3);
+    await expect(
+      page.locator('#d-2026-08-15 .photo-grid__link[data-selected]'),
+    ).toHaveCount(1);
   });
 
-  test('[x] closes it', async ({ page }) => {
+  test('the sticky bar appears with the count and goes at zero', async ({ page }) => {
     await page.goto(`${BASE}/2026/08/02`);
-    await page.locator('.admin-grid__tile').first().click();
-    await expect(page.getByRole('complementary')).toBeVisible();
+    const bar = page.getByRole('toolbar', { name: 'Selection' });
+    await expect(bar).toHaveCount(0);
 
-    await page.getByRole('button', { name: 'Close details' }).click();
+    const grid = tiles(page, '#d-2026-08-02');
+    await grid.nth(0).click({ modifiers: ['ControlOrMeta'] });
+    await expect(bar).toContainText('1 selected');
+    await grid.nth(1).click({ modifiers: ['ControlOrMeta'] });
+    await expect(bar).toContainText('2 selected');
 
-    await expect(page.getByRole('complementary')).toHaveCount(0);
-    await expect(page.locator('.admin-grid__tile--open')).toHaveCount(0);
+    // It sits above the pinned headings rather than over them.
+    await page.locator('#d-2026-08-02 .timeline__anchor').click();
+    const barBox = (await bar.boundingBox())!;
+    const yearBox = (await page
+      .locator('#y-2026 .timeline__year-heading')
+      .boundingBox())!;
+    expect(yearBox.y).toBeGreaterThanOrEqual(barBox.y + barBox.height - 1);
+
+    await bar.getByRole('button', { name: 'Deselect all' }).click();
+    await expect(bar).toHaveCount(0);
+    await expect(selected(page)).toHaveCount(0);
   });
 
-  test('clicking outside closes it', async ({ page }) => {
+  test('a plain click clears the selection and opens the photo', async ({ page }) => {
     await page.goto(`${BASE}/2026/08/02`);
-    await page.locator('.admin-grid__tile').first().click();
-    await expect(page.getByRole('complementary')).toBeVisible();
+    const grid = tiles(page, '#d-2026-08-02');
+    await grid.nth(3).click({ modifiers: ['ControlOrMeta'] });
+    await expect(selected(page)).toHaveCount(1);
 
-    await page.locator('.layout__title').click();
+    // The way out of a selection that caught the wrong photos.
+    await grid.nth(0).click();
 
-    await expect(page.getByRole('complementary')).toHaveCount(0);
-  });
-
-  test('clicking another thumbnail switches rather than closing', async ({ page }) => {
-    await page.goto(`${BASE}/2026/08/02`);
-    const tiles = page.locator('.admin-grid__tile');
-    await tiles.nth(0).click();
-    const first = await page.locator('.detail__title').textContent();
-
-    await tiles.nth(1).click();
-
-    await expect(page.getByRole('complementary')).toBeVisible();
-    await expect(page.locator('.detail__title')).not.toHaveText(first!);
-    await expect(page.locator('.admin-grid__tile--open')).toHaveCount(1);
-    await expect(tiles.nth(1)).toHaveClass(/admin-grid__tile--open/);
-  });
-
-  test('Escape closes it', async ({ page }) => {
-    await page.goto(`${BASE}/2026/08/02`);
-    await page.locator('.admin-grid__tile').first().click();
-    await expect(page.getByRole('complementary')).toBeVisible();
-
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page).toHaveURL(`${BASE}/photo/${FIXTURE_PHOTO_IDS['beach-early']}`);
     await page.keyboard.press('Escape');
-
-    await expect(page.getByRole('complementary')).toHaveCount(0);
+    await expect(selected(page)).toHaveCount(0);
   });
 });
 
-test.describe('the enlarged photo', () => {
-  /** Open a photo's detail panel, then its preview. */
-  async function enlarge(page: Page) {
-    await page.goto(`${BASE}/2026/08/02`);
-    await page.locator('.admin-grid__tile').first().click();
-    await page.getByRole('button', { name: 'Show this photo larger' }).click();
-    await expect(page.locator('.zoom__image')).toBeVisible();
-  }
+test.describe("a day heading's Select all", () => {
+  const selectAll = (page: Page, anchor: string) =>
+    page.locator(`${anchor} .timeline__select-all`);
 
-  test('covers the window, dimming even the panel it was opened from', async ({
+  test('takes that day and only that day, and adds to what is selected', async ({
     page,
   }) => {
-    await enlarge(page);
-    const viewport = page.viewportSize()!;
-    const image = (await page.locator('.zoom__image').boundingBox())!;
+    await page.goto(`${BASE}/`);
+    // Something selected elsewhere first, which Select all must not replace.
+    await tiles(page, '#d-2026-08-15')
+      .first()
+      .click({ modifiers: ['ControlOrMeta'] });
 
-    // Most of the screen, but with a margin of page left showing all round.
-    expect(
-      Math.max(image.width / viewport.width, image.height / viewport.height),
-    ).toBeGreaterThan(0.8);
-    expect(image.width).toBeLessThan(viewport.width);
-    expect(image.height).toBeLessThan(viewport.height);
+    await selectAll(page, '#d-2026-08-02').click();
 
-    // The detail panel is fixed to the right edge; the backdrop is over it too.
-    const overPanel = await page.evaluate(
-      () =>
-        document.elementFromPoint(window.innerWidth - 40, window.innerHeight / 2)
-          ?.className,
+    await expect(selected(page)).toHaveCount(7);
+    await expect(
+      page.locator('#d-2026-08-02 .photo-grid__link[data-selected]'),
+    ).toHaveCount(6);
+    await expect(page.getByRole('toolbar', { name: 'Selection' })).toContainText(
+      '7 selected',
     );
-    expect(overPanel).toContain('zoom');
   });
 
-  test('hangs the [x] on the corner of the photograph itself', async ({ page }) => {
-    await enlarge(page);
-    const image = (await page.locator('.zoom__image').boundingBox())!;
-    const close = (await page.locator('.zoom__close').boundingBox())!;
-
-    // Inside the picture's own top-right corner, not the window's: a letterboxed
-    // box stretched around the photo would put it somewhere out in the dark.
-    expect(close.x).toBeGreaterThan(image.x + image.width / 2);
-    expect(close.x + close.width).toBeLessThanOrEqual(image.x + image.width + 1);
-    expect(close.y).toBeGreaterThanOrEqual(image.y - 1);
-    expect(close.y).toBeLessThan(image.y + image.height / 2);
-  });
-
-  test('the [x] closes it and leaves the panel open', async ({ page }) => {
-    await enlarge(page);
-    await page.getByRole('button', { name: 'Close the enlarged photo' }).click();
-
-    await expect(page.locator('.zoom')).toHaveCount(0);
-    await expect(page.getByRole('complementary')).toBeVisible();
-  });
-
-  test('a click outside closes it and leaves the panel open', async ({ page }) => {
-    await enlarge(page);
-    // The corner of the backdrop, well clear of the photograph.
-    await page.locator('.zoom').click({ position: { x: 4, y: 4 } });
-
-    await expect(page.locator('.zoom')).toHaveCount(0);
-    await expect(page.getByRole('complementary')).toBeVisible();
-  });
-
-  test('Escape closes it, and only then the panel', async ({ page }) => {
-    await enlarge(page);
-
-    await page.keyboard.press('Escape');
-    await expect(page.locator('.zoom')).toHaveCount(0);
-    await expect(page.getByRole('complementary')).toBeVisible();
-
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('complementary')).toHaveCount(0);
-  });
-});
-
-test.describe('metadata editing', () => {
-  test('saves a caption and a corrected date', async ({ page }) => {
-    await page.goto(`${BASE}/2026/03/01`);
-    await page.locator('.admin-grid__tile').first().click();
-
-    const panel = page.getByRole('complementary');
-    await expect(panel).toBeVisible();
-
-    await panel.getByLabel('Caption').fill('Edited by a test');
-    await panel.getByRole('button', { name: 'Save changes' }).click();
-    await expect(panel.getByText('Saved')).toBeVisible();
-
-    // Put it back.
-    await panel.getByLabel('Caption').fill('Snowdrops out already.');
-    await panel.getByRole('button', { name: 'Save changes' }).click();
-    await expect(panel.getByText('Saved')).toBeVisible();
-  });
-
-  test('rejects an impossible date without contacting the server', async ({ page }) => {
-    await page.goto(`${BASE}/2026/03/01`);
-    await page.locator('.admin-grid__tile').first().click();
-
-    const panel = page.getByRole('complementary');
-    await panel.getByLabel('Capture date').fill('2026-02-30');
-    await panel.getByRole('button', { name: 'Save changes' }).click();
-
-    await expect(panel.getByRole('alert')).toContainText('real date');
-  });
-
-  test('disables the time field when there is no date', async ({ page }) => {
-    // A time is meaningful only alongside a date.
-    await page.goto(`${BASE}/undated`);
-    await page.locator('.admin-grid__tile').first().click();
-
-    const panel = page.getByRole('complementary');
-    await expect(panel.getByLabel('Capture time')).toBeDisabled();
-
-    await panel.getByLabel('Capture date').fill('2026-01-01');
-    await expect(panel.getByLabel('Capture time')).toBeEnabled();
-  });
-});
-
-/**
- * Everything destructive happens on this project's own scratch day — three
- * photos plus one in the trash, and nothing else in the fixture counts
- * anything in July.
- *
- * One day per project, because the fixture store is a single process shared
- * by every Playwright worker: two projects running the same destructive test
- * at the same moment would race on the same photos even though each puts
- * everything back. See fixtures/catalog.ts.
- */
-function scratch() {
-  const day = SCRATCH_DAYS[test.info().project.name === 'webkit' ? 1 : 0]!;
-  const [year, month, date] = day.split('-');
-  return {
-    path: `${BASE}/${year}/${month}/${date}`,
-    /** The trashed photo on that day, which only this project restores. */
-    trashedFile: `IMG_${day.replaceAll('-', '')}_211900.HEIC`,
-    /** How that day reads in the interface, e.g. "July 4, 2026". */
-    dayLabel: `July ${Number(date)}, ${year}`,
-    /** Its earliest photo, and so the first tile in the grid. */
-    firstFile: `IMG_${day.replaceAll('-', '')}_210311.HEIC`,
-  };
-}
-
-/** Delete the first photo of the scratch day, through the detail panel. */
-async function deleteFirstPhoto(page: Page): Promise<void> {
-  await page.goto(scratch().path);
-  await page.locator('.admin-grid__tile').first().click();
-  await page.getByRole('complementary').getByRole('button', { name: 'Delete' }).click();
-  await page
-    .getByRole('alertdialog')
-    .getByRole('button', { name: 'Delete', exact: true })
-    .click();
-  await expect(page.getByRole('status')).toContainText('1 photo deleted.');
-}
-
-/** Put a photo back from the trash, for tests whose undo offer has gone. */
-async function restoreFromTrash(page: Page, filename: string): Promise<void> {
-  await page.goto(`${BASE}/trash`);
-  const item = page.locator('.trash__item').filter({ hasText: filename });
-  await item.locator('.trash__tile').click();
-  await page.getByRole('button', { name: 'Restore' }).click();
-  await expect(item).toHaveCount(0);
-}
-
-test.describe('delete, confirm, and undo', () => {
-  test('states the resolved count and moves the photo to the trash', async ({
+  test('is absent once the day is whole, and returns when one is dropped', async ({
     page,
   }) => {
-    // Single-photo deletion is the detail panel's own Delete, which needs no
-    // selection at all.
-    await page.goto(scratch().path);
-    await page.locator('.admin-grid__tile').first().click();
-    await page
-      .getByRole('complementary')
-      .getByRole('button', { name: 'Delete' })
-      .click();
+    // Never a disabled button: a control that can do nothing is not shown.
+    await page.goto(`${BASE}/2026/08/02`);
+    const control = selectAll(page, '#d-2026-08-02');
+    await expect(control).toBeVisible();
 
+    await control.click();
+    await expect(control).toHaveCount(0);
+
+    await tiles(page, '#d-2026-08-02')
+      .nth(0)
+      .click({ modifiers: ['ControlOrMeta'] });
+    await expect(control).toBeVisible();
+  });
+
+  test('is nowhere to be seen in the viewer', async ({ page }) => {
+    await page.goto('http://localhost:5173/dev-display-path/');
+    await expect(page.locator('.timeline__select-all')).toHaveCount(0);
+    await expect(page.locator('.photo-grid__filename')).toHaveCount(0);
+  });
+});
+
+test.describe('deleting a selection', () => {
+  test('states the count, clears the page, and offers Undo', async ({ page }) => {
+    const { anchor, path } = scratch();
+    await page.goto(path);
+    const grid = tiles(page, anchor);
+    await grid.nth(0).click({ modifiers: ['ControlOrMeta'] });
+    await grid.nth(1).click({ modifiers: ['ControlOrMeta'] });
+
+    await page.getByRole('button', { name: 'Delete selected' }).click();
     const dialog = page.getByRole('alertdialog');
-    await expect(dialog).toBeVisible();
     // The count comes from the resolved preview, not from the live query.
-    await expect(dialog).toContainText('1 photo');
+    await expect(dialog).toContainText('2 photos');
     await expect(dialog).toContainText('30 days');
 
-    await withTrashed(
-      page,
-      async () => {
-        await dialog.getByRole('button', { name: 'Delete' }).click();
-        await expect(page.getByRole('status')).toContainText('1 photo deleted.');
-      },
-      async () => {
-        await page.getByRole('button', { name: 'Undo' }).click();
-        await expect(page.getByRole('status')).toHaveCount(0);
-      },
-    );
+    await confirmDelete(page);
 
-    // Undo put it back.
-    await page.goto(scratch().path);
-    await expect(page.locator('.admin-grid__item')).toHaveCount(3);
+    // Patched in place: no reload, and the third photo is untouched.
+    await expect(page.getByRole('status')).toContainText('2 photos deleted.');
+    await expect(page.locator(`${anchor} .photo-grid__item`)).toHaveCount(1);
+    await expect(page.getByRole('toolbar', { name: 'Selection' })).toHaveCount(0);
+
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(page.getByRole('status')).toHaveCount(0);
+    await page.goto(path);
+    await expect(page.locator(`${anchor} .photo-grid__item`)).toHaveCount(3);
   });
 
   test('cancelling changes nothing', async ({ page }) => {
-    await page.goto(scratch().path);
-    await page.locator('.admin-grid__tile').first().click();
-    await page
-      .getByRole('complementary')
-      .getByRole('button', { name: 'Delete' })
-      .click();
+    const { anchor, path } = scratch();
+    await page.goto(path);
+    await page.locator(`${anchor} .timeline__select-all`).click();
+    await page.getByRole('button', { name: 'Delete selected' }).click();
+    await expect(page.getByRole('alertdialog')).toContainText('3 photos');
 
     await page.getByRole('button', { name: 'Cancel' }).click();
     await expect(page.getByRole('alertdialog')).toHaveCount(0);
-    await expect(page.locator('.admin-grid__item')).toHaveCount(3);
+    await expect(page.locator(`${anchor} .photo-grid__item`)).toHaveCount(3);
   });
 
-  test('deletes a whole day through Select all, stating the count', async ({
+  test('Escape dismisses the confirmation without closing anything else', async ({
     page,
   }) => {
-    await page.goto(scratch().path);
-    await page.getByRole('button', { name: 'Select all', exact: true }).click();
-    await page.getByRole('button', { name: 'Delete selected' }).click();
-
-    const dialog = page.getByRole('alertdialog');
-    await expect(dialog).toContainText('3 photos');
-    await page.getByRole('button', { name: 'Cancel' }).click();
-  });
-
-  test('deletes exactly the selected photos', async ({ page }) => {
-    await page.goto(scratch().path);
-    const tiles = page.locator('.admin-grid__tile');
-    await tiles.nth(0).click({ modifiers: ['ControlOrMeta'] });
-    await tiles.nth(1).click({ modifiers: ['ControlOrMeta'] });
-
-    await page.getByRole('button', { name: 'Delete selected' }).click();
-    const dialog = page.getByRole('alertdialog');
-    await expect(dialog).toContainText('2 photos');
-
-    await withTrashed(
-      page,
-      async () => {
-        await dialog.getByRole('button', { name: 'Delete', exact: true }).click();
-        await expect(page.getByRole('status')).toContainText('2 photos deleted.');
-        // The third is untouched, and nothing is left selected.
-        await expect(page.locator('.admin-grid__item')).toHaveCount(1);
-        await expect(page.getByRole('button', { name: 'Delete selected' })).toHaveCount(
-          0,
-        );
-      },
-      async () => {
-        await page.getByRole('button', { name: 'Undo' }).click();
-        await expect(page.getByRole('status')).toHaveCount(0);
-      },
-    );
-
-    await page.goto(scratch().path);
-    await expect(page.locator('.admin-grid__item')).toHaveCount(3);
-  });
-
-  test('the undo offer does not survive a navigation', async ({ page }) => {
-    const { firstFile } = scratch();
-    await deleteFirstPhoto(page);
-
-    // Client-side navigation, so the app itself stays mounted: the offer names
-    // photos that were on the page it was raised from.
-    await page.getByRole('link', { name: /^Trash/ }).click();
-    await expect(page.getByRole('status')).toHaveCount(0);
-
-    await restoreFromTrash(page, firstFile);
-  });
-
-  test('the undo offer withdraws itself after five seconds', async ({ page }) => {
-    const { firstFile } = scratch();
-    await deleteFirstPhoto(page);
-
-    const banner = page.getByRole('status');
-    await expect(banner).toBeVisible();
-    // Still there a moment later, then gone of its own accord.
-    await expect(banner).toBeVisible({ timeout: 2_000 });
-    await expect(banner).toHaveCount(0, { timeout: 8_000 });
-
-    await restoreFromTrash(page, firstFile);
-  });
-
-  test('Escape dismisses the confirmation', async ({ page }) => {
-    await page.goto(scratch().path);
-    await page.getByRole('button', { name: 'Select all', exact: true }).click();
+    const { anchor, path } = scratch();
+    await page.goto(path);
+    await page.locator(`${anchor} .timeline__select-all`).click();
     await page.getByRole('button', { name: 'Delete selected' }).click();
     await expect(page.getByRole('alertdialog')).toBeVisible();
 
     await page.keyboard.press('Escape');
     await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(selected(page)).toHaveCount(3);
   });
 });
 
-test.describe('selecting in the grid', () => {
-  const selected = (page: Page) => page.locator('.admin-grid__tile[data-selected]');
+test.describe('the admin photo view', () => {
+  /** Open the first photo of the scratch day. */
+  async function openFirst(page: Page) {
+    const { anchor, path } = scratch();
+    await page.goto(path);
+    await tiles(page, anchor).first().click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+  }
 
-  test('shows only the toolbar buttons that have something to act on', async ({
+  test('names the file and carries the edit form in place of the caption', async ({
     page,
   }) => {
-    await page.goto(`${BASE}/2026/08/02`);
-    // "Select all" is a substring of "Deselect all", so every one of these
-    // has to be an exact match.
-    const deleteSelected = page.getByRole('button', { name: 'Delete selected' });
-    const selectAll = page.getByRole('button', { name: 'Select all', exact: true });
-    const deselectAll = page.getByRole('button', { name: 'Deselect all' });
+    await openFirst(page);
+    const { files } = scratch();
 
-    // Nothing selected: only Select all.
-    await expect(deleteSelected).toHaveCount(0);
-    await expect(selectAll).toBeVisible();
-    await expect(deselectAll).toHaveCount(0);
+    await expect(page.locator('.lightbox__filename')).toHaveText(files[0]!);
+    // The viewer's caption and date text is not there; the fields are.
+    await expect(page.locator('.lightbox__caption')).toHaveCount(0);
+    await expect(page.getByLabel('Capture date')).toHaveValue(scratch().day);
+    await expect(page.getByLabel('Capture time')).toHaveValue('21:03:11');
+    await expect(page.getByLabel('Caption')).toHaveValue('First rocket up.');
 
-    // Some selected: all three, in that order left to right.
-    await page
-      .locator('.admin-grid__tile')
-      .nth(0)
-      .click({ modifiers: ['ControlOrMeta'] });
-    await expect(page.locator('.admin__toolbar-actions button')).toHaveText([
-      'Delete selected',
-      'Select all',
-      'Deselect all',
-    ]);
-
-    // All selected: nothing left to select.
-    await selectAll.click();
-    await expect(selected(page)).toHaveCount(6);
-    await expect(page.locator('.admin__toolbar-actions button')).toHaveText([
-      'Delete selected',
-      'Deselect all',
-    ]);
-
-    await deselectAll.click();
-    await expect(selected(page)).toHaveCount(0);
-    await expect(page.locator('.admin__toolbar-actions button')).toHaveText([
-      'Select all',
-    ]);
+    // And the actions beneath it.
+    for (const name of ['Download', 'Delete', 'Photo info']) {
+      await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+    }
   });
 
-  test('modifier-click selects a tile instead of opening it', async ({ page }) => {
-    await page.goto(`${BASE}/2026/08/02`);
-    const tiles = page.locator('.admin-grid__tile');
+  test('arrows across the library, resetting the form each step', async ({ page }) => {
+    await openFirst(page);
+    const { files } = scratch();
 
-    await tiles.nth(2).click({ modifiers: ['ControlOrMeta'] });
-    await expect(selected(page)).toHaveCount(1);
-    await expect(page.getByRole('complementary')).toHaveCount(0);
+    await page.getByLabel('Caption').fill('Never saved');
+    await page.getByRole('button', { name: 'Next photo' }).click();
 
-    // And clicking it again takes it back out.
-    await tiles.nth(2).click({ modifiers: ['ControlOrMeta'] });
-    await expect(selected(page)).toHaveCount(0);
+    await expect(page.locator('.lightbox__filename')).toHaveText(files[1]!);
+    // The unsaved edit is discarded silently, as it always was.
+    await expect(page.getByLabel('Caption')).toHaveValue('');
+    await expect(page.getByLabel('Capture time')).toHaveValue('21:07:45');
+
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.locator('.lightbox__filename')).toHaveText(files[0]!);
+    await expect(page.getByLabel('Caption')).toHaveValue('First rocket up.');
   });
 
-  test('shift-click selects the range from the last tile toggled', async ({ page }) => {
-    await page.goto(`${BASE}/2026/08/02`);
-    const tiles = page.locator('.admin-grid__tile');
+  test('disables the time field when there is no date', async ({ page }) => {
+    // A time is meaningful only alongside a date.
+    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['undated-a']}`);
+    await expect(page.getByLabel('Capture time')).toBeDisabled();
 
-    await tiles.nth(1).click({ modifiers: ['ControlOrMeta'] });
-    await tiles.nth(4).click({ modifiers: ['Shift'] });
-    await expect(selected(page)).toHaveCount(4);
-
-    // The anchor stays put, so shrinking the range back is one more click.
-    await tiles.nth(2).click({ modifiers: ['Shift'] });
-    await expect(selected(page)).toHaveCount(4);
+    await page.getByLabel('Capture date').fill('2026-01-01');
+    await expect(page.getByLabel('Capture time')).toBeEnabled();
   });
 
-  test('shift-click extends from the photo the panel is showing', async ({ page }) => {
-    // Click one, shift-click another: the gesture people actually use, and
-    // the plain click is what sets the anchor it measures from.
-    await page.goto(`${BASE}/2026/08/02`);
-    const tiles = page.locator('.admin-grid__tile');
+  test('rejects an impossible date without contacting the server', async ({ page }) => {
+    const requests: string[] = [];
+    page.on('request', (request) => {
+      if (request.method() === 'POST') requests.push(request.url());
+    });
 
-    await tiles.nth(0).click();
-    await tiles.nth(3).click({ modifiers: ['Shift'] });
+    await openFirst(page);
+    await page.getByLabel('Capture date').fill('2026-02-30');
+    await page.getByRole('button', { name: 'Save changes' }).click();
 
-    await expect(selected(page)).toHaveCount(4);
+    await expect(page.getByRole('alert')).toContainText('real date');
+    expect(requests).toEqual([]);
   });
 
-  test('marking a second photo closes the detail panel', async ({ page }) => {
-    await page.goto(`${BASE}/2026/08/02`);
-    const tiles = page.locator('.admin-grid__tile');
-    const panel = page.getByRole('complementary');
-
-    // The open photo counts as one of the marked tiles, so a modifier-click on
-    // any other one is already two — the panel speaks for neither.
-    await tiles.nth(0).click();
-    await expect(panel).toBeVisible();
-    await tiles.nth(1).click({ modifiers: ['ControlOrMeta'] });
-    await expect(panel).toHaveCount(0);
-    await expect(selected(page)).toHaveCount(1);
-  });
-
-  test('a shift-range closes the detail panel too', async ({ page }) => {
-    await page.goto(`${BASE}/2026/08/02`);
-    const tiles = page.locator('.admin-grid__tile');
-
-    await tiles.nth(0).click();
-    await expect(page.getByRole('complementary')).toBeVisible();
-    await tiles.nth(3).click({ modifiers: ['Shift'] });
-
-    await expect(page.getByRole('complementary')).toHaveCount(0);
-    await expect(selected(page)).toHaveCount(4);
-  });
-
-  test('a plain click opens the detail panel and drops the selection', async ({
+  test('a saved date moves the photo on the page, and it stays moved', async ({
     page,
   }) => {
-    await page.goto(`${BASE}/2026/08/02`);
-    await page.getByRole('button', { name: 'Select all', exact: true }).click();
-    await expect(selected(page)).toHaveCount(6);
+    const { anchor, day, files, path } = scratch();
+    const moved = `${day.slice(0, 7)}-20`;
 
-    // The way out of a selection that caught the wrong photos.
-    await page.locator('.admin-grid__tile').first().click();
-    await expect(selected(page)).toHaveCount(0);
-    await expect(page.getByRole('complementary')).toBeVisible();
+    await openFirst(page);
+    await page.getByLabel('Caption').fill('Edited by a test');
+    await page.getByLabel('Capture date').fill(moved);
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByText('Saved')).toBeVisible();
+
+    // Patched in place from the reply: the new day exists behind the photo
+    // view, and the old one is one photo lighter. No reload.
+    await page.keyboard.press('Escape');
+    await expect(page.locator(`#d-${moved} .photo-grid__item`)).toHaveCount(1);
+    await expect(page.locator(`${anchor} .photo-grid__item`)).toHaveCount(2);
+
+    // And it really was stored.
+    await page.goto(`${BASE}/${moved.replaceAll('-', '/')}`);
+    await expect(page.locator(`#d-${moved}`)).toContainText(files[0]!);
+
+    // Put the fixture back.
+    await tiles(page, `#d-${moved}`).first().click();
+    await page.getByLabel('Capture date').fill(day);
+    await page.getByLabel('Capture time').fill('21:03:11');
+    await page.getByLabel('Caption').fill('First rocket up.');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByText('Saved')).toBeVisible();
+    await page.goto(path);
+    await expect(page.locator(`${anchor} .photo-grid__item`)).toHaveCount(3);
   });
 
-  test('leaves the selection behind when the day changes', async ({ page }) => {
-    // Client-side navigation, which keeps the app mounted: a day's selection
-    // must not follow along to the next day.
-    await page.goto(`${BASE}/2026/08`);
-    await page.getByRole('link', { name: /August 2, 2026/ }).click();
-    await page.getByRole('button', { name: 'Select all', exact: true }).click();
-    await expect(selected(page)).toHaveCount(6);
+  test('a field owns the keyboard while it has focus', async ({ page }) => {
+    await openFirst(page);
+    const { files } = scratch();
+    const caption = page.getByLabel('Caption');
 
+    await caption.fill('abcd');
+    // Arrows move the caret and Backspace deletes a character: neither
+    // changes photo, and neither trashes anything.
+    await caption.press('ArrowLeft');
+    await caption.press('ArrowLeft');
+    await caption.press('Backspace');
+    await expect(caption).toHaveValue('acd');
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(page.locator('.lightbox__filename')).toHaveText(files[0]!);
+
+    // Escape leaves the field; only a second Escape closes the view.
+    await caption.press('Escape');
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  });
+
+  test('Delete confirms, then trashes and advances to the next photo', async ({
+    page,
+  }) => {
+    const { anchor, files, ids, path } = scratch();
+    await openFirst(page);
+
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(page.getByRole('alertdialog')).toContainText('1 photo');
+    await confirmDelete(page);
+
+    // The view moves on rather than dropping back to the timeline.
+    await expect(page).toHaveURL(`${BASE}/photo/${ids[1]}`);
+    await expect(page.locator('.lightbox__filename')).toHaveText(files[1]!);
+    await expect(page.getByRole('status')).toContainText('1 photo deleted.');
+
+    // Back does not land on the photo just trashed, which is a 404 now.
     await page.goBack();
-    await page.getByRole('link', { name: /August 15, 2026/ }).click();
-    await expect(page.locator('.admin-grid__item')).toHaveCount(1);
-    await expect(selected(page)).toHaveCount(0);
+    await expect(page).toHaveURL(path);
+
+    await restoreFromTrash(page, files[0]!);
+    await page.goto(path);
+    await expect(page.locator(`${anchor} .photo-grid__item`)).toHaveCount(3);
+  });
+
+  test('the Delete key is the Delete button, and Cancel changes nothing', async ({
+    page,
+  }) => {
+    const { anchor, files, path } = scratch();
+    await openFirst(page);
+
+    await page.keyboard.press('Backspace');
+    await expect(page.getByRole('alertdialog')).toContainText('1 photo');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+
+    // Still on the same photo, and still in the library.
+    await expect(page.locator('.lightbox__filename')).toHaveText(files[0]!);
+    await page.goto(path);
+    await expect(page.locator(`${anchor} .photo-grid__item`)).toHaveCount(3);
+  });
+
+  test('the confirmation owns the keyboard while it is up', async ({ page }) => {
+    // Both handlers are on `window`, so without the photo view standing down
+    // while something over it holds focus, Escape would cancel the dialog and
+    // close the view behind it, and an arrow would move to a photo the
+    // pending token is not for.
+    const { files } = scratch();
+    await openFirst(page);
+    await page.keyboard.press('Backspace');
+    await expect(page.getByRole('alertdialog')).toBeVisible();
+
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('.lightbox__filename')).toHaveText(files[0]!);
+
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toBeVisible();
+  });
+
+  test('the undo offer outlives a navigation and then withdraws itself', async ({
+    page,
+  }) => {
+    const { files } = scratch();
+    await openFirst(page);
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await confirmDelete(page);
+
+    const banner = page.getByRole('status');
+    await expect(banner).toBeVisible();
+
+    // Advancing after a delete is itself a navigation, so nothing a
+    // navigation does may retire the offer.
+    await page.keyboard.press('ArrowRight');
+    await expect(banner).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(banner).toBeVisible();
+
+    // Only its own clock does.
+    await expect(banner).toHaveCount(0, { timeout: 8_000 });
+
+    await restoreFromTrash(page, files[0]!);
   });
 });
 
-test.describe('trash', () => {
-  test('lists trashed photos with what is needed to identify them', async ({
+test.describe('the trash', () => {
+  test('shows what is needed to identify a photo, and no download', async ({
     page,
   }) => {
-    const { trashedFile, dayLabel } = scratch();
+    const { trashedFile, dayHeading } = scratch();
     await page.goto(`${BASE}/trash`);
 
-    // This project's own trashed photo: the other project's sits beside it.
-    const item = page.locator('.trash__item').filter({ hasText: trashedFile });
+    // This project's own trashed photo; the other project's sits beside it.
+    const item = page.locator('.photo-grid__item').filter({ hasText: trashedFile });
     await expect(item).toBeVisible();
-    // Thumbnail, filename, original grouping date, and time remaining.
     await expect(item.locator('img')).toBeVisible();
-    await expect(item).toContainText(dayLabel);
-    await expect(item).toContainText(/Removed on \w+ \d+, \d{4}/);
+    await expect(item).toContainText(`${dayHeading}, 2026`);
+    await expect(item).toContainText(/Deleted \w+ \d+, \d{4}, purged \w+ \d+, \d{4}/);
+
+    // A trashed photo shows enough to be identified, and nothing more.
+    await expect(page.getByRole('button', { name: /Download/ })).toHaveCount(0);
   });
 
-  test('offers no download for a trashed photo', async ({ page }) => {
-    // A trashed photo shows enough to be identified, and nothing more.
+  test('opens a photo on the signed preview, with no way to edit it', async ({
+    page,
+  }) => {
+    const { trashedFile } = scratch();
     await page.goto(`${BASE}/trash`);
-    await expect(page.getByRole('button', { name: /Download/ })).toHaveCount(0);
+    await page
+      .locator('.photo-grid__item')
+      .filter({ hasText: trashedFile })
+      .locator('.photo-grid__link')
+      .click();
+
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    // The route does not change: a trashed photo's own URL is a 404.
+    await expect(page).toHaveURL(`${BASE}/trash`);
+    await expect(page.locator('.lightbox__image')).toHaveAttribute(
+      'src',
+      /\/d\/[0-9a-f]{32}\/display-1280/,
+    );
+
+    await expect(page.getByRole('button', { name: 'Photo info' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(
+      0,
+    );
+    await expect(page.getByLabel('Caption')).toHaveCount(0);
+
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
   });
 
   test('requires an explicit confirmation to delete permanently', async ({ page }) => {
     await page.goto(`${BASE}/trash`);
     await page
-      .locator('.trash__item')
+      .locator('.photo-grid__item')
       .filter({ hasText: scratch().trashedFile })
-      .locator('.trash__tile')
-      .click();
+      .locator('.photo-grid__link')
+      .click({ modifiers: ['ControlOrMeta'] });
 
     await page.getByRole('button', { name: 'Delete permanently' }).click();
-
-    const dialog = page.getByRole('alertdialog');
-    await expect(dialog).toContainText('cannot be undone');
+    await expect(page.getByRole('alertdialog')).toContainText('cannot be undone');
     await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
   });
 
   test('restores a photo back into its day', async ({ page }) => {
-    const { path, trashedFile } = scratch();
-    const mine = page.locator('.trash__item').filter({ hasText: trashedFile });
+    const { anchor, path, trashedFile } = scratch();
+    const mine = page.locator('.photo-grid__item').filter({ hasText: trashedFile });
 
     await page.goto(`${BASE}/trash`);
-    await mine.locator('.trash__tile').click();
+    await mine.locator('.photo-grid__link').click({ modifiers: ['ControlOrMeta'] });
     await page.getByRole('button', { name: 'Restore' }).click();
-
     await expect(mine).toHaveCount(0);
 
     // It is back in the day it belongs to.
     await page.goto(path);
-    await expect(page.locator('.admin-grid__item')).toHaveCount(4);
+    await expect(page.locator(`${anchor} .photo-grid__item`)).toHaveCount(4);
 
-    // Put the fixture back the way it was.
-    const restored = page
-      .locator('.admin-grid__item')
-      .filter({ hasText: trashedFile })
-      .locator('.admin-grid__tile');
-    await restored.click();
+    // Put the fixture back the way it was found.
     await page
-      .getByRole('complementary')
-      .getByRole('button', { name: 'Delete' })
+      .locator(`${anchor} .photo-grid__item`)
+      .filter({ hasText: trashedFile })
+      .locator('.photo-grid__link')
       .click();
-    await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await confirmDelete(page);
     await expect(page.getByRole('status')).toContainText('1 photo deleted.');
   });
 });

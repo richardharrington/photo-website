@@ -72,7 +72,8 @@ up to about a minute, which the design accepts.
 src/
   display/                   viewer app entry (own Vite build)
   admin/                     admin app entry (own Vite build)
-  shared/                    catalog types, date/validation logic, UI pieces
+  shared/                    catalog types, date/validation logic, and under
+                             `ui/` the whole viewer UI both apps render
   pipeline/                  browser image pipeline (decode/orient/encode/hash)
 netlify/
   edge-functions/gate.ts     opaque-path gate and rewrite
@@ -92,7 +93,10 @@ public/                      robots file and static build inputs
 ```
 
 The display and admin apps are **two fully independent Vite builds**, so no
-shared chunk can place admin code under the display path. Add standard project
+shared chunk can place admin code under the display path. The viewer UI lives
+in `src/shared/ui/` and is imported by both builds; nothing under `src/shared/`
+imports from either app, and the admin is that UI with a curation context
+provided. Add standard project
 files: `package.json`, TypeScript/Vite configuration, `netlify.toml`, Wrangler
 configuration, ESLint, Prettier, tests, and `.env.example`. The public
 repository contains variable *names* only.
@@ -271,12 +275,14 @@ Functions return generic 404 for an unavailable/unauthorized resource.
 
 ### Display API
 
-- the whole timeline in one response, which is all the viewer reads
+- the whole timeline in one response, which is all either app reads
   (decisions.md #25–26);
-- hierarchy/group queries for year, month, day, and Undated, which the admin
-  app still browses level by level;
 - photo detail and sibling navigation;
 - short-lived signed download URL for a photo's full-resolution JPEG.
+
+`/timeline` and `/photo` are the only projections. Both apps are one scrolling
+page, so the level-by-level hierarchy, day, and Undated queries have nothing
+left to answer.
 
 Derivative URLs are not issued by the API: the client composes them from
 `WORKER_BASE_URL` and the photo ID. They are stable, so browsers cache
@@ -290,9 +296,9 @@ open. Signed download URLs last about five minutes.
 - per-photo date/time/caption update;
 - trash, restore, manual permanent delete, and bulk deletion;
 - current catalog JSON export;
-- trash listing (returns signed thumbnail URLs, since the Worker refuses
-  capability-URL access to trashed photos; it never signs full-resolution
-  URLs for trashed photos).
+- trash listing (returns signed thumbnail and preview URLs, since the Worker
+  refuses capability-URL access to trashed photos; it never signs
+  full-resolution URLs for trashed photos).
 
 Every destructive request is a two-step preview/confirm: the preview endpoint
 resolves the selection or date-group query to an **explicit photo ID list**,
@@ -332,13 +338,17 @@ The Worker runs a daily cron task that:
    display hierarchy with fixture catalog data.
 2. Build day grid, lazy thumbnails, lightbox, info view, keyboard focus and
    previous/next navigation.
-3. Build admin layout, always-large upload drop target, the browser pipeline
-   and upload queue (per-file states: processing, uploading, done, skipped,
-   failed+retry), detail panel, and metadata form.
-4. Build desktop modifier/shift selection, Select all, and delete
+3. Build the shared curation context and the admin photo view's edit form, so
+   the admin is the viewer with editing rather than a second interface.
+4. Build desktop modifier/shift selection across the whole library, the day
+   headings' Select all, the sticky selection bar, and delete
    confirmations/Undo. (Marquee dragging was dropped; see decisions.md #35.)
-5. Build Trash list, restore/permanent-delete flows, catalog export, and audit
-   visibility where useful.
+5. Build the always-large upload drop target above the timeline, with the
+   browser pipeline and upload queue (per-file states: processing, uploading,
+   done, skipped, failed+retry).
+6. Build the Trash page on the shared grid and photo view, restore and
+   permanent-delete flows, catalog export, and audit visibility where useful.
+7. Remove the read endpoints nothing calls any more.
 
 Do not implement search, tags, albums, manual reordering, ZIP downloads, mobile
 bulk selection, catalog import, or video features.

@@ -1,94 +1,178 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { navigate, useLocationPath } from '../shared/ui/navigation.ts';
 import { Link } from '../shared/ui/Link.tsx';
 import { useResource } from '../shared/ui/useResource.ts';
-import { formatCaptureDate, formatMonth, monthName } from '../shared/datetime.ts';
+import type { Resource } from '../shared/ui/useResource.ts';
+import { parseRoute } from '../shared/ui/routes.ts';
+import type { Route } from '../shared/ui/routes.ts';
+import { Layout } from '../shared/ui/Layout.tsx';
+import { NotFound } from '../shared/ui/States.tsx';
+import { TimelinePage } from '../shared/ui/TimelinePage.tsx';
+import type { TimelineTarget } from '../shared/ui/TimelinePage.tsx';
+import { PhotoPage } from '../shared/ui/PhotoPage.tsx';
+import { indexTimeline } from '../shared/ui/timeline-index.ts';
+import { CurationContext } from '../shared/ui/curation.ts';
+import type { Curation, PhotoEdit } from '../shared/ui/curation.ts';
+import { removePhotos, upsertPhoto } from '../shared/timeline-patch.ts';
+import { nextAfterDeleting } from './advance.ts';
 import { adminApi, routes } from './api.ts';
 import type { PreviewResult } from './api.ts';
-import { parseAdminRoute } from './routes.ts';
-import type { AdminRoute } from './routes.ts';
-import { AdminGrid } from './components/AdminGrid.tsx';
-import { DetailPanel } from './components/DetailPanel.tsx';
 import { Confirm, UndoBanner } from './components/Confirm.tsx';
-import { TrashView } from './components/TrashView.tsx';
+import { SelectionBar } from './components/SelectionBar.tsx';
+import { TrashPage } from './components/TrashPage.tsx';
 import { UploadPanel } from './components/Upload.tsx';
 import {
-  allSelected,
+  addAll,
   anchorOn,
   EMPTY_SELECTION,
   extendTo,
   pruneToVisible,
-  selectAll,
   selectedIds,
   toggle,
 } from './selection.ts';
 import type { SelectionState } from './selection.ts';
-import type {
-  GroupResponse,
-  HierarchyResponse,
-  PublicPhoto,
-} from '../shared/display-api.ts';
+import type { PublicPhoto, TimelineResponse } from '../shared/display-api.ts';
 import type { SelectionQuery } from '../shared/admin-operations.ts';
 
-function pad2(value: number): string {
-  return String(value).padStart(2, '0');
+/** The admin's own top-level pages, on top of the routes both apps share. */
+const ADMIN_PAGES = ['trash'] as const;
+
+/** Which section of the one page a route is asking for. */
+function targetOf(
+  route: Exclude<Route, { kind: 'not-found' | 'photo' | 'page' }>,
+): TimelineTarget {
+  switch (route.kind) {
+    case 'home':
+      return { kind: 'top' };
+    case 'year':
+      return { kind: 'year', year: route.year };
+    case 'month':
+      return { kind: 'month', year: route.year, month: route.month };
+    case 'day':
+      return { kind: 'day', year: route.year, month: route.month, day: route.day };
+    case 'undated':
+      return { kind: 'undated' };
+  }
 }
 
+function photoCount(count: number): string {
+  return `${count} photo${count === 1 ? '' : 's'}`;
+}
+
+/**
+ * The admin site: the viewer, plus curation.
+ *
+ * One request, one page, the same pages the family sees — with a selection, an
+ * upload target above the timeline, an edit form in the photo view, and Trash
+ * in the header. Everything that makes it an admin is the `CurationContext`
+ * this provides; nothing in `src/shared/ui/` knows this file exists.
+ *
+ * This component owns the library, because every mutation changes it and
+ * because a delete in the photo view has to know what the neighbouring photo
+ * was. It holds the fetched timeline and a patched copy: a mutation patches
+ * the copy from the server's own reply, so the page never waits on a reload,
+ * and a background refetch replaces it a moment later so nothing stays out of
+ * step for long.
+ */
 export function App() {
   const path = useLocationPath();
-  const route = parseAdminRoute(path, __APP_BASE__);
+  const route = parseRoute(path, __APP_BASE__, ADMIN_PAGES);
 
-  const [reloadKey, setReloadKey] = useState(0);
-  const [openPhoto, setOpenPhoto] = useState<PublicPhoto | null>(null);
-  const [preview, setPreview] = useState<PreviewResult | null>(null);
-  const [undo, setUndo] = useState<{
-    ids: string[];
-    message: string;
-    /** The view it was raised in; see below. */
-    path: string;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * The library as fetched, and as patched.
+   *
+   * `fetched` loads once and is never re-run: refetching goes through
+   * `refetch` below, which replaces the patched copy in place rather than
+   * dropping the page back to a loading state.
+   */
+  const fetched = useResource<TimelineResponse>(
+    (signal) => adminApi.timeline(signal),
+    [],
+  );
+  const [patched, setPatched] = useState<TimelineResponse | null>(null);
+  const data = patched ?? (fetched.status === 'ready' ? fetched.data : null);
 
-  // The offer belongs to the page it was raised on — it names a count of
-  // photos that were on that page — so any navigation retires it. Adjusting
-  // state during render rather than in an effect is React's own answer to
-  // "this state belonged to a view we have left", and unlike merely hiding it
-  // the offer is gone for good rather than waiting to reappear on the way
-  // back.
-  if (undo && undo.path !== path) setUndo(null);
-
-  const dismissUndo = useCallback(() => setUndo(null), []);
-
-  const reload = useCallback(() => {
-    setOpenPhoto(null);
-    setReloadKey((key) => key + 1);
-  }, []);
-
-  const hierarchy = useResource<HierarchyResponse>(
-    (signal) => adminApi.hierarchy(signal),
-    [reloadKey],
+  const timeline = useMemo<Resource<TimelineResponse>>(
+    () => (data ? { status: 'ready', data, stale: false } : fetched),
+    [data, fetched],
   );
 
-  async function startTrash(selectionQuery: SelectionQuery) {
+  /** At most one refetch in flight; a burst of edits is not a burst of GETs. */
+  const pendingRefetch = useRef<Promise<void> | null>(null);
+  const refetch = useCallback(() => {
+    if (pendingRefetch.current) return;
+    pendingRefetch.current = adminApi
+      .timeline()
+      .then((next) => setPatched(next))
+      // A failed background refetch leaves the patched copy standing: it is
+      // the server's own reply to the mutation, not a guess.
+      .catch(() => undefined)
+      .finally(() => {
+        pendingRefetch.current = null;
+      });
+  }, []);
+
+  const [selection, setSelection] = useState<SelectionState>(EMPTY_SELECTION);
+  const [preview, setPreview] = useState<{
+    result: PreviewResult;
+    /** The photo the view was on, when the delete came from the photo view. */
+    from: string | null;
+  } | null>(null);
+  const [undo, setUndo] = useState<{ ids: string[]; message: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const dismissUndo = useCallback(() => setUndo(null), []);
+
+  const orderedIds = useMemo(
+    () => (data ? indexTimeline(data).orderedIds : []),
+    [data],
+  );
+
+  // Pruned on every render, never the raw state: a delete takes photos off the
+  // page without touching the selection, and a bulk action must never reach a
+  // photo the administrator can no longer see.
+  const visible = pruneToVisible(selection, orderedIds);
+  const chosen = selectedIds(visible);
+
+  const [trashKey, setTrashKey] = useState(0);
+  const trash = useResource<{ count: number }>(
+    (signal) => adminApi.trashCount(signal),
+    [trashKey],
+  );
+  const trashCount = trash.status === 'ready' ? trash.data.count : null;
+  const countTrashAgain = useCallback(() => setTrashKey((key) => key + 1), []);
+
+  async function startTrash(query: SelectionQuery, from: string | null) {
     setError(null);
     try {
-      setPreview(await adminApi.previewTrash(selectionQuery));
+      setPreview({ result: await adminApi.previewTrash(query), from });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That could not be prepared.');
     }
   }
 
   async function confirmTrash() {
-    if (!preview) return;
+    if (!preview || !data) return;
+    const { result, from } = preview;
     try {
-      const result = await adminApi.confirmTrash(preview);
+      const outcome = await adminApi.confirmTrash(result);
       setPreview(null);
+
+      // Before the patch, while the trashed photo still has neighbours.
+      const next = from ? nextAfterDeleting(orderedIds, outcome.trashed, from) : null;
+
+      setPatched(removePhotos(data, outcome.trashed));
       setUndo({
-        ids: result.trashed,
-        message: `${result.count} photo${result.count === 1 ? '' : 's'} deleted.`,
-        path,
+        ids: outcome.trashed,
+        message: `${photoCount(outcome.count)} deleted.`,
       });
-      reload();
+
+      if (from) {
+        // A replace, so Back from the next photo does not land on the one just
+        // trashed — which is a 404 now.
+        navigate(next ? routes.photo(next) : routes.home(), { replace: true });
+      }
+      countTrashAgain();
+      refetch();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'That could not be completed.');
       setPreview(null);
@@ -100,72 +184,122 @@ export function App() {
     try {
       await adminApi.restore(undo.ids);
       setUndo(null);
-      reload();
+      // No patch: the restored photos are not in the response this page holds,
+      // so a refetch is the honest answer, and the undo path is rare.
+      countTrashAgain();
+      refetch();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Restore failed.');
     }
   }
 
-  // A persistent Trash link with its item count (design.md, "Admin site").
-  const trash = useResource<{ count: number }>(
-    (signal) => adminApi.trashCount(signal),
-    [reloadKey],
+  async function saveEdit(photoId: string, edit: PhotoEdit): Promise<PublicPhoto> {
+    setError(null);
+    // Rejections travel to the form, which is where the message belongs.
+    const { photo } = await adminApi.edit(photoId, edit);
+    if (data) setPatched(upsertPhoto(data, photo));
+    refetch();
+    return photo;
+  }
+
+  const curation = useMemo<Curation>(
+    () => ({
+      selectedIds: visible.ids,
+      // A plain click clears the selection and stays the anchor, the way it
+      // does in a file manager: it is the one gesture that always gets out of
+      // a selection gone wrong, and a shift-click after it reaches back to the
+      // photo now open.
+      anchorOn: (id) => setSelection(anchorOn(id)),
+      toggle: (id) => setSelection(toggle(visible, id)),
+      extendTo: (id) => setSelection(extendTo(visible, orderedIds, id)),
+      selectAll: (ids) => setSelection((state) => addAll(state, ids)),
+      trash: (id) => void startTrash({ kind: 'ids', photoIds: [id] }, id),
+      edit: saveEdit,
+      readOnly: false,
+    }),
+    // startTrash and saveEdit read the current render's `data` and
+    // `orderedIds`, which is what these dependencies stand for.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [visible, orderedIds, data],
   );
-  const trashCount = trash.status === 'ready' ? trash.data.count : null;
 
-  return (
-    <div className="admin">
-      <header className="admin__header">
-        <Link to={routes.home()} className="admin__title">
-          {__SITE_TITLE__} — Administration
-        </Link>
-        <nav className="admin__nav">
-          <Link to={routes.trash()}>
-            Trash{trashCount === null ? '' : ` (${trashCount})`}
-          </Link>
-          <a href={adminApi.exportUrl()} download>
-            Export catalog
-          </a>
-        </nav>
-      </header>
+  const nav = (
+    <>
+      <Link to={routes.trash()}>
+        Trash{trashCount === null ? '' : ` (${trashCount})`}
+      </Link>
+      <a href={adminApi.exportUrl()} download>
+        Export catalog
+      </a>
+    </>
+  );
 
-      <main className="admin__main">
-        {error ? (
-          <p className="detail__error" role="alert">
-            {error}
-          </p>
+  const libraryIsEmpty = data !== null && data.total === 0 && data.undated.count === 0;
+
+  /**
+   * The trash provides its own read-only curation, so the library's selection
+   * and its bar stay behind on the timeline while it is open. The confirm
+   * dialog, the error line, and the undo offer below are outside this, because
+   * an offer raised on the timeline must survive walking over to the trash.
+   */
+  const main =
+    route.kind === 'page' ? (
+      <TrashPage nav={nav} onChanged={countTrashAgain} />
+    ) : route.kind === 'not-found' ? (
+      <CurationContext.Provider value={curation}>
+        <Layout nav={nav}>
+          <NotFound />
+        </Layout>
+      </CurationContext.Provider>
+    ) : (
+      <CurationContext.Provider value={curation}>
+        <TimelinePage
+          resource={timeline}
+          // A photo route must not move the page underneath the photo view.
+          target={route.kind === 'photo' ? null : targetOf(route)}
+          nav={nav}
+          above={
+            // Always large and easy to target; more prominent when there is
+            // nothing in the library yet.
+            <UploadPanel onBatchComplete={refetch} emphasized={libraryIsEmpty} />
+          }
+        />
+        {route.kind === 'photo' ? (
+          <PhotoPage id={route.id} timeline={timeline} />
         ) : null}
 
-        {route.kind === 'trash' ? (
-          <TrashView onChanged={reload} />
-        ) : (
-          <BrowseView
-            route={route}
-            hierarchy={hierarchy}
-            reloadKey={reloadKey}
-            openPhotoId={openPhoto?.id ?? null}
-            onOpenPhoto={setOpenPhoto}
-            onTrash={(query) => void startTrash(query)}
-            onReload={reload}
-          />
-        )}
-      </main>
+        {chosen.length > 0 ? (
+          <SelectionBar
+            count={chosen.length}
+            onDeselectAll={() => setSelection(EMPTY_SELECTION)}
+          >
+            <button
+              type="button"
+              className="admin-danger"
+              onClick={() => void startTrash({ kind: 'ids', photoIds: chosen }, null)}
+            >
+              Delete selected
+            </button>
+          </SelectionBar>
+        ) : null}
+      </CurationContext.Provider>
+    );
 
-      {openPhoto ? (
-        <DetailPanel
-          photo={openPhoto}
-          onClose={() => setOpenPhoto(null)}
-          onSaved={(photo) => {
-            setOpenPhoto(photo);
-            setReloadKey((key) => key + 1);
-          }}
-          onTrash={(photoId) => void startTrash({ kind: 'ids', photoIds: [photoId] })}
-        />
+  return (
+    <>
+      {main}
+
+      {/* Fixed at the top, above the photo view: a delete can fail while the
+          photo view is covering the page, and the reason has to be visible. */}
+      {error ? (
+        <p className="admin-banner admin-error" role="alert">
+          {error}
+        </p>
       ) : null}
 
       {preview ? (
         <Confirm
-          preview={preview}
+          preview={preview.result}
           title="Delete photos?"
           description="will move to the trash, where they are kept for 30 days."
           confirmLabel="Delete"
@@ -176,8 +310,17 @@ export function App() {
       ) : null}
 
       {undo ? (
-        // Keyed by what it would put back, so a second deletion raises a new
-        // banner with a fresh clock rather than inheriting the old one's.
+        /*
+         * Five seconds from the moment it appears, and nothing else retires
+         * it: not arrowing, not closing the photo view, not clicking a
+         * heading. Advancing after a delete is itself a navigation, so a rule
+         * that retired the offer on navigation would withdraw it before it
+         * could be read.
+         *
+         * Keyed by what it would put back, so a second deletion inside those
+         * five seconds raises a fresh banner for its own photos rather than
+         * inheriting the old one's clock.
+         */
         <UndoBanner
           key={undo.ids.join(',')}
           message={undo.message}
@@ -185,252 +328,6 @@ export function App() {
           onDismiss={dismissUndo}
         />
       ) : null}
-    </div>
-  );
-}
-
-interface BrowseViewProps {
-  route: AdminRoute;
-  hierarchy: ReturnType<typeof useResource<HierarchyResponse>>;
-  reloadKey: number;
-  /** The photo the detail panel is showing, so the grid can mark it. */
-  openPhotoId: string | null;
-  /** Opens the detail panel, or closes it when passed null. */
-  onOpenPhoto: (photo: PublicPhoto | null) => void;
-  onTrash: (query: SelectionQuery) => void;
-  onReload: () => void;
-}
-
-function BrowseView(props: BrowseViewProps) {
-  const { route, hierarchy, reloadKey, onReload } = props;
-
-  const isGrid = route.kind === 'day' || route.kind === 'undated';
-
-  const group = useResource<GroupResponse | null>(
-    (signal) => {
-      if (route.kind === 'day') {
-        return adminApi.day(route.year, route.month, route.day, signal);
-      }
-      if (route.kind === 'undated') return adminApi.undated(signal);
-      return Promise.resolve(null);
-    },
-    [route.kind, JSON.stringify(route), reloadKey],
-  );
-
-  const libraryIsEmpty =
-    hierarchy.status === 'ready' &&
-    hierarchy.data.total === 0 &&
-    hierarchy.data.undated.count === 0;
-
-  return (
-    <>
-      {/* Always large and easy to target; more prominent when there is
-          nothing in the library yet. */}
-      <UploadPanel onBatchComplete={onReload} emphasized={libraryIsEmpty} />
-
-      {route.kind === 'not-found' ? <p className="state">Not found.</p> : null}
-
-      {!isGrid && route.kind !== 'not-found' ? <IndexView {...props} /> : null}
-
-      {/* Keyed by the route: a day's selection has no meaning on the next day,
-          and remounting is a surer reset than clearing it on every path a
-          navigation can take. */}
-      {isGrid ? (
-        <GridView key={JSON.stringify(route)} {...props} group={group} />
-      ) : null}
-    </>
-  );
-}
-
-function IndexView({ route, hierarchy }: BrowseViewProps) {
-  if (hierarchy.status === 'loading') return <p className="state">Loading…</p>;
-  if (hierarchy.status === 'not-found') return <p className="state">Not found.</p>;
-  if (hierarchy.status === 'error') {
-    return (
-      <p className="state" role="alert">
-        {hierarchy.message}
-      </p>
-    );
-  }
-
-  const data = hierarchy.data;
-
-  if (route.kind === 'home') {
-    const entries = [
-      ...data.years.map((year) => ({
-        href: routes.year(year.year),
-        label: String(year.year),
-        count: year.count,
-      })),
-      ...(data.undated.count > 0
-        ? [{ href: routes.undated(), label: 'Undated', count: data.undated.count }]
-        : []),
-    ];
-    return entries.length === 0 ? (
-      <p className="state state--empty">No photos here yet.</p>
-    ) : (
-      <GroupLinks entries={entries} />
-    );
-  }
-
-  if (route.kind === 'year') {
-    const year = data.years.find((entry) => entry.year === route.year);
-    if (!year) return <p className="state">Not found.</p>;
-    return (
-      <GroupLinks
-        entries={year.months.map((month) => ({
-          href: routes.month(route.year, month.month),
-          label: monthName(month.month),
-          count: month.count,
-        }))}
-      />
-    );
-  }
-
-  if (route.kind === 'month') {
-    const month = data.years
-      .find((entry) => entry.year === route.year)
-      ?.months.find((entry) => entry.month === route.month);
-    if (!month) return <p className="state">Not found.</p>;
-    return (
-      <>
-        <h1 className="layout__title">{formatMonth(route.year, route.month)}</h1>
-        <GroupLinks
-          entries={month.days.map((day) => ({
-            href: routes.day(route.year, route.month, day.day),
-            label: formatCaptureDate(
-              `${route.year}-${pad2(route.month)}-${pad2(day.day)}`,
-            ),
-            count: day.count,
-          }))}
-        />
-      </>
-    );
-  }
-
-  return null;
-}
-
-function GroupLinks({
-  entries,
-}: {
-  entries: readonly { href: string; label: string; count: number }[];
-}) {
-  return (
-    <ul className="group-list">
-      {entries.map((entry) => (
-        <li key={entry.href}>
-          <Link to={entry.href} className="group-list__link">
-            <span className="group-list__label">{entry.label}</span>
-            <span className="group-list__count">
-              {entry.count} photo{entry.count === 1 ? '' : 's'}
-            </span>
-          </Link>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function GridView({
-  route,
-  group,
-  openPhotoId,
-  onOpenPhoto,
-  onTrash,
-}: BrowseViewProps & { group: ReturnType<typeof useResource<GroupResponse | null>> }) {
-  const [selection, setSelection] = useState<SelectionState>(EMPTY_SELECTION);
-
-  if (group.status === 'loading') return <p className="state">Loading…</p>;
-  if (group.status === 'not-found') return <p className="state">Not found.</p>;
-  if (group.status === 'error') {
-    return (
-      <p className="state" role="alert">
-        {group.message}
-      </p>
-    );
-  }
-  if (!group.data) return null;
-
-  const photos = group.data.photos;
-  const ids = photos.map((photo) => photo.id);
-
-  // Everything works from the pruned selection, never the raw state: a delete
-  // takes photos out of the grid without touching it, and a bulk action must
-  // never reach a photo the administrator can no longer see.
-  const visible = pruneToVisible(selection, ids);
-  const chosen = selectedIds(visible);
-  const everythingChosen = allSelected(visible, ids);
-
-  // The detail panel speaks for one photograph, so it closes as soon as more
-  // than one tile is lit up. The open photo is one of those: with the panel on
-  // one photo and a modifier-click on a second, two tiles are marked and the
-  // panel describes neither pair, even though the selection itself holds one.
-  const select = (next: SelectionState) => {
-    setSelection(next);
-    const marked = new Set(next.ids);
-    if (openPhotoId) marked.add(openPhotoId);
-    if (marked.size > 1) onOpenPhoto(null);
-  };
-
-  const title =
-    route.kind === 'day'
-      ? formatCaptureDate(`${route.year}-${pad2(route.month)}-${pad2(route.day)}`)
-      : 'Undated';
-
-  return (
-    <>
-      <div className="admin__toolbar">
-        <h1 className="layout__title">{title}</h1>
-        {/* A button that can do nothing is absent rather than disabled, and the
-            row is right-aligned so the rest slide over to fill the gap. Each
-            one is present exactly when there is something for it to act on. */}
-        <div className="admin__toolbar-actions">
-          {chosen.length > 0 ? (
-            <button
-              type="button"
-              className="detail__delete"
-              onClick={() => onTrash({ kind: 'ids', photoIds: chosen })}
-            >
-              Delete selected
-            </button>
-          ) : null}
-          {photos.length > 0 && !everythingChosen ? (
-            <button type="button" onClick={() => select(selectAll(ids))}>
-              Select all
-            </button>
-          ) : null}
-          {chosen.length > 0 ? (
-            <button type="button" onClick={() => select(EMPTY_SELECTION)}>
-              Deselect all
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      {photos.length === 0 ? (
-        <p className="state state--empty">No photos here yet.</p>
-      ) : (
-        <AdminGrid
-          photos={photos}
-          openPhotoId={openPhotoId}
-          selectedIds={visible.ids}
-          onOpen={(photoId) => {
-            // An unmodified click collapses the selection, the way it does in
-            // a file manager: it is the one gesture that always gets out of a
-            // selection gone wrong, and a shift-range that caught too much is
-            // one click from being started over. The tile stays the anchor,
-            // so a shift-click after it reaches back to the photo the panel
-            // is showing.
-            setSelection(anchorOn(photoId));
-            const photo = photos.find((candidate) => candidate.id === photoId);
-            if (photo) onOpenPhoto(photo);
-            else navigate(routes.photo(photoId));
-          }}
-          onToggle={(photoId) => select(toggle(visible, photoId))}
-          onExtend={(photoId) => select(extendTo(visible, ids, photoId))}
-        />
-      )}
     </>
   );
 }

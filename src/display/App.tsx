@@ -12,7 +12,9 @@ import type { TimelineResponse } from '../shared/display-api.ts';
 
 /** Which section of the one page a route is asking for. */
 function targetOf(
-  route: Exclude<Route, { kind: 'not-found' | 'photo' }>,
+  // `page` is never produced here: the viewer passes no extra pages to the
+  // parser, so `/trash` under the display base is its own 404.
+  route: Exclude<Route, { kind: 'not-found' | 'photo' | 'page' }>,
 ): TimelineTarget {
   switch (route.kind) {
     case 'home':
@@ -33,7 +35,7 @@ export function App() {
   const route = parseRoute(path, __APP_BASE__);
 
   // A malformed URL never reaches the timeline, so it costs no request.
-  if (route.kind === 'not-found') {
+  if (route.kind === 'not-found' || route.kind === 'page') {
     return (
       <Layout>
         <NotFound />
@@ -56,7 +58,7 @@ export function App() {
  * No `CurationContext` provider, so every shared component sees `null` and
  * renders the viewer's plain reading interface.
  */
-function Viewer({ route }: { route: Exclude<Route, { kind: 'not-found' }> }) {
+function Viewer({ route }: { route: Exclude<Route, { kind: 'not-found' | 'page' }> }) {
   const timeline = useResource<TimelineResponse>(
     (signal) => readApi.timeline(signal),
     [],

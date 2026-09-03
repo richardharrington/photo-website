@@ -4,6 +4,8 @@ import { altTextFor } from '../validation.ts';
 import { derivativeSrcSet, derivativeUrl } from '../urls.ts';
 import { formatCaptureDate, formatCaptureTimeForViewer } from '../datetime.ts';
 import { readApi, routes } from './api.ts';
+import { useCuration } from './curation.ts';
+import { EditForm } from './EditForm.tsx';
 import type { PublicPhoto } from '../display-api.ts';
 
 interface LightboxProps {
@@ -29,6 +31,21 @@ interface LightboxProps {
   backHref: string;
   /** Runs instead of a plain navigation, so the timeline can be told where to land. */
   onClose: () => void;
+  /**
+   * Step to another photo without changing the route.
+   *
+   * The trash needs it: a trashed photo's `/photo/<id>` is a 404 by design, so
+   * its listing has no routes to step between and holds the open photo in
+   * local state instead. Left out, stepping navigates, and resolves its
+   * position from the address bar for the reason above.
+   */
+  onStep?: (id: string) => void;
+  /**
+   * Where the picture comes from, overriding the capability URL. The trash
+   * passes its short-lived signed preview; there is no `srcset` then, because
+   * only the one rendition is signed.
+   */
+  imageSrc?: string;
 }
 
 /**
@@ -62,11 +79,28 @@ function captureLine(photo: PublicPhoto): string | null {
  * of caption, date, and the two actions — with the photo's box running exactly
  * between them. The filename and the capture *time* live one click away, in
  * the info panel.
+ *
+ * This is also the admin's editing view, and the whole of it: under a curation
+ * context the bottom-left stack holds the date, time, and caption as fields
+ * with a Save button, the action row gains Delete, and the filename shows at
+ * the top right. There is no side panel and no separate enlarged preview,
+ * because this is the enlarged preview.
  */
-export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps) {
+export function Lightbox({
+  photo,
+  orderedIds,
+  backHref,
+  onClose,
+  onStep,
+  imageSrc,
+}: LightboxProps) {
+  const curation = useCuration();
+  const editable = curation !== null && !curation.readOnly;
+
   const dialogRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
   /**
    * Which photo the info panel is open for, rather than whether it is open.
    *
@@ -83,16 +117,20 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
   const large = photo.derivatives['display-2560'];
   const aspect = large.width / large.height;
 
-  /** Move by one position from wherever the URL currently is. */
+  /** Move by one position from wherever the current photo is. */
   const step = useCallback(
     (delta: number) => {
-      const currentId = window.location.pathname.split('/').pop() ?? '';
+      const currentId = onStep
+        ? photo.id
+        : (window.location.pathname.split('/').pop() ?? '');
       const position = orderedIds.indexOf(currentId);
       if (position === -1) return;
       const target = orderedIds[position + delta];
-      if (target) navigate(routes.photo(target));
+      if (!target) return;
+      if (onStep) onStep(target);
+      else navigate(routes.photo(target));
     },
-    [orderedIds],
+    [orderedIds, onStep, photo.id],
   );
 
   const currentPosition = orderedIds.indexOf(photo.id);
@@ -147,6 +185,34 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
   // silently dropped.
   useLayoutEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      const active = document.activeElement;
+
+      /*
+       * A field owns the keyboard while it has focus.
+       *
+       * This is a correctness rule rather than a preference: the handler is on
+       * `window`, so without it ArrowLeft would change photo while the caret
+       * was meant to move, and Backspace would delete the photograph instead
+       * of a character. Escape leaves the field; a second Escape, with focus
+       * outside the form, closes the view.
+       */
+      if (active && formRef.current?.contains(active)) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          if (active instanceof HTMLElement) active.blur();
+        }
+        return;
+      }
+
+      // Something over the lightbox has taken focus — the confirmation dialog,
+      // which focuses its own button — so the keyboard is not ours. Without
+      // this, Escape would cancel the dialog *and* close the view behind it,
+      // and an arrow press would move to a photo the pending token is not for.
+      const dialog = dialogRef.current;
+      if (active && active !== document.body && dialog && !dialog.contains(active)) {
+        return;
+      }
+
       switch (event.key) {
         case 'Escape':
           event.preventDefault();
@@ -160,6 +226,15 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
           event.preventDefault();
           step(1);
           break;
+        // Triage of a bad day is Delete, confirm, Delete, confirm: the key is
+        // the button, and the app advances to the next photo after each one.
+        case 'Delete':
+        case 'Backspace':
+          if (editable && curation) {
+            event.preventDefault();
+            curation.trash(photo.id);
+          }
+          break;
         default:
           break;
       }
@@ -167,7 +242,7 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, step]);
+  }, [onClose, step, editable, curation, photo.id]);
 
   // The page behind the lightbox must not scroll while it is open.
   useEffect(() => {
@@ -183,10 +258,13 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
    * lands on a warm cache. Waiting for the current image keeps the preload
    * from competing with it for the connection; `complete` covers the case where
    * it was already cached and no load event is coming.
+   *
+   * Not in the trash, whose images are behind short-lived signed URLs the
+   * listing minted for exactly the renditions it holds.
    */
   useEffect(() => {
     const image = imageRef.current;
-    if (!image) return;
+    if (!image || imageSrc) return;
 
     let cancelled = false;
     const start = () => {
@@ -209,7 +287,7 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
       image.removeEventListener('load', start);
       image.removeEventListener('error', start);
     };
-  }, [photo.id, orderedIds]);
+  }, [photo.id, orderedIds, imageSrc]);
 
   async function onDownload() {
     setDownloadError(null);
@@ -232,7 +310,9 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
 
   return (
     <div
-      className="lightbox"
+      // The form needs room the viewer's narrow caption column does not, so
+      // the stage makes way for it; see admin.css.
+      className={editable ? 'lightbox lightbox--editing' : 'lightbox'}
       role="dialog"
       aria-modal="true"
       aria-label={alt}
@@ -250,6 +330,14 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
         <span aria-hidden="true">&larr;</span> Lightbox
       </a>
 
+      {/* Which file this is, without opening Photo info: an administrator
+          working through a batch needs it at a glance. */}
+      {curation ? (
+        <span className="lightbox__filename" title={photo.originalFilename}>
+          {photo.originalFilename}
+        </span>
+      ) : null}
+
       <div className="lightbox__stage" ref={stageRef}>
         <button
           type="button"
@@ -265,15 +353,19 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
           className="lightbox__image"
           key={photo.id}
           ref={imageRef}
-          src={derivativeUrl(__WORKER_BASE_URL__, photo.id, 'display-1280')}
-          srcSet={derivativeSrcSet(__WORKER_BASE_URL__, photo.id, [
-            {
-              rendition: 'display-1280',
-              width: photo.derivatives['display-1280'].width,
-            },
-            { rendition: 'display-2560', width: large.width },
-          ])}
-          sizes="100vw"
+          src={imageSrc ?? derivativeUrl(__WORKER_BASE_URL__, photo.id, 'display-1280')}
+          srcSet={
+            imageSrc
+              ? undefined
+              : derivativeSrcSet(__WORKER_BASE_URL__, photo.id, [
+                  {
+                    rendition: 'display-1280',
+                    width: photo.derivatives['display-1280'].width,
+                  },
+                  { rendition: 'display-2560', width: large.width },
+                ])
+          }
+          sizes={imageSrc ? undefined : '100vw'}
           width={large.width}
           height={large.height}
           alt={alt}
@@ -311,12 +403,21 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
           </dl>
         ) : null}
 
-        {/* Caption, date, and the two buttons are one stack, ordered by how
-            much they say about the photograph. On a wide screen they share a
-            right edge, which is the only alignment in the view that the
-            photo's own box does not provide. */}
+        {/* Caption, date, and the actions are one stack, ordered by how much
+            they say about the photograph. On a wide screen they share a right
+            edge, which is the only alignment in the view that the photo's own
+            box does not provide. In the admin the caption and date are the
+            edit form's own fields, in the same place. */}
         <div className="lightbox__bottom">
-          {photo.caption || dateLine ? (
+          {editable && curation ? (
+            <EditForm
+              ref={formRef}
+              // Remounted per photo, so no edit can survive an arrow press.
+              key={photo.id}
+              photo={photo}
+              onSave={(edit) => curation.edit(photo.id, edit)}
+            />
+          ) : photo.caption || dateLine ? (
             <div className="lightbox__meta">
               {/* The only hand-written words about a photograph; they stay on
                   screen while everything else moves behind a button. */}
@@ -334,9 +435,23 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
           ) : null}
 
           <div className="lightbox__actions">
-            <button type="button" onClick={onDownload} disabled={downloading}>
-              {downloading ? 'Preparing download…' : 'Download'}
-            </button>
+            {/* A trashed photo shows enough to be identified and nothing
+                more: no download of any kind, and no second delete here — the
+                trash's own bar owns Restore and Delete permanently. */}
+            {curation?.readOnly ? null : (
+              <button type="button" onClick={onDownload} disabled={downloading}>
+                {downloading ? 'Preparing download…' : 'Download'}
+              </button>
+            )}
+            {editable && curation ? (
+              <button
+                type="button"
+                className="admin-danger"
+                onClick={() => curation.trash(photo.id)}
+              >
+                Delete
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => setInfoFor(showInfo ? null : photo.id)}

@@ -552,9 +552,10 @@ async function downloadLink(photoId: string): Promise<Response> {
 /**
  * The trash view.
  *
- * Thumbnails come as signed URLs because the Worker refuses capability-URL
- * access to a trashed photo. It never signs a full-resolution URL for one:
- * a trashed photo must not be downloadable.
+ * Both images come as signed URLs because the Worker refuses capability-URL
+ * access to a trashed photo: the thumbnail for the grid, and a `display-1280`
+ * preview so the trash's photo view has something to show. It never signs a
+ * full-resolution URL for one — a trashed photo must not be downloadable.
  */
 async function listTrash(): Promise<Response> {
   const { catalog } = await loadCatalog(store(), nowIso);
@@ -562,16 +563,18 @@ async function listTrash(): Promise<Response> {
   const workerBase = requiredEnv('WORKER_BASE_URL').replace(/\/+$/, '');
   const expiresAt = nowSeconds() + SIGNED_URL_TTL_SECONDS;
 
+  const signedUrl = async (photoId: string, rendition: string) => {
+    const grant = { photoId, rendition, expiresAt };
+    return `${workerBase}${assetGrantPath(grant, await signAssetGrant(key, grant))}`;
+  };
+
   const items = await Promise.all(
-    trashedPhotos(catalog).map(async (photo) => {
-      const grant = { photoId: photo.id, rendition: 'thumb', expiresAt };
-      const signature = await signAssetGrant(key, grant);
-      return {
-        photo: toPublicPhoto(photo),
-        trashedAt: photo.trashedAt,
-        thumbnailUrl: `${workerBase}${assetGrantPath(grant, signature)}`,
-      };
-    }),
+    trashedPhotos(catalog).map(async (photo) => ({
+      photo: toPublicPhoto(photo),
+      trashedAt: photo.trashedAt,
+      thumbnailUrl: await signedUrl(photo.id, 'thumb'),
+      previewUrl: await signedUrl(photo.id, 'display-1280'),
+    })),
   );
 
   items.sort((a, b) => (a.trashedAt! < b.trashedAt! ? 1 : -1));

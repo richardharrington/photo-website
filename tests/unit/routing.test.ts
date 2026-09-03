@@ -126,11 +126,11 @@ describe('display routes', () => {
   });
 
   it('routes the API to the display function, never the admin one', () => {
-    expect(routeRequest(displayUrl('/api/hierarchy'), CONFIG)).toEqual({
+    expect(routeRequest(displayUrl('/api/timeline'), CONFIG)).toEqual({
       kind: 'api',
       mode: 'display',
       functionPath: '/.netlify/functions/display',
-      subPath: '/hierarchy',
+      subPath: '/timeline',
     });
   });
 });

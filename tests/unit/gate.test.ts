@@ -159,7 +159,7 @@ describe('API routing', () => {
     // The mode must come from which secret path was used, never from a header
     // the browser controls.
     const { context } = makeContext();
-    const req = request(`/${DISPLAY_PATH}/api/hierarchy`, {
+    const req = request(`/${DISPLAY_PATH}/api/timeline`, {
       headers: {
         [ACCESS_MODE_HEADER]: 'admin',
         [INTERNAL_SECRET_HEADER]: 'guessed',

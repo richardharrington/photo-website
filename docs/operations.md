@@ -737,7 +737,7 @@ the photo ID the rest of that group uses.
       responses here; images are covered by the Worker check below.
 
   ```sh
-  for url in "$SITE/$DISPLAY_PATH/" "$SITE/$DISPLAY_PATH/api/hierarchy" "$SITE/robots.txt"; do
+  for url in "$SITE/$DISPLAY_PATH/" "$SITE/$DISPLAY_PATH/api/timeline" "$SITE/robots.txt"; do
     echo "== $url"
     curl -sI "$url" | grep -iE '^(x-robots-tag|referrer-policy|x-content-type-options):'
   done

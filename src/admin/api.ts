@@ -1,28 +1,24 @@
 /**
  * Admin API client.
  *
- * Reads go through the same display endpoints the viewer uses — the admin
- * extends the display hierarchy rather than duplicating it — while mutations
- * are admin-only. Both live below this build's own opaque base.
+ * The reads are the shared read client, unchanged: the admin renders the same
+ * timeline and the same photo view the viewer does, so it asks for exactly
+ * what the viewer asks for. What this module adds is the mutations, and the
+ * error parsing they need — an admin acts on the library and has to be told
+ * why something was refused, where a viewer only ever reads.
+ *
+ * Both halves live below this build's own opaque base.
  */
 
-import { appRoutes } from '../shared/urls.ts';
+import { readApi, routes } from '../shared/ui/api.ts';
 import { NotFoundError } from '../shared/ui/useResource.ts';
-import type {
-  GroupResponse,
-  HierarchyResponse,
-  PhotoResponse,
-  PublicPhoto,
-} from '../shared/display-api.ts';
+import type { PublicPhoto } from '../shared/display-api.ts';
+import type { PhotoEdit } from '../shared/ui/curation.ts';
 import type { SelectionQuery } from '../shared/admin-operations.ts';
 import type { Rendition } from '../shared/constants.ts';
 import type { DerivativeDescriptor } from '../shared/catalog.ts';
 
-export const routes = appRoutes(__APP_BASE__);
-
-function pad2(value: number): string {
-  return String(value).padStart(2, '0');
-}
+export { routes };
 
 /** A rejection the API explains, as opposed to a bare failure. */
 export class ApiError extends Error {
@@ -80,27 +76,24 @@ export interface PreviewResult {
 export interface TrashItem {
   photo: PublicPhoto;
   trashedAt: string;
+  /** Short-lived signed URLs: a trashed photo has no capability URL. */
   thumbnailUrl: string;
+  previewUrl: string;
+}
+
+export interface TrashListing {
+  items: TrashItem[];
+  /** When the signed URLs above stop working. */
+  expiresAt: string;
 }
 
 export const adminApi = {
   // ---- Reads ------------------------------------------------------------
-  hierarchy: (signal?: AbortSignal) =>
-    request<HierarchyResponse>('/hierarchy', { signal: signal ?? null }),
-
-  day: (year: number, month: number, day: number, signal?: AbortSignal) =>
-    request<GroupResponse>(`/day/${year}/${pad2(month)}/${pad2(day)}`, {
-      signal: signal ?? null,
-    }),
-
-  undated: (signal?: AbortSignal) =>
-    request<GroupResponse>('/undated', { signal: signal ?? null }),
-
-  photo: (id: string, signal?: AbortSignal) =>
-    request<PhotoResponse>(`/photo/${id}`, { signal: signal ?? null }),
+  // The viewer's own projections, verbatim.
+  ...readApi,
 
   trash: (signal?: AbortSignal) =>
-    request<{ items: TrashItem[] }>('/trash', { signal: signal ?? null }),
+    request<TrashListing>('/trash', { signal: signal ?? null }),
 
   trashCount: (signal?: AbortSignal) =>
     request<{ count: number }>('/trash/count', { signal: signal ?? null }),
@@ -127,10 +120,8 @@ export const adminApi = {
   }) => post<CommitResult>('/commit', body),
 
   // ---- Curation ---------------------------------------------------------
-  edit: (
-    photoId: string,
-    edit: { date: string | null; time: string | null; caption: string | null },
-  ) => post<{ photo: PublicPhoto }>('/edit', { photoId, ...edit }),
+  edit: (photoId: string, edit: PhotoEdit) =>
+    post<{ photo: PublicPhoto }>('/edit', { photoId, ...edit }),
 
   /**
    * Both halves of a destructive action. The preview resolves a selection to
@@ -163,11 +154,6 @@ export const adminApi = {
   /** The Undo behind a just-completed trash action. */
   restore: (photoIds: string[]) =>
     post<{ restored: string[]; count: number }>('/restore', { photoIds }),
-
-  downloadLink: (photoId: string) =>
-    request<{ url: string; expiresAt: string; filename: string }>(
-      `/download/${photoId}`,
-    ),
 
   exportUrl: () => routes.api('/export'),
 };

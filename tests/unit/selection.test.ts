@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  addAll,
   allSelected,
   EMPTY_SELECTION,
   extendTo,
@@ -63,6 +64,21 @@ describe('selection', () => {
     expect(allSelected(selectAll(ids), ids)).toBe(true);
     expect(allSelected(toggle(selectAll(ids), 'c'), ids)).toBe(false);
     expect(allSelected(EMPTY_SELECTION, [])).toBe(false);
+  });
+
+  it('adds a group to the selection without replacing it', () => {
+    // A day heading's Select all. Selecting a second day must not drop the
+    // first, which is the whole difference from selectAll.
+    const held = toggle(EMPTY_SELECTION, 'a');
+    const both = addAll(held, ['c', 'd']);
+    expect(selectedIds(both).sort()).toEqual(['a', 'c', 'd']);
+
+    // Idempotent, and it leaves the anchor where a click put it.
+    expect(selectedIds(addAll(both, ['c'])).sort()).toEqual(['a', 'c', 'd']);
+    expect(both.anchorId).toBe('a');
+
+    // Unlike selectAll, which is the replacing version.
+    expect(selectedIds(selectAll(['c', 'd'])).sort()).toEqual(['c', 'd']);
   });
 
   it('drops photos, and an anchor, that have left the list', () => {

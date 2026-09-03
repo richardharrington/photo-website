@@ -6,9 +6,14 @@
  * survive a form or describe anything but a set of IDs.
  *
  * Selecting in the grid is by modifier-click only: a plain click opens the
- * detail panel, which is what a click has always done there. Marquee dragging
+ * photo view, which is what a click has always done there. Marquee dragging
  * is deliberately absent — it was tried, it never worked, and it is not needed
  * to reach any action.
+ *
+ * One selection covers the whole library, not one day: a shift-range runs
+ * across day, month, and year boundaries in timeline order, and the selection
+ * is not keyed to a route, so the headings' `replaceState` navigation leaves
+ * it alone.
  */
 
 export interface SelectionState {
@@ -60,7 +65,7 @@ export function extendTo(
 /**
  * Nothing selected, but this photo is where the next shift-click starts.
  *
- * A plain click opens the detail panel and clears the selection, and it is
+ * A plain click opens the photo view and clears the selection, and it is
  * still the "you are here" every file manager measures a range from. Without
  * this the commonest gesture of all — click one photo, shift-click another —
  * found no anchor and selected a single tile.
@@ -71,6 +76,18 @@ export function anchorOn(id: string): SelectionState {
 
 export function selectAll(orderedIds: readonly string[]): SelectionState {
   return { ids: new Set(orderedIds), anchorId: null };
+}
+
+/**
+ * Add these photos to the selection, keeping everything already in it.
+ *
+ * This is a day heading's Select all, and adding rather than replacing is what
+ * makes "this day and that one" two clicks. It sets no anchor: a range is
+ * measured from a tile someone actually clicked, and a whole day has no one
+ * tile to measure from.
+ */
+export function addAll(state: SelectionState, ids: readonly string[]): SelectionState {
+  return { ids: new Set([...state.ids, ...ids]), anchorId: state.anchorId };
 }
 
 export function allSelected(

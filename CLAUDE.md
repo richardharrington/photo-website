@@ -60,12 +60,12 @@ the catalog.
 
 Four runtimes share one `src/shared/` model layer:
 
-| Runtime           | Entry                                           | Reaches R2 via                |
-| ----------------- | ----------------------------------------------- | ----------------------------- |
-| Viewer app        | `src/display/` (own Vite build)                 | —                             |
-| Admin app         | `src/admin/` + `src/pipeline/` (own Vite build) | presigned S3 PUTs             |
-| Netlify Functions | `netlify/functions/{display,admin}.ts`          | S3 API (`@aws-sdk/client-s3`) |
-| Cloudflare Worker | `worker/src/index.ts`                           | native R2 binding             |
+| Runtime           | Entry                                                              | Reaches R2 via                |
+| ----------------- | ------------------------------------------------------------------ | ----------------------------- |
+| Viewer app        | `src/display/` + `src/shared/ui/` (own Vite build)                 | —                             |
+| Admin app         | `src/admin/` + `src/pipeline/` + `src/shared/ui/` (own Vite build) | presigned S3 PUTs             |
+| Netlify Functions | `netlify/functions/{display,admin}.ts`                             | S3 API (`@aws-sdk/client-s3`) |
+| Cloudflare Worker | `worker/src/index.ts`                                              | native R2 binding             |
 
 There is no database. `catalog/current.json` in the private R2 bucket is the
 whole model; every mutation is an ETag-guarded conditional write with
@@ -98,6 +98,10 @@ export.
 shared chunk can put admin code under the display path. Nothing in the display
 module graph may import from `src/admin/`.
 
+Nothing under `src/shared/` may import from either app. The admin augments the
+shared UI through `CurationContext`; the viewer provides `null`, so the viewer
+bundle carries the branches and never the admin modules.
+
 Only the three values in `clientDefines()` (`config/build-env.ts`) are inlined
 into a bundle — no `VITE_` prefix auto-inlining, so a secret cannot reach a
 browser by being named carelessly. A build with `NETLIFY=true` and a missing
@@ -120,10 +124,11 @@ in the Vite dev server, running the _real_ projection and mutation code over an
 in-memory store. Only storage and image bytes are fake.
 
 It is nonetheless **more permissive than production**, and that has shipped
-bugs. Its admin handler falls through to `handleDisplay` for any unrecognized
-GET, which hid the admin API missing four read routes entirely — the fix was
-`netlify/functions/lib/read-routes.ts`, shared by both functions. When adding a
-route, add it to the real function, not just to the fixture server.
+bugs. Its admin handler still falls through to `handleDisplay` for any
+unrecognized GET, which once hid the admin API missing the viewer's read routes
+entirely — the fix was `netlify/functions/lib/read-routes.ts`, shared by both
+functions. When adding a route, add it to the real function, not just to the
+fixture server.
 
 ## Invariants worth knowing before editing
 
@@ -141,7 +146,9 @@ route, add it to the real function, not just to the fixture server.
 - **Decode and encode are strictly serial**, one file at a time
   (`src/pipeline/index.ts`). `UPLOAD_CONCURRENCY` governs uploads only.
 - **`src/shared/` (outside `ui/` and `styles/`) must stay free of DOM, Node,
-  and Workers globals** — it is compiled into all three targets.
+  and Workers globals** — it is compiled into all three targets. `ui/` is the
+  only place under `src/shared/` where DOM globals are allowed;
+  `src/shared/timeline-patch.ts` is not in it and must stay runtime-neutral.
 - **`full` is excluded from `DISPLAY_RENDITIONS`.** The full-resolution JPEG is
   reachable only through a short-lived HMAC-signed URL, never from a photo ID.
 - Objects never move. Trash is a catalog field; only permanent deletion or the

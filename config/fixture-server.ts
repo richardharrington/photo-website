@@ -16,12 +16,9 @@ import type { Plugin } from 'vite';
 import { fixtureCatalog } from '../fixtures/catalog.ts';
 import { InMemoryObjectStore } from '../fixtures/in-memory-store.ts';
 import {
-  dayResponse,
-  hierarchyResponse,
   photoResponse,
   timelineResponse,
   toPublicPhoto,
-  undatedResponse,
 } from '../src/shared/display-api.ts';
 import { getLivePhoto, trashedPhotos } from '../src/shared/catalog.ts';
 import type { Catalog } from '../src/shared/catalog.ts';
@@ -182,14 +179,6 @@ async function serveAsset(
 async function handleDisplay(route: string, res: ServerResponse): Promise<boolean> {
   const catalog = await currentCatalog();
 
-  if (route === '/hierarchy') {
-    sendJson(
-      res,
-      200,
-      hierarchyResponse(catalog, process.env.SITE_TITLE ?? 'Family Photos'),
-    );
-    return true;
-  }
   if (route === '/timeline') {
     sendJson(
       res,
@@ -198,19 +187,6 @@ async function handleDisplay(route: string, res: ServerResponse): Promise<boolea
     );
     return true;
   }
-  if (route === '/undated') {
-    sendJson(res, 200, undatedResponse(catalog));
-    return true;
-  }
-
-  const day = /^\/day\/(\d{4})\/(\d{2})\/(\d{2})$/.exec(route);
-  if (day) {
-    const body = dayResponse(catalog, Number(day[1]), Number(day[2]), Number(day[3]));
-    if (body) sendJson(res, 200, body);
-    else sendNotFound(res);
-    return true;
-  }
-
   const photo = /^\/photo\/([0-9a-f]{32})$/.exec(route);
   if (photo) {
     const body = photoResponse(catalog, photo[1]!);
@@ -260,10 +236,17 @@ async function handleAdmin(
         .map((photo) => ({
           photo: toPublicPhoto(photo),
           trashedAt: photo.trashedAt,
+          // Production signs a grant per rendition; locally the signed route
+          // is unsigned, so the trash's grid and photo view are exercisable.
+          // Never `full`: a trashed photo must not be downloadable.
           thumbnailUrl: `/d/${photo.id}/thumb`,
+          previewUrl: `/d/${photo.id}/display-1280`,
         }))
         .sort((a, b) => (a.trashedAt! < b.trashedAt! ? 1 : -1));
-      sendJson(res, 200, { items });
+      sendJson(res, 200, {
+        items,
+        expiresAt: new Date(Date.now() + SIGNED_URL_TTL_SECONDS * 1000).toISOString(),
+      });
       return true;
     }
 

@@ -23,6 +23,7 @@ import { routes } from './api.ts';
 import { Layout } from './Layout.tsx';
 import { Empty, ErrorState, Loading, NotFound } from './States.tsx';
 import { PhotoGrid } from './PhotoGrid.tsx';
+import { SelectAll } from './SelectAll.tsx';
 import { scrollToElementId, takeScrollRequest } from './scroll.ts';
 import type { TimelineMonth, TimelineResponse, TimelineYear } from '../display-api.ts';
 
@@ -256,6 +257,9 @@ export function TimelinePage({ resource, target, nav, above }: TimelinePageProps
                           {monthName(month.month)} {day.day}
                         </span>
                       </Link>
+                      {/* Outside the anchor, so selecting a day does not also
+                          navigate to it. Nothing at all in the viewer. */}
+                      <SelectAll ids={day.photos.map((photo) => photo.id)} />
                     </h4>
                     <PhotoGrid photos={day.photos} />
                   </section>
@@ -274,6 +278,7 @@ export function TimelinePage({ resource, target, nav, above }: TimelinePageProps
                   {photoCount(timeline.undated.count)}
                 </span>
               </Link>
+              <SelectAll ids={timeline.undated.photos.map((photo) => photo.id)} />
             </h2>
             {timeline.undated.count === 0 ? (
               <Empty>No undated photos.</Empty>

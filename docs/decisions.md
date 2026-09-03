@@ -394,3 +394,149 @@ API-contract change beyond one added read route.
     thing only: the enlarged photo first, the panel once there is nothing over
     it, and while it is open a click outside is its business rather than a
     click outside the panel.
+
+## The admin becomes the viewer — 2026-09-03
+
+The viewer became the better way to reach a photograph — one scroll, arrow
+keys across the whole library — while the admin stayed four clicks deep and
+had drifted into a second implementation of the same hierarchy. The admin is
+now the viewer plus curation. What the family sees does not change at all: the
+first stage was a pure refactor with an identical rendered viewer, and the
+second adds nothing to the display bundle but a few branches.
+
+38. **Two builds, one UI library.** The viewer's pages, components, routes,
+    scroll, and read client moved to `src/shared/ui/`, which both apps import;
+    `src/display/` and `src/admin/` keep an entry, an `App`, an API client,
+    and an `index.html`. Rejected: leaving the code in `src/display/` and
+    having the admin import it, because the display build's root would then
+    double as the admin's component library, and the one-directional "display
+    never imports admin" rule would have to be policed by reading. With a
+    shared tree the rule is symmetric and greppable: nothing under
+    `src/shared/` names `src/display` or `src/admin`. The two Vite builds, the
+    two opaque paths, the gate, and both Functions are untouched.
+
+39. **Curation is a React context.** `src/shared/ui/curation.ts` exports a
+    `CurationContext` whose value is `null` in the viewer and a typed object
+    in the admin; shared components check for its presence and read callbacks
+    from it. Nothing in the shared tree imports admin code — the context
+    carries nothing the viewer could not compile against — so the viewer ships
+    the branches and never the modules, at about 5 kB. Rejected: render props
+    and slots, which is prop threading by another name, and assembling each
+    page from smaller pieces, which would have meant two page layouts to keep
+    in step.
+
+40. **A plain click on a tile opens the photo view, in both apps, and the
+    admin's editing lives there.** The side detail panel, its enlarged-preview
+    overlay, the admin grid, and the level-by-level browse are gone. This
+    supersedes #37: the photo view *is* the enlarged view, so there is no
+    layer over a panel to close in order.
+
+41. **The photo view's bottom-left stack holds the edit form, always.** Where
+    the viewer shows caption and date as text, the admin shows capture date,
+    capture time, and caption as fields with **Save changes**, and beneath
+    them **Download**, **Delete**, **Photo info**. No Edit toggle: editing is
+    what an administrator is there for, and a toggle puts a click in front of
+    every correction. The form needs room a caption does not, so under
+    curation the stage starts clear of a fixed gutter and the picture centres
+    in what is left — the stack takes that gutter outright rather than hanging
+    off `--photo-left` as the viewer's does (#32), because the previous-photo
+    button sits exactly where a stack measured from the picture would end.
+
+42. **Explicit Save, and an unsaved edit is discarded silently** on arrow
+    navigation, Escape, and close, exactly as the old panel discarded it. The
+    form is keyed on the photo's ID, so arrowing remounts it with the stored
+    values; keying on the metadata too would remount it the moment a save came
+    back and wipe the "Saved" mark the user was meant to see.
+
+43. **Fields own the keyboard while focused.** With focus inside the form,
+    ArrowLeft, ArrowRight, Delete, Backspace, and Escape do what they do in a
+    text field, and the photo view's handlers ignore them; Escape blurs the
+    field, and a second Escape closes the view. This is a correctness rule,
+    not a preference: the handler is on `window`, so without it an arrow would
+    change photo while the caret was meant to move and Backspace would delete
+    the photograph instead of a character. The same handler stands down
+    entirely when something outside the dialog holds focus, which is how the
+    confirmation dialog stops Escape from cancelling it *and* closing the view
+    behind it.
+
+44. **Delete advances.** After a photo is trashed from the photo view, the
+    view moves to the next photo in library order, or the previous one if it
+    was last, or closes if the library is now empty. Triage of a bad day is
+    Delete, confirm, Delete, confirm. The next photo is computed from the
+    order *before* the patch, which is the only place the trashed photo's
+    neighbours are still written down, and the navigation is a `replace`, so
+    Back does not land on a photo that is a 404 now.
+
+45. **Every delete is confirmed, single or bulk,** through the existing
+    preview/confirm token dialog (#12); Enter confirms, because the dialog
+    focuses its own confirm button. Delete and Backspace are keyboard
+    shortcuts for it in the photo view, subject to #43. Rejected: skipping the
+    dialog for single deletes with Undo as the only net — the dialog states
+    the resolved count, and a resolved count is the thing worth reading.
+
+46. **The Undo offer lasts five seconds and nothing else retires it.** Not
+    arrowing, not closing the photo view, not clicking a heading. This
+    replaces the admin's old "any navigation retires the offer" rule, because
+    #44 makes advancing after a delete a navigation, and the rule would have
+    withdrawn the offer before it could be read. A second deletion inside
+    those five seconds replaces the banner with a fresh one for its own
+    photos, keyed by what it would put back so it inherits no clock.
+
+47. **Selection spans the whole library.** One selection for the page, and a
+    shift-range runs across day, month, and year boundaries in timeline order,
+    from the same index the arrows step through. It is not keyed to a route,
+    so the headings' `replaceState` navigation leaves it alone.
+
+48. **Select all moved from the toolbar to each day heading, and the toolbar
+    became a sticky bar.** This amends #36. There is no library-wide Select
+    all — one click that marks a decade for deletion is a blast radius, and
+    the day is the unit the page is already organised by — and a day's control
+    *adds* to the selection rather than replacing it, so two days is two
+    clicks. While anything is selected a bar pinned to the top of the viewport
+    shows the count, **Delete selected**, and **Deselect all**; with nothing
+    selected there is no bar. #36's "never a disabled button" rule still
+    holds for both: the day's control is absent once its whole day is
+    selected, and returns when one photo is deselected. The bar measures
+    itself and publishes its height to the root, because the pinned year and
+    month headings have to move down out from under it and it wraps on a
+    narrow window — a number written in two places is a number that
+    disagrees with itself.
+
+    This also amends #35: a plain click now opens the photo view rather than a
+    panel, and "a second marked photo closes the panel" no longer applies,
+    there being no panel. Everything else in #35 stands, the plain-clicked
+    tile still being the anchor.
+
+49. **After a mutation the admin patches the timeline in memory from the
+    server's reply, then refetches in the background.** Immediate UI, one
+    source of truth a moment later, and at most one refetch in flight. The
+    patch functions are pure and unit-tested against the same counts-agree
+    invariant the projection guarantees, because a patch that broke it would
+    put the page into a state the server could never produce — an empty day
+    heading, or a count that disagrees with the tiles under it. `upsertPhoto`
+    cannot place a *date-only* photo exactly: those are ordered by
+    `(batchSeq, selectionIndex)` and a `PublicPhoto` deliberately carries
+    neither, so it lands after the day's timed photos and the refetch settles
+    it. Restore has no patch at all — the restored photo is not in the
+    response the client holds — and an upload batch only refetches.
+
+50. **`/hierarchy`, `/day`, and `/undated` are gone from both Functions, the
+    fixture server, and the shared projection.** This supersedes #26, whose
+    whole reason for keeping them was that the admin still browsed level by
+    level. `/timeline` and `/photo` are the only read projections now. They
+    return `null` from the shared route table rather than a 404, so a stale
+    client asking for one gets the same plain 404 as any other unknown path.
+
+51. **The trash is the same grid and the same photo view, read-only.** Its
+    listing gained a signed `display-1280` preview URL alongside the
+    thumbnail, so the photo view has something to show; `full` is never signed
+    for a trashed photo and there is no download of any kind. Its photo view
+    is local state rather than a route, because a trashed photo's
+    `/photo/<id>` is a 404 by design — which is also why its tiles are buttons
+    rather than links, there being no address to link to.
+
+52. **Two stages, shipped separately.** The first moved the viewer into
+    `src/shared/ui/` with no behaviour change, verified by the display and
+    mobile suites passing unchanged. The second replaced the admin on top of
+    it. Splitting them is what made "the viewer did not change" a claim a test
+    run could settle rather than a claim about a diff.

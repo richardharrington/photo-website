@@ -1,68 +1,15 @@
 /*
- * Admin styles.
+ * Admin styles: what the admin adds to the viewer's own stylesheet, and
+ * nothing else.
+ *
+ * display.css is the base for both apps, because the admin *is* the viewer
+ * with curation on top — the same header, the same timeline, the same grid,
+ * the same photo view. Everything here either fills the two slots the shared
+ * layout leaves open, or marks and edits what the shared components render.
  *
  * Laptop-oriented: selecting takes a modifier key and a pointer. Mobile
  * viewing is responsive; touch-specific bulk selection is out of scope.
  */
-
-.admin {
-  min-height: 100vh;
-}
-
-.admin__header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space);
-  padding: var(--space) calc(var(--space) * 1.5);
-  border-bottom: 1px solid var(--border);
-}
-
-.admin__title {
-  color: var(--fg);
-  text-decoration: none;
-  font-weight: 600;
-}
-
-.admin__nav {
-  display: flex;
-  gap: var(--space);
-  font-size: 0.9375rem;
-}
-
-.admin__nav a {
-  color: var(--fg-muted);
-  text-decoration: none;
-}
-
-.admin__nav a:hover {
-  color: var(--fg);
-  text-decoration: underline;
-}
-
-.admin__main {
-  max-width: 78rem;
-  margin: 0 auto;
-  padding: calc(var(--space) * 1.5);
-}
-
-.admin__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space);
-  margin-bottom: var(--space);
-}
-
-.admin__toolbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.875rem;
-  color: var(--fg-muted);
-}
 
 button {
   font: inherit;
@@ -78,6 +25,69 @@ button {
 button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* The one colour in the interface that is not a photograph: everything that
+   destroys something wears it, and nothing else does. */
+.admin-danger {
+  border-color: #b91c1c;
+  color: #b91c1c;
+}
+
+.admin-error {
+  color: #b91c1c;
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .admin-danger,
+  .admin-error {
+    color: #fca5a5;
+  }
+}
+
+/* An app-level failure can happen while the photo view is covering the page,
+   so it is fixed above everything the page itself draws. */
+.admin-banner {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  padding: 0.5rem var(--space);
+  border: 1px solid var(--border);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  background: var(--bg-raised);
+}
+
+/* Header ----------------------------------------------------------------- */
+
+/* Only the admin fills the header's nav slot. The viewer's header holds the
+   site's name alone and keeps its plain block layout, untouched. */
+.layout__header:has(.layout__nav) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+}
+
+.layout__nav {
+  display: flex;
+  gap: var(--space);
+  font-size: 0.9375rem;
+}
+
+.layout__nav a {
+  color: var(--fg-muted);
+  text-decoration: none;
+}
+
+.layout__nav a:hover {
+  color: var(--fg);
+  text-decoration: underline;
 }
 
 /* Upload ----------------------------------------------------------------- */
@@ -193,72 +203,16 @@ button:disabled {
   width: 8rem;
 }
 
-/* Admin grid ------------------------------------------------------------- */
+/* Tiles ------------------------------------------------------------------ */
 
-/* Masonry, matching the viewer's grid; see display.css for the reasoning and
-   for what it costs in reading order. */
-.admin-grid {
-  list-style: none;
-  margin: 0;
-  padding: 0.25rem;
-  column-width: 9rem;
-  column-gap: 0.75rem;
-  min-height: 12rem;
-}
-
-.admin-grid__item {
+/* Room beneath every thumbnail for its filename, which only the admin shows. */
+.photo-grid__item {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  /* Keeps a thumbnail and its filename together in one column. */
-  break-inside: avoid;
-  margin: 0 0 0.75rem;
 }
 
-/* No fixed aspect: the tile takes the photo's own shape, so nothing is
-   cropped and nothing is letterboxed. Rows come out ragged as a result. */
-.admin-grid__tile {
-  display: block;
-  /* Holds the selected tile's wash. */
-  position: relative;
-  padding: 0;
-  border: 2px solid transparent;
-  border-radius: 3px;
-  overflow: hidden;
-  background: var(--bg-raised);
-}
-
-/* The photo the detail panel is showing. */
-.admin-grid__tile--open {
-  border-color: var(--focus);
-}
-
-/* Selected for a bulk delete. A wash over the thumbnail as well as a border:
-   the open tile already owns the border, both states can land on the same
-   tile, and a selection has to be readable at a glance across many tiles. */
-.admin-grid__tile--selected {
-  border-color: var(--focus);
-}
-
-.admin-grid__tile--selected::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: color-mix(in srgb, var(--focus) 25%, transparent);
-}
-
-.admin-grid__image {
-  display: block;
-  width: 100%;
-  /* The width and height attributes on the element give the browser the
-     aspect ratio up front, so the space is still reserved before the image
-     arrives and the grid does not reflow as thumbnails load. */
-  height: auto;
-  pointer-events: none;
-}
-
-/* Every admin thumbnail shows its original filename, unlike the viewer. */
-.admin-grid__filename {
+.photo-grid__filename {
   font-size: 0.75rem;
   color: var(--fg-muted);
   overflow: hidden;
@@ -266,184 +220,237 @@ button:disabled {
   white-space: nowrap;
 }
 
-/* Detail panel ----------------------------------------------------------- */
-
-.detail {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(24rem, 100vw);
-  overflow-y: auto;
-  padding: var(--space);
-  background: var(--bg);
-  border-left: 1px solid var(--border);
-  box-shadow: -8px 0 24px rgb(0 0 0 / 12%);
-  z-index: 5;
-}
-
-/* Wraps rather than crushing the filename: on a narrow panel the controls
-   drop to their own line, which is still above the preview. */
-.detail__header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.detail__header-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.detail__title {
-  font-size: 0.9375rem;
-  font-weight: 600;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-/* The preview is a button: neither a thumbnail nor a 24rem preview always
-   settles whether a photograph is worth deleting. */
-.detail__preview-button {
-  display: block;
-  width: 100%;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: none;
-  cursor: zoom-in;
-}
-
-.detail__preview {
-  width: 100%;
-  /* Capped so the metadata form stays close to the top of the panel. A
-     portrait photo at this width would otherwise be about 500px tall and
-     push the date, time, and caption fields off a short window. */
-  max-height: 40vh;
-  object-fit: contain;
-  margin: var(--space) 0;
-  border-radius: 4px;
-}
-
-.detail__form {
+/* The trash's dates. Two short lines rather than one long one, because a
+   filename above them is already as wide as the tile. */
+.photo-grid__note {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-}
-
-.detail__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  font-size: 0.875rem;
-}
-
-.detail__field span {
+  font-size: 0.75rem;
   color: var(--fg-muted);
 }
 
-.detail__field input,
-.detail__field textarea {
+/* The trash's tiles open in place, so they are buttons rather than links;
+   the viewer's tile styling is on the shared class either way. */
+button.photo-grid__link {
+  width: 100%;
+  padding: 0;
+  text-align: left;
+}
+
+/* Selected for a bulk delete: a wash over the thumbnail as well as a border,
+   because a selection has to be readable at a glance across many tiles. The
+   border is transparent until then, so nothing shifts when a tile is marked. */
+.photo-grid__link {
+  position: relative;
+  border: 2px solid transparent;
+}
+
+.photo-grid__link--selected {
+  border-color: var(--focus);
+}
+
+.photo-grid__link--selected::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--focus) 25%, transparent);
+}
+
+/* Select all, and the sticky bar ------------------------------------------ */
+
+/* Each heading gains its own Select all at the right end. The anchor keeps
+   the rest of the line, so the heading is still one wide click target. */
+.timeline__day-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.timeline__anchor {
+  flex: 1;
+  width: auto;
+}
+
+.timeline__select-all {
+  flex: none;
+  font-size: 0.75rem;
+  font-weight: 400;
+  padding: 0.15rem 0.5rem;
+  color: var(--fg-muted);
+}
+
+.timeline__select-all:hover {
+  color: var(--fg);
+}
+
+.selection-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  /* Over the pinned year and month headings, which move down to meet it. */
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem calc(var(--space) * 1.5);
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--border);
+}
+
+.selection-bar__count {
+  margin-right: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The pinned headings sit below the bar while it is shown.
+ *
+ * The bar measures itself and publishes its height to the root, because it
+ * wraps on a narrow window; with no bar the variable is absent and every
+ * offset below falls back to the viewer's own. These override display.css,
+ * which is imported first.
+ */
+.timeline__year-heading {
+  top: var(--selection-bar-height, 0px);
+}
+
+.timeline__month-heading {
+  top: calc(var(--timeline-year-height) + var(--selection-bar-height, 0px));
+}
+
+.timeline__year {
+  scroll-margin-top: var(--selection-bar-height, 0px);
+}
+
+.timeline__month {
+  scroll-margin-top: calc(
+    var(--timeline-year-height) + var(--selection-bar-height, 0px)
+  );
+}
+
+.timeline__day,
+.photo-grid__item {
+  scroll-margin-top: calc(
+    var(--timeline-stack-height) + var(--selection-bar-height, 0px)
+  );
+}
+
+/* The edit form, in the photo view ---------------------------------------- */
+
+/*
+ * Where the viewer shows a caption and a date, the admin shows the fields
+ * that produce them, in the same corner of the same view. It shares the
+ * stack's right edge on a wide screen, and takes the full width of the footer
+ * row below the shared 40rem breakpoint.
+ *
+ * Capped and scrollable rather than allowed to grow: the stack hangs off the
+ * bottom of the picture, and a form tall enough to climb over a landscape
+ * photograph on a short window would push the photo out of its own box. The
+ * cap leaves room for the action row beneath it and the back link above.
+ */
+.edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: 100%;
+  max-height: calc(100vh - 14rem);
+  overflow-y: auto;
+}
+
+.edit-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  font-size: 0.8125rem;
+}
+
+.edit-form__field span {
+  color: var(--fg-muted);
+}
+
+.edit-form__field input,
+.edit-form__field textarea {
   font: inherit;
   font-size: 0.9375rem;
-  padding: 0.4rem 0.5rem;
+  padding: 0.3rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg);
   color: var(--fg);
 }
 
-.detail__field input:disabled {
+.edit-form__field input:disabled {
   opacity: 0.5;
 }
 
-.detail__actions {
+.edit-form__actions {
   display: flex;
   align-items: center;
   gap: 0.75rem;
 }
 
-.detail__saved {
+.edit-form__saved {
   color: var(--fg-muted);
   font-size: 0.875rem;
 }
 
-.detail__error {
-  color: #b91c1c;
+/* Which file is on screen, without opening Photo info. Muted, and in the
+   corner the back link does not use. */
+.lightbox__filename {
+  color: var(--fg-muted);
   font-size: 0.875rem;
-  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-@media (prefers-color-scheme: dark) {
-  .detail__error {
-    color: #fca5a5;
+@media (min-width: 40rem) {
+  .lightbox__filename {
+    position: absolute;
+    top: var(--space);
+    right: var(--space);
+    z-index: 2;
+    max-width: 40%;
   }
-}
 
-/* Reads as the text it is, rather than as another button competing with
-   Download and Delete just below it. */
-.detail__close {
-  padding: 0 0.25rem;
-  border: none;
-  background: none;
-  color: var(--fg-muted);
-  font-family: var(--font);
-  font-size: 0.875rem;
-  line-height: 1.4;
-  cursor: pointer;
-}
+  /*
+   * The picture makes room for the form.
+   *
+   * In the viewer the bottom-left stack lives in whatever margin a centred
+   * photograph happens to leave, which for a caption is enough and for a
+   * landscape photograph on a wide window is about a hundred pixels. A form
+   * cannot wrap into that. So the stage starts clear of a fixed gutter and the
+   * picture centres in what is left.
+   *
+   * The stack takes that gutter outright rather than hanging off
+   * `--photo-left` as it does in the viewer: the previous-photo button lives
+   * at the stage's own left edge, which is exactly where a stack measured from
+   * the picture would end. A fixed line is also the better edge for a column
+   * of fields, which have one of their own already.
+   */
+  .lightbox--editing .lightbox__stage {
+    left: 21rem;
+  }
 
-.detail__close:hover {
-  color: var(--fg);
-}
+  .lightbox--editing .lightbox__foot {
+    right: calc(100% - 20rem);
+  }
 
-.detail__delete {
-  border-color: #b91c1c;
-  color: #b91c1c;
-}
+  /* Three buttons across rather than down: the form has already made the
+     column wide enough, and the stack is tall enough without them stacked. */
+  .lightbox--editing .lightbox__actions {
+    flex-direction: row;
+  }
 
-/* Enlarged photo --------------------------------------------------------- */
-
-/* Rendered inside the panel, so it is inside the panel's stacking context and
-   covers the panel and the grid alike without competing z-indexes. */
-.zoom {
-  position: fixed;
-  inset: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgb(0 0 0 / 72%);
-}
-
-/* Shrink-wraps the picture, so the [x] hangs on the corner of the photograph
-   itself rather than the corner of a box stretched around it — and so every
-   pixel that is not the photograph is backdrop, and closes on a click. */
-.zoom__figure {
-  position: relative;
-  line-height: 0;
-}
-
-/* As large as the window allows, less a margin of dimmed page all round, so
-   it reads as a photograph laid over the site rather than a new screen. */
-.zoom__image {
-  display: block;
-  width: auto;
-  height: auto;
-  max-width: 92vw;
-  max-height: 92vh;
-  border-radius: 2px;
-}
-
-.zoom__close {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  line-height: 1;
-  padding: 0.25rem 0.5rem;
+  /* Closer than the viewer's caption-to-buttons gap: the form is already tall,
+     and the picture's bottom edge is aligned to the action row either way. */
+  .lightbox--editing .lightbox__bottom {
+    gap: 0.75rem;
+  }
 }
 
 /* Confirmation and undo -------------------------------------------------- */
@@ -487,6 +494,14 @@ button:disabled {
   color: #b91c1c;
 }
 
+@media (prefers-color-scheme: dark) {
+  .confirm__destructive {
+    color: #fca5a5;
+  }
+}
+
+/* Above everything, the photo view included: the offer outlives whatever
+   navigation follows the delete that raised it. */
 .undo {
   position: fixed;
   left: 50%;
@@ -506,63 +521,7 @@ button:disabled {
 /* Trash ------------------------------------------------------------------ */
 
 .trash__intro {
+  margin-top: 0;
   color: var(--fg-muted);
   font-size: 0.9375rem;
-}
-
-.trash__toolbar {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: var(--space);
-  font-size: 0.875rem;
-  color: var(--fg-muted);
-}
-
-.trash__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
-  gap: var(--space);
-}
-
-.trash__item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.trash__tile {
-  padding: 0;
-  aspect-ratio: 1;
-  border: 2px solid transparent;
-  border-radius: 3px;
-  overflow: hidden;
-  background: var(--bg-raised);
-}
-
-.trash__tile--selected {
-  border-color: var(--focus);
-}
-
-.trash__tile img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.trash__meta {
-  display: flex;
-  flex-direction: column;
-  font-size: 0.75rem;
-  color: var(--fg-muted);
-}
-
-.trash__filename {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--fg);
 }

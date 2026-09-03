@@ -43,49 +43,6 @@
   padding: calc(var(--space) * 1.5);
 }
 
-.layout__title {
-  font-size: 1.5rem;
-  font-weight: 600;
-  margin: 0 0 calc(var(--space) * 1.5);
-}
-
-/* Group indexes ---------------------------------------------------------- */
-
-/* The viewer has no index pages any more; these belong to the admin app's own
-   month and day lists, which still browse level by level. */
-
-.group-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  border-top: 1px solid var(--border);
-}
-
-.group-list__link {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: var(--space);
-  padding: 0.875rem 0.25rem;
-  border-bottom: 1px solid var(--border);
-  color: var(--fg);
-  text-decoration: none;
-}
-
-.group-list__link:hover {
-  background: var(--bg-raised);
-}
-
-.group-list__label {
-  font-size: 1.0625rem;
-}
-
-.group-list__count {
-  color: var(--fg-muted);
-  font-size: 0.875rem;
-  font-variant-numeric: tabular-nums;
-}
-
 /* Timeline --------------------------------------------------------------- */
 
 /* The year and month headings pin to the top while scrolling, so a page
@@ -510,8 +467,7 @@
   }
 }
 
-/* Shared with the admin detail panel; the photo view's own panel resets the
-   margin, which only the admin layout needs. */
+/* The photo view's information panel, which resets this margin above. */
 .photo-info {
   margin: var(--space) 0 0;
   display: grid;

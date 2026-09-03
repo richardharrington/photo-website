@@ -18,55 +18,13 @@ import { ErrorState, Loading, NotFound } from './States.tsx';
 import { Lightbox } from './Lightbox.tsx';
 import { requestScrollTo } from './scroll.ts';
 import { tileAnchor } from './PhotoGrid.tsx';
-import type {
-  GroupRef,
-  PhotoResponse,
-  PublicPhoto,
-  TimelineResponse,
-} from '../display-api.ts';
+import { indexTimeline } from './timeline-index.ts';
+import type { GroupRef, PhotoResponse, TimelineResponse } from '../display-api.ts';
 
 function groupHref(group: GroupRef): string {
   return group.kind === 'undated'
     ? routes.undated()
     : routes.day(group.year, group.month, group.day);
-}
-
-interface TimelineIndex {
-  /** Every photo ID in display order: days newest first, then undated. */
-  orderedIds: string[];
-  photos: Map<string, PublicPhoto>;
-  groups: Map<string, GroupRef>;
-}
-
-function indexTimeline(data: TimelineResponse): TimelineIndex {
-  const orderedIds: string[] = [];
-  const photos = new Map<string, PublicPhoto>();
-  const groups = new Map<string, GroupRef>();
-
-  for (const year of data.years) {
-    for (const month of year.months) {
-      for (const day of month.days) {
-        for (const photo of day.photos) {
-          orderedIds.push(photo.id);
-          photos.set(photo.id, photo);
-          groups.set(photo.id, {
-            kind: 'day',
-            year: year.year,
-            month: month.month,
-            day: day.day,
-          });
-        }
-      }
-    }
-  }
-
-  for (const photo of data.undated.photos) {
-    orderedIds.push(photo.id);
-    photos.set(photo.id, photo);
-    groups.set(photo.id, { kind: 'undated' });
-  }
-
-  return { orderedIds, photos, groups };
 }
 
 interface PhotoPageProps {

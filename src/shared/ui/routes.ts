@@ -16,6 +16,13 @@ export type Route =
   | { kind: 'day'; year: number; month: number; day: number }
   | { kind: 'undated' }
   | { kind: 'photo'; id: string }
+  /**
+   * A page one app has and the other does not. The admin passes `['trash']`
+   * and gets `{ kind: 'page', name: 'trash' }`; the viewer passes nothing, so
+   * `/trash` under the display base is its own 404 — the same parser, and no
+   * admin vocabulary in the display bundle.
+   */
+  | { kind: 'page'; name: string }
   | { kind: 'not-found' };
 
 const NOT_FOUND: Route = { kind: 'not-found' };
@@ -29,8 +36,16 @@ const TWO_DIGIT_RE = /^\d{2}$/;
  * Anything malformed becomes `not-found` rather than being coerced, so a
  * mistyped URL shows the site's own 404 instead of an empty group that looks
  * like a real but deleted one.
+ *
+ * `extra` names the app's own top-level pages, which parse only when they
+ * appear alone. It is checked last, so no app can shadow a group, a photo, or
+ * the undated section with a page of its own.
  */
-export function parseRoute(pathname: string, base: string): Route {
+export function parseRoute(
+  pathname: string,
+  base: string,
+  extra: readonly string[] = [],
+): Route {
   const root = base.replace(/\/+$/, '');
   if (!pathname.startsWith(root)) return NOT_FOUND;
 
@@ -47,6 +62,11 @@ export function parseRoute(pathname: string, base: string): Route {
     const id = segments[1];
     if (segments.length !== 2 || !id || !isValidPhotoId(id)) return NOT_FOUND;
     return { kind: 'photo', id };
+  }
+
+  const first = segments[0];
+  if (first !== undefined && extra.includes(first)) {
+    return segments.length === 1 ? { kind: 'page', name: first } : NOT_FOUND;
   }
 
   const [rawYear, rawMonth, rawDay] = segments;

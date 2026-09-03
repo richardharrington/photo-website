@@ -5,10 +5,10 @@ import { fixtureCatalog, FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
 /**
  * The timeline projection: the whole library in one response.
  *
- * It is built from the same hierarchy the old index pages used, and these
- * tests exist to pin that it stays that way — every ordering and visibility
- * rule the viewer depends on now arrives in a single payload, so a regression
- * here is a regression in the entire page rather than in one route.
+ * It is built from the same grouping the level-by-level projections were, and
+ * these tests exist to pin that it stays that way — it is now the only
+ * projection either app reads, so every ordering and visibility rule arrives
+ * in one payload, and a regression here is a regression in the whole page.
  */
 
 const catalog = fixtureCatalog();

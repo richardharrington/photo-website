@@ -291,41 +291,48 @@ queue with overall and per-file status rather than an arbitrary batch limit.
 
 ## Admin site
 
-The admin extends the display hierarchy and adds curation controls.
+The admin site is the display site with curation added. It is the same
+one-page timeline and the same photo view, reached through its own opaque
+path, and everything below applies on top of the display site's rules.
 
-- Clicking a thumbnail opens a detail panel with editable date, time, caption,
-  original filename/information, an original-size download action, and a delete
-  action.
-- The panel's preview opens the photograph again at nearly full screen, over a
-  dimmed page, with an **[x]** on the picture's own top-right corner. A click
-  outside it, the [x], or Escape closes it and leaves the panel open. Neither a
-  thumbnail nor a panel-width preview always settles whether a photograph is
-  worth keeping, and that decision is what the panel is for.
-- Every thumbnail in the main admin grid shows the original filename. A
-  persistent **Trash** navigation link with an item count leads to recovery and
-  permanent-deletion controls.
-- Normal click opens the detail panel and clears the selection. Modifier-click
-  (Command, or Control away from a Mac) selects a photo instead, and shift-click
-  extends the selection from the last photo modifier-clicked. There is no
-  marquee dragging.
-- Above the grid, right-aligned, sit **Delete selected**, **Select all**, and
-  **Deselect all**, in that order. None of them is ever shown disabled: each
-  appears only while it has something to act on — Select all whenever a photo
-  is unselected, the other two whenever a photo is selected — and the rest
-  shift right to close the gap.
-- Bulk delete is available for selected photos, and is the only bulk action.
-  The confirmation states the selected count and applies to the exact photos
-  shown at confirmation time. Bulk metadata edits are out of scope; date, time,
-  and caption edits are per-photo only.
-- Mobile viewing is responsive. Admin workflows are explicitly laptop-oriented;
-  touch-specific bulk-selection UI is out of scope initially.
-- Viewer empty states simply say “No photos here yet.” The admin makes its large
-  upload drop area prominent when the library is empty and keeps it large and
-  easy to target thereafter.
-- The in-progress upload queue shows per-file states (processing, uploading,
-  done, skipped as duplicate, failed with reason and retry). There is no
-  persistent server-side “processing” area; a file either commits fully or
-  leaves no record.
+- The header gains a persistent **Trash** link with an item count and an
+  **Export catalog** link. Every thumbnail shows its original filename.
+  The upload drop area sits above the timeline, prominent when the library
+  is empty and large and easy to target thereafter; the in-progress queue
+  shows per-file states (processing, uploading, done, skipped as duplicate,
+  failed with reason and retry). There is no persistent server-side
+  "processing" area; a file either commits fully or leaves no record.
+- Clicking a thumbnail opens the photo view, which for an admin carries the
+  edit form in place of the caption and date text: capture date, capture
+  time, caption, and **Save changes**, with **Download**, **Delete**, and
+  **Photo info** beneath. The original filename shows at the top right.
+  Nothing is saved until Save; arrowing away or closing discards an
+  unsaved edit. While a field has focus the keyboard belongs to it: arrows
+  move the caret, Escape leaves the field, and only a second Escape closes
+  the view. With focus outside the form, Delete or Backspace is the same
+  as the Delete button.
+- Delete, single or bulk, always confirms through the preview-and-confirm
+  dialog, which states the resolved count and applies to exactly the
+  photos it named. After a single delete the photo view advances to the
+  next photo (or the previous at the end, or closes if none remain). A
+  brief Undo appears and lasts five seconds regardless of what the admin
+  does in the meantime.
+- Selection is by modifier-click (Command, or Control away from a Mac) and
+  shift-click, which extends from the last photo modifier-clicked across
+  any day, month, or year boundary. A plain click opens the photo view and
+  clears the selection. There is no marquee dragging. Each day heading
+  carries a **Select all** for that day, shown only while one of its photos
+  is unselected; it adds to the selection rather than replacing it, and
+  there is no library-wide Select all. While anything is selected a bar
+  pinned to the top of the page shows the count, **Delete selected**, and
+  **Deselect all**; it is absent otherwise. No selection control is ever
+  shown disabled. Bulk delete is the only bulk action; date, time, and
+  caption are per-photo.
+- After an edit or a delete the page updates in place from the server's
+  reply and quietly refetches the library afterwards, so the page never
+  waits on a reload and never stays out of step for long.
+- Mobile viewing is responsive. Admin workflows are explicitly
+  laptop-oriented; touch-specific bulk-selection UI is out of scope.
 
 ### Trash
 
@@ -336,8 +343,9 @@ The admin extends the display hierarchy and adds curation controls.
   records removed, audit retained).
 - The trash provides an explicitly confirmed permanent-delete action.
 - A deleted photo can be restored during its retention period. Trashed photos
-  cannot be downloaded, but the Trash shows thumbnails, filenames, original
-  date grouping, and deletion date for safe identification.
+  cannot be downloaded, but the Trash shows them on the same grid and photo
+  view as the library, with thumbnails, filenames, original date, and deletion
+  date for safe identification; both images are short-lived signed URLs.
 - The image Worker refuses to serve trashed photos. Because it briefly caches
   catalog state, a trashed photo's URLs may continue to work for up to about a
   minute (and images already viewed remain in viewers' browser caches); this
