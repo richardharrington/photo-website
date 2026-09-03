@@ -362,11 +362,15 @@ function GridView({
   const chosen = selectedIds(visible);
   const everythingChosen = allSelected(visible, ids);
 
-  // The detail panel speaks for one photograph. Once a second is selected it
-  // is describing the wrong thing, so selecting closes it.
+  // The detail panel speaks for one photograph, so it closes as soon as more
+  // than one tile is lit up. The open photo is one of those: with the panel on
+  // one photo and a modifier-click on a second, two tiles are marked and the
+  // panel describes neither pair, even though the selection itself holds one.
   const select = (next: SelectionState) => {
     setSelection(next);
-    if (next.ids.size > 1) onOpenPhoto(null);
+    const marked = new Set(next.ids);
+    if (openPhotoId) marked.add(openPhotoId);
+    if (marked.size > 1) onOpenPhoto(null);
   };
 
   const title =

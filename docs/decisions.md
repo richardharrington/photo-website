@@ -357,8 +357,11 @@ API-contract change beyond one added read route.
     after it reaches back to the photo on screen in the panel — without that,
     the commonest gesture of all (click one, shift-click another) found no
     anchor and selected a single tile, which is what a modifier-click does.
-    A second selected photo closes the panel: it speaks for one photograph,
-    and it would be describing the wrong one.
+    A second marked photo closes the panel: it speaks for one photograph, and
+    it would be describing the wrong one. The photo the panel is open on counts
+    as marked, so a modifier-click on any other tile is already two — without
+    that the panel stayed put through the commonest case of all, one open and
+    one picked out beside it.
 
 36. **"Delete this whole group" became "Select all" plus "Delete selected".**
     One button that deletes everything on the page is a wide blast radius

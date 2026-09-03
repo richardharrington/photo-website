@@ -518,22 +518,30 @@ test.describe('selecting in the grid', () => {
     await expect(selected(page)).toHaveCount(4);
   });
 
-  test('a second selected photo closes the detail panel', async ({ page }) => {
+  test('marking a second photo closes the detail panel', async ({ page }) => {
     await page.goto(`${BASE}/2026/08/02`);
     const tiles = page.locator('.admin-grid__tile');
     const panel = page.getByRole('complementary');
 
+    // The open photo counts as one of the marked tiles, so a modifier-click on
+    // any other one is already two — the panel speaks for neither.
     await tiles.nth(0).click();
     await expect(panel).toBeVisible();
-
-    // One photo selected still leaves the panel describing one photo.
     await tiles.nth(1).click({ modifiers: ['ControlOrMeta'] });
-    await expect(panel).toBeVisible();
-
-    // A second makes it describe the wrong one.
-    await tiles.nth(2).click({ modifiers: ['ControlOrMeta'] });
     await expect(panel).toHaveCount(0);
-    await expect(selected(page)).toHaveCount(2);
+    await expect(selected(page)).toHaveCount(1);
+  });
+
+  test('a shift-range closes the detail panel too', async ({ page }) => {
+    await page.goto(`${BASE}/2026/08/02`);
+    const tiles = page.locator('.admin-grid__tile');
+
+    await tiles.nth(0).click();
+    await expect(page.getByRole('complementary')).toBeVisible();
+    await tiles.nth(3).click({ modifiers: ['Shift'] });
+
+    await expect(page.getByRole('complementary')).toHaveCount(0);
+    await expect(selected(page)).toHaveCount(4);
   });
 
   test('a plain click opens the detail panel and drops the selection', async ({
