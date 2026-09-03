@@ -1,8 +1,8 @@
-import { Link } from '../../shared/ui/Link.tsx';
-import { altTextFor } from '../../shared/validation.ts';
-import { derivativeUrl } from '../../shared/urls.ts';
-import { routes } from '../api.ts';
-import type { PublicPhoto } from '../../shared/display-api.ts';
+import { Link } from './Link.tsx';
+import { altTextFor } from '../validation.ts';
+import { derivativeUrl } from '../urls.ts';
+import { routes } from './api.ts';
+import type { PublicPhoto } from '../display-api.ts';
 
 interface PhotoGridProps {
   photos: readonly PublicPhoto[];

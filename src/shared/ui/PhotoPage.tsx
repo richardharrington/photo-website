@@ -9,21 +9,21 @@
 
 import { useCallback, useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { navigate } from '../../shared/ui/navigation.ts';
-import { useResource } from '../../shared/ui/useResource.ts';
-import type { Resource } from '../../shared/ui/useResource.ts';
-import { displayApi, routes } from '../api.ts';
-import { Layout } from '../components/Layout.tsx';
-import { ErrorState, Loading, NotFound } from '../components/States.tsx';
-import { Lightbox } from '../components/Lightbox.tsx';
-import { requestScrollTo } from '../scroll.ts';
-import { tileAnchor } from '../components/PhotoGrid.tsx';
+import { navigate } from './navigation.ts';
+import { useResource } from './useResource.ts';
+import type { Resource } from './useResource.ts';
+import { readApi, routes } from './api.ts';
+import { Layout } from './Layout.tsx';
+import { ErrorState, Loading, NotFound } from './States.tsx';
+import { Lightbox } from './Lightbox.tsx';
+import { requestScrollTo } from './scroll.ts';
+import { tileAnchor } from './PhotoGrid.tsx';
 import type {
   GroupRef,
   PhotoResponse,
   PublicPhoto,
   TimelineResponse,
-} from '../../shared/display-api.ts';
+} from '../display-api.ts';
 
 function groupHref(group: GroupRef): string {
   return group.kind === 'undated'
@@ -77,7 +77,7 @@ interface PhotoPageProps {
 
 export function PhotoPage({ id, timeline }: PhotoPageProps) {
   const detail = useResource<PhotoResponse>(
-    (signal) => displayApi.photo(id, signal),
+    (signal) => readApi.photo(id, signal),
     [id],
     // Previous/next must not unmount the dialog on every step; see
     // ResourceOptions.keepPreviousData.

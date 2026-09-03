@@ -1,13 +1,13 @@
 /**
- * Client-side routes for the viewer, below the app's opaque base.
+ * Client-side routes for both apps, below each build's own opaque base.
  *
  * Deep URLs are stable and shareable. A photo's route is keyed by its ID
  * rather than its date, so correcting a capture date never breaks a bookmark
  * someone has already sent to the family.
  */
 
-import { isValidPhotoId } from '../shared/ids.ts';
-import { isValidYmd } from '../shared/datetime.ts';
+import { isValidPhotoId } from '../ids.ts';
+import { isValidYmd } from '../datetime.ts';
 
 export type Route =
   | { kind: 'home' }

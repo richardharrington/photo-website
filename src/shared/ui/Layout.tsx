@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { Link } from '../../shared/ui/Link.tsx';
-import { routes } from '../api.ts';
+import { Link } from './Link.tsx';
+import { routes } from './api.ts';
 
 interface LayoutProps {
   /**
@@ -9,17 +9,25 @@ interface LayoutProps {
    * a plain link instead.
    */
   isHome?: boolean;
+  /**
+   * Rendered in the header after the site title.
+   *
+   * The viewer passes nothing — its header is the site's name and nothing
+   * else. The admin fills it with Trash and Export catalog, which is the whole
+   * difference between the two headers.
+   */
+  nav?: ReactNode;
   children: ReactNode;
 }
 
 /**
- * Page chrome: the site title, and nothing else.
+ * Page chrome: the site title, and whatever nav the app adds beside it.
  *
  * Restrained on purpose — neutral surfaces, system type, no decorative UI
  * competing with the photographs. There are no breadcrumbs because there is
  * nowhere to climb to: years, months, and days are headings on one page.
  */
-export function Layout({ isHome = false, children }: LayoutProps) {
+export function Layout({ isHome = false, nav, children }: LayoutProps) {
   return (
     <div className="layout">
       <header className="layout__header">
@@ -37,6 +45,8 @@ export function Layout({ isHome = false, children }: LayoutProps) {
             {__SITE_TITLE__}
           </Link>
         )}
+
+        {nav ? <nav className="layout__nav">{nav}</nav> : null}
       </header>
 
       <main className="layout__main">{children}</main>

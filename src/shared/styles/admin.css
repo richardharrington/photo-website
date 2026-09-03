@@ -1,9 +1,8 @@
 /*
  * Admin styles.
  *
- * Laptop-oriented: the grid and the side detail panel assume a pointer and a
- * wide viewport, and selecting takes a modifier key. Mobile viewing is
- * responsive; see src/admin/selection.ts.
+ * Laptop-oriented: selecting takes a modifier key and a pointer. Mobile
+ * viewing is responsive; touch-specific bulk selection is out of scope.
  */
 
 .admin {

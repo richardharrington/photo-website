@@ -1,13 +1,13 @@
 import { useLocationPath } from '../shared/ui/navigation.ts';
 import { useResource } from '../shared/ui/useResource.ts';
-import { displayApi } from './api.ts';
-import { parseRoute } from './routes.ts';
-import type { Route } from './routes.ts';
-import { Layout } from './components/Layout.tsx';
-import { NotFound } from './components/States.tsx';
-import { TimelinePage } from './pages/TimelinePage.tsx';
-import type { TimelineTarget } from './pages/TimelinePage.tsx';
-import { PhotoPage } from './pages/PhotoPage.tsx';
+import { readApi } from '../shared/ui/api.ts';
+import { parseRoute } from '../shared/ui/routes.ts';
+import type { Route } from '../shared/ui/routes.ts';
+import { Layout } from '../shared/ui/Layout.tsx';
+import { NotFound } from '../shared/ui/States.tsx';
+import { TimelinePage } from '../shared/ui/TimelinePage.tsx';
+import type { TimelineTarget } from '../shared/ui/TimelinePage.tsx';
+import { PhotoPage } from '../shared/ui/PhotoPage.tsx';
 import type { TimelineResponse } from '../shared/display-api.ts';
 
 /** Which section of the one page a route is asking for. */
@@ -52,10 +52,13 @@ export function App() {
  * re-render, and the page is exactly where it was left. Both children read the
  * same resource, so opening a photo asks the server for nothing but that
  * photo's own detail.
+ *
+ * No `CurationContext` provider, so every shared component sees `null` and
+ * renders the viewer's plain reading interface.
  */
 function Viewer({ route }: { route: Exclude<Route, { kind: 'not-found' }> }) {
   const timeline = useResource<TimelineResponse>(
-    (signal) => displayApi.timeline(signal),
+    (signal) => readApi.timeline(signal),
     [],
   );
 

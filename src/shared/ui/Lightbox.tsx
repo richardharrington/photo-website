@@ -1,13 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { navigate } from '../../shared/ui/navigation.ts';
-import { altTextFor } from '../../shared/validation.ts';
-import { derivativeSrcSet, derivativeUrl } from '../../shared/urls.ts';
-import {
-  formatCaptureDate,
-  formatCaptureTimeForViewer,
-} from '../../shared/datetime.ts';
-import { displayApi, routes } from '../api.ts';
-import type { PublicPhoto } from '../../shared/display-api.ts';
+import { navigate } from './navigation.ts';
+import { altTextFor } from '../validation.ts';
+import { derivativeSrcSet, derivativeUrl } from '../urls.ts';
+import { formatCaptureDate, formatCaptureTimeForViewer } from '../datetime.ts';
+import { readApi, routes } from './api.ts';
+import type { PublicPhoto } from '../display-api.ts';
 
 interface LightboxProps {
   photo: PublicPhoto;
@@ -220,7 +217,7 @@ export function Lightbox({ photo, orderedIds, backHref, onClose }: LightboxProps
     try {
       // Requested at click time: a five-minute signed link would otherwise go
       // stale while someone reads the caption.
-      const link = await displayApi.downloadLink(photo.id);
+      const link = await readApi.downloadLink(photo.id);
       window.location.assign(link.url);
     } catch {
       setDownloadError('That download link could not be created. Please try again.');

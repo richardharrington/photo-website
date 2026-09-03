@@ -1,5 +1,5 @@
-import { Link } from '../../shared/ui/Link.tsx';
-import { routes } from '../api.ts';
+import { Link } from './Link.tsx';
+import { routes } from './api.ts';
 
 /**
  * Shown while a request is in flight. `aria-busy` announces the wait without

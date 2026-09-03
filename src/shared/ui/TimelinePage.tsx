@@ -15,19 +15,16 @@
  */
 
 import { useLayoutEffect, useRef } from 'react';
-import type { Resource } from '../../shared/ui/useResource.ts';
-import { monthName } from '../../shared/datetime.ts';
-import { Link } from '../../shared/ui/Link.tsx';
-import { routes } from '../api.ts';
-import { Layout } from '../components/Layout.tsx';
-import { Empty, ErrorState, Loading, NotFound } from '../components/States.tsx';
-import { PhotoGrid } from '../components/PhotoGrid.tsx';
-import { scrollToElementId, takeScrollRequest } from '../scroll.ts';
-import type {
-  TimelineMonth,
-  TimelineResponse,
-  TimelineYear,
-} from '../../shared/display-api.ts';
+import type { ReactNode } from 'react';
+import type { Resource } from './useResource.ts';
+import { monthName } from '../datetime.ts';
+import { Link } from './Link.tsx';
+import { routes } from './api.ts';
+import { Layout } from './Layout.tsx';
+import { Empty, ErrorState, Loading, NotFound } from './States.tsx';
+import { PhotoGrid } from './PhotoGrid.tsx';
+import { scrollToElementId, takeScrollRequest } from './scroll.ts';
+import type { TimelineMonth, TimelineResponse, TimelineYear } from '../display-api.ts';
 
 /** The section a route asks the page to be scrolled to. */
 export type TimelineTarget =
@@ -118,9 +115,17 @@ interface TimelinePageProps {
    * place.
    */
   target: TimelineTarget | null;
+  /** The header's nav slot; see Layout. The viewer passes nothing. */
+  nav?: ReactNode;
+  /**
+   * Rendered inside the layout above the timeline, in every state including
+   * the empty library. The admin's upload target lives here; the viewer
+   * passes nothing.
+   */
+  above?: ReactNode;
 }
 
-export function TimelinePage({ resource, target }: TimelinePageProps) {
+export function TimelinePage({ resource, target, nav, above }: TimelinePageProps) {
   const data = resource.status === 'ready' ? resource.data : null;
 
   /**
@@ -152,21 +157,22 @@ export function TimelinePage({ resource, target }: TimelinePageProps) {
 
   if (resource.status === 'loading') {
     return (
-      <Layout isHome>
+      <Layout isHome nav={nav}>
+        {above}
         <Loading />
       </Layout>
     );
   }
   if (resource.status === 'not-found') {
     return (
-      <Layout>
+      <Layout nav={nav}>
         <NotFound />
       </Layout>
     );
   }
   if (resource.status === 'error') {
     return (
-      <Layout>
+      <Layout nav={nav}>
         <ErrorState message={resource.message} />
       </Layout>
     );
@@ -174,7 +180,7 @@ export function TimelinePage({ resource, target }: TimelinePageProps) {
 
   if (target && !sectionExists(resource.data, target)) {
     return (
-      <Layout>
+      <Layout nav={nav}>
         <NotFound />
       </Layout>
     );
@@ -188,14 +194,16 @@ export function TimelinePage({ resource, target }: TimelinePageProps) {
 
   if (timeline.total === 0 && !showUndated) {
     return (
-      <Layout isHome>
+      <Layout isHome nav={nav}>
+        {above}
         <Empty />
       </Layout>
     );
   }
 
   return (
-    <Layout isHome>
+    <Layout isHome nav={nav}>
+      {above}
       <div className="timeline">
         {timeline.years.map((year) => (
           <section
