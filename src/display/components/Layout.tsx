@@ -5,8 +5,8 @@ import { routes } from '../api.ts';
 interface LayoutProps {
   /**
    * The timeline *is* the site, so its header renders the site name as the
-   * page's h1. The photo view's own states are not the site's front page and
-   * make the name a link home instead.
+   * page's h1. The other states are not the site's front page and render it as
+   * a plain link instead.
    */
   isHome?: boolean;
   children: ReactNode;
@@ -23,8 +23,15 @@ export function Layout({ isHome = false, children }: LayoutProps) {
   return (
     <div className="layout">
       <header className="layout__header">
+        {/* A link even on the timeline, where it is the heading as well: the
+            URL follows the section being read, so the site's own name is the
+            way back to the plain address and the top of the library. */}
         {isHome ? (
-          <h1 className="layout__site-title">{__SITE_TITLE__}</h1>
+          <h1 className="layout__site-title">
+            <Link to={routes.home()} className="layout__site-link">
+              {__SITE_TITLE__}
+            </Link>
+          </h1>
         ) : (
           <Link to={routes.home()} className="layout__site-title">
             {__SITE_TITLE__}

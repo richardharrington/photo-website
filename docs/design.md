@@ -244,7 +244,9 @@ queue with overall and per-file status rather than an arbitrary batch limit.
 - The whole library is **one newest-first scrolling page**: year headings,
   month headings beneath them, day headings beneath those, and a masonry block
   of photos under each day. There are no index pages and no navigation between
-  levels — reaching any photo is a scroll, not four clicks. The current year and
+  levels — reaching any photo is a scroll, not four clicks. The site name in
+  the header is a link back to the plain address and the top of the library,
+  since the address bar follows whatever section is being read. The current year and
   month headings pin to the top of the viewport while scrolling; a month slides
   up behind its year rather than over it.
 - The three levels are told apart by size before they are read — 32px, 20px,

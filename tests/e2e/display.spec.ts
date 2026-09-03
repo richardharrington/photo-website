@@ -111,6 +111,20 @@ test.describe('the timeline', () => {
     await expect(undated.locator('.photo-grid__item')).toHaveCount(2);
   });
 
+  test('the site name goes back to the plain address and the top', async ({ page }) => {
+    await page.goto(`${BASE}/2026/03/01`);
+    await expect(page.locator('#d-2026-03-01')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
+
+    await page.getByRole('link', { name: 'Family Photos' }).click();
+
+    // No section in the address any more, and back at the top of the library.
+    await expect(page).toHaveURL(`${BASE}/`);
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    // Still the same one page, not a navigation to somewhere else.
+    await expect(page.locator('#d-2026-03-01')).toHaveCount(1);
+  });
+
   test('the base path starts at the top', async ({ page }) => {
     await page.goto(`${BASE}/`);
     expect(await page.evaluate(() => window.scrollY)).toBe(0);
