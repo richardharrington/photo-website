@@ -38,8 +38,29 @@ export interface Curation {
   trash(id: string): void;
   /** Save an edit; resolves with the stored photo. Rejects with a message. */
   edit(id: string, edit: PhotoEdit): Promise<PublicPhoto>;
-  /** True on the trash page: the lightbox shows no form and no actions. */
-  readOnly: boolean;
+  /** What the photo view offers for these photographs; see `Capabilities`. */
+  can: Capabilities;
+}
+
+/**
+ * What the photo view may do with the photographs a context covers.
+ *
+ * Three of them rather than one `readOnly` flag, because the three listings
+ * that provide a context do not agree along a single axis. The library allows
+ * all three. The trash allows none: a trashed photo has no download of any
+ * kind, and its own bar owns Restore and Delete permanently. A photograph
+ * still being uploaded allows editing and nothing else — it is exactly the
+ * point of showing it early that its date and caption can be typed before it
+ * lands — but it has no stored bytes to download and no catalog record to
+ * trash.
+ *
+ * The viewer provides no context at all, and gets the download it has always
+ * had; only `edit` and `trash` are admin-only by nature.
+ */
+export interface Capabilities {
+  edit: boolean;
+  download: boolean;
+  trash: boolean;
 }
 
 export const CurationContext = createContext<Curation | null>(null);

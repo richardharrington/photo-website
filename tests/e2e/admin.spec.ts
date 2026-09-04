@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 import { SCRATCH_DAYS, FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
+import { tinyPng } from '../../fixtures/tiny-png.ts';
 
 /**
  * The admin app, against the local fixture server.
@@ -57,6 +58,9 @@ function scratch() {
     ids: ['a', 'b', 'c'].map(
       (letter) => FIXTURE_PHOTO_IDS[`scratch-${index}-${letter}`]!,
     ),
+    /** A day of this project's own to upload into, and then empty again. */
+    uploadDay: `2026-07-2${index}`,
+    uploadFile: `dropped-${project}.png`,
   };
 }
 
@@ -93,7 +97,14 @@ test.describe('the admin timeline', () => {
       /2025/,
       /Undated/,
     ]);
-    await expect(page.locator('.photo-grid__item')).toHaveCount(18);
+    // Not a fixed number: this file also uploads a photograph, and the other
+    // browser project may be part-way through doing so. display.spec.ts pins
+    // the library's size against the same projection.
+    const counts = await page.evaluate(() => ({
+      tiles: document.querySelectorAll('.photo-grid__item').length,
+      filenames: document.querySelectorAll('.photo-grid__filename').length,
+    }));
+    expect(counts.tiles).toBeGreaterThanOrEqual(18);
 
     // Above it, the upload target; in the header, what the viewer never has.
     await expect(page.getByRole('button', { name: /Add photos/ })).toBeVisible();
@@ -102,18 +113,55 @@ test.describe('the admin timeline', () => {
 
     // Every thumbnail says which file it is; the viewer's never do.
     await expect(page.getByText('IMG_20260802_081502.HEIC')).toBeVisible();
-    await expect(page.locator('.photo-grid__filename')).toHaveCount(18);
+    expect(counts.filenames).toBe(counts.tiles);
   });
 
-  test('keeps the drop target large on a populated library', async ({ page }) => {
-    // design.md: prominent when the library is empty, and still large and easy
-    // to target thereafter.
+  test('keeps the drop target under the cursor wherever the page is', async ({
+    page,
+  }) => {
+    // design.md: pinned to the top. The library is one page years long, so a
+    // target at the head of it is a target you have to scroll back to — with a
+    // file already held over the window.
     await page.goto(`${BASE}/`);
     const target = page.getByRole('button', { name: /Add photos/ });
-
     await expect(target).toBeVisible();
-    const box = await target.boundingBox();
-    expect(box?.height ?? 0).toBeGreaterThanOrEqual(100);
+
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await expect(target).toBeInViewport();
+
+    const { dropBottom, overlapping } = await page.evaluate(() => {
+      const drop = document.querySelector('.drop-target')!.getBoundingClientRect();
+      const headings = document.querySelectorAll(
+        '.timeline__year-heading, .timeline__month-heading',
+      );
+      return {
+        dropBottom: drop.bottom,
+        overlapping: [...headings].filter((heading) => {
+          const box = heading.getBoundingClientRect();
+          return box.bottom > drop.top + 1 && box.top < drop.bottom - 1;
+        }).length,
+      };
+    });
+
+    // Pinned at the very top, and the headings that pin there too sit below
+    // it rather than underneath it — which is what the published height is for.
+    expect(dropBottom).toBeLessThan(120);
+    expect(overlapping).toBe(0);
+  });
+
+  test('stands down while the photo view is open', async ({ page }) => {
+    await page.goto(`${BASE}/`);
+    const target = page.getByRole('button', { name: /Add photos/ });
+    await expect(target).toBeVisible();
+
+    // One photograph fills the screen; a drop target pinned over it would be
+    // inviting a drop onto a view that is not the library.
+    await page.locator('.photo-grid__link').first().click();
+    await expect(page.locator('.lightbox')).toBeVisible();
+    await expect(target).toBeHidden();
+
+    await page.keyboard.press('Escape');
+    await expect(target).toBeVisible();
   });
 
   test('lands scrolled to the section a deep URL names', async ({ page }) => {
@@ -344,16 +392,48 @@ test.describe('the admin photo view', () => {
     await openFirst(page);
     const { files } = scratch();
 
-    await page.getByLabel('Caption').fill('Never saved');
     await page.getByRole('button', { name: 'Next photo' }).click();
-
     await expect(page.locator('.lightbox__filename')).toHaveText(files[1]!);
-    // The unsaved edit is discarded silently, as it always was.
     await expect(page.getByLabel('Caption')).toHaveValue('');
     await expect(page.getByLabel('Capture time')).toHaveValue('21:07:45');
 
     await page.keyboard.press('ArrowLeft');
     await expect(page.locator('.lightbox__filename')).toHaveText(files[0]!);
+    await expect(page.getByLabel('Caption')).toHaveValue('First rocket up.');
+  });
+
+  test('will not step away from an edit that has not been saved', async ({ page }) => {
+    await openFirst(page);
+    const { files } = scratch();
+
+    await page.getByLabel('Caption').fill('Never saved');
+    await expect(page.getByText('Unsaved changes')).toBeVisible();
+
+    // Stepping is what would discard it, so both ways of stepping stop.
+    await expect(page.getByRole('button', { name: 'Next photo' })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'Previous photo' })).toBeDisabled();
+    await page.locator('.lightbox').click();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('.lightbox__filename')).toHaveText(files[0]!);
+
+    // Put back what was there, and the view moves again — no flag to get
+    // stuck on, just a comparison against what is stored.
+    await page.getByLabel('Caption').fill('First rocket up.');
+    await expect(page.getByText('Unsaved changes')).toBeHidden();
+    await page.getByRole('button', { name: 'Next photo' }).click();
+    await expect(page.locator('.lightbox__filename')).toHaveText(files[1]!);
+  });
+
+  test('still lets an unsaved edit be abandoned deliberately', async ({ page }) => {
+    // Escape and the way back are asking to leave, and always have been.
+    await openFirst(page);
+    await page.getByLabel('Caption').fill('Never saved');
+
+    await page.locator('.lightbox').click();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.lightbox')).toBeHidden();
+
+    await openFirst(page);
     await expect(page.getByLabel('Caption')).toHaveValue('First rocket up.');
   });
 
@@ -516,6 +596,89 @@ test.describe('the admin photo view', () => {
     await expect(banner).toHaveCount(0, { timeout: 8_000 });
 
     await restoreFromTrash(page, files[0]!);
+  });
+});
+
+/**
+ * Adding photographs, through the real pipeline.
+ *
+ * The file dropped here is a genuine PNG and everything that happens to it is
+ * genuine: the browser decodes it, converts it, encodes four artifacts with
+ * the WebAssembly codecs, PUTs them, and commits. What is being tested is not
+ * the pipeline — pipeline.spec.ts owns that, against real photographs — but
+ * that a file becomes a curatable photograph the moment it is dropped rather
+ * than when it lands.
+ *
+ * The photograph is deleted and purged at the end, so the fixture is left as
+ * it was found.
+ */
+test.describe('adding photographs', () => {
+  test('is a photograph on the page before it is a photograph on the server', async ({
+    page,
+  }) => {
+    const { uploadDay, uploadFile } = scratch();
+    await page.goto(`${BASE}/`);
+
+    await page.locator('.drop-target__input').setInputFiles({
+      name: uploadFile,
+      mimeType: 'image/png',
+      buffer: tinyPng(),
+    });
+
+    // A tile of its own, above the library, named after the file — with no
+    // capture date, because a file with no EXIF has nothing to say about when
+    // it was taken. Which is the photograph whose date most needs typing in.
+    const pending = page.locator('.upload__pending');
+    const tile = pending.locator('.photo-grid__item').filter({ hasText: uploadFile });
+    await expect(tile).toHaveCount(1);
+
+    // It opens into the library's own photo view and the library's own form.
+    await tile.locator('.photo-grid__link').click();
+    await expect(page.locator('.lightbox')).toBeVisible();
+    await expect(page.locator('.lightbox__filename')).toHaveText(uploadFile);
+    await expect(page.getByLabel('Capture date')).toHaveValue('');
+
+    // Editing is all it offers: there are no stored bytes to download and no
+    // catalog record to delete.
+    await expect(page.getByRole('button', { name: 'Save changes' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(
+      0,
+    );
+
+    await page.getByLabel('Capture date').fill(uploadDay);
+    await page.getByLabel('Caption').fill('Typed on the way up.');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByText('Saved')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+
+    // Whether that landed in the commit or as an edit just after it is not
+    // something the page ever says, and is not something to depend on: what
+    // has to hold is that the photograph is in the library, on the day it was
+    // given, with the caption it was given.
+    const [year, month, date] = uploadDay.split('-');
+    await page.goto(`${BASE}/${year}/${month}/${date}`);
+    const landed = page
+      .locator(`#d-${uploadDay} .photo-grid__item`)
+      .filter({ hasText: uploadFile });
+    await expect(landed).toHaveCount(1);
+
+    await landed.locator('.photo-grid__link').click();
+    await expect(page.getByLabel('Caption')).toHaveValue('Typed on the way up.');
+
+    // Put the fixture back the way it was found: out of the library, and out
+    // of the trash behind it.
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await confirmDelete(page);
+    await expect(page.getByRole('status')).toContainText('1 photo deleted.');
+
+    await page.goto(`${BASE}/trash`);
+    const trashed = page.locator('.photo-grid__item').filter({ hasText: uploadFile });
+    await trashed.locator('.photo-grid__link').click({ modifiers: ['ControlOrMeta'] });
+    await page.getByRole('button', { name: 'Delete permanently' }).click();
+    await confirmDelete(page, 'Delete permanently');
+    await expect(trashed).toHaveCount(0);
   });
 });
 

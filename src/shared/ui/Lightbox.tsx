@@ -95,7 +95,7 @@ export function Lightbox({
   imageSrc,
 }: LightboxProps) {
   const curation = useCuration();
-  const editable = curation !== null && !curation.readOnly;
+  const editable = curation?.can.edit ?? false;
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -113,13 +113,30 @@ export function Lightbox({
   const showInfo = infoFor === photo.id;
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
+  /**
+   * Whether the edit form is holding something that has not been saved.
+   *
+   * The form reports it, because only the form knows; the view acts on it,
+   * because the controls that would throw the edit away are the view's. See
+   * the guard in `step` below.
+   */
+  const [dirty, setDirty] = useState(false);
 
   const large = photo.derivatives['display-2560'];
   const aspect = large.width / large.height;
 
-  /** Move by one position from wherever the current photo is. */
+  /**
+   * Move by one position from wherever the current photo is.
+   *
+   * Refused outright while the form holds an unsaved change. Arrowing away
+   * remounts the form on the next photo, which discards what was typed — and
+   * a caption typed into a photograph and then silently dropped is worse than
+   * an arrow key that does nothing. The two arrow buttons are disabled for the
+   * same reason, and the form says why.
+   */
   const step = useCallback(
     (delta: number) => {
+      if (dirty) return;
       const currentId = onStep
         ? photo.id
         : (window.location.pathname.split('/').pop() ?? '');
@@ -130,12 +147,14 @@ export function Lightbox({
       if (onStep) onStep(target);
       else navigate(routes.photo(target));
     },
-    [orderedIds, onStep, photo.id],
+    [orderedIds, onStep, photo.id, dirty],
   );
 
   const currentPosition = orderedIds.indexOf(photo.id);
-  const hasPrevious = currentPosition > 0;
-  const hasNext = currentPosition !== -1 && currentPosition < orderedIds.length - 1;
+  const hasPrevious = currentPosition > 0 && !dirty;
+  const hasNext =
+    currentPosition !== -1 && currentPosition < orderedIds.length - 1 && !dirty;
+  const heldBack = dirty ? 'Save or discard your changes first' : undefined;
 
   // Move focus into the dialog when it opens, so a keyboard user is not left
   // behind on the timeline.
@@ -230,7 +249,7 @@ export function Lightbox({
         // the button, and the app advances to the next photo after each one.
         case 'Delete':
         case 'Backspace':
-          if (editable && curation) {
+          if (curation?.can.trash) {
             event.preventDefault();
             curation.trash(photo.id);
           }
@@ -242,7 +261,7 @@ export function Lightbox({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, step, editable, curation, photo.id]);
+  }, [onClose, step, curation, photo.id]);
 
   // The page behind the lightbox must not scroll while it is open.
   useEffect(() => {
@@ -344,6 +363,7 @@ export function Lightbox({
           className="lightbox__nav lightbox__nav--previous"
           onClick={() => step(-1)}
           disabled={!hasPrevious}
+          title={heldBack}
           aria-label="Previous photo"
         >
           <span aria-hidden="true">&#8249;</span>
@@ -377,6 +397,7 @@ export function Lightbox({
           className="lightbox__nav lightbox__nav--next"
           onClick={() => step(1)}
           disabled={!hasNext}
+          title={heldBack}
           aria-label="Next photo"
         >
           <span aria-hidden="true">&#8250;</span>
@@ -416,6 +437,7 @@ export function Lightbox({
               key={photo.id}
               photo={photo}
               onSave={(edit) => curation.edit(photo.id, edit)}
+              onDirtyChange={setDirty}
             />
           ) : photo.caption || dateLine ? (
             <div className="lightbox__meta">
@@ -438,12 +460,12 @@ export function Lightbox({
             {/* A trashed photo shows enough to be identified and nothing
                 more: no download of any kind, and no second delete here — the
                 trash's own bar owns Restore and Delete permanently. */}
-            {curation?.readOnly ? null : (
+            {curation && !curation.can.download ? null : (
               <button type="button" onClick={onDownload} disabled={downloading}>
                 {downloading ? 'Preparing download…' : 'Download'}
               </button>
             )}
-            {editable && curation ? (
+            {curation?.can.trash ? (
               <button
                 type="button"
                 className="admin-danger"

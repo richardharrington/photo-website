@@ -97,19 +97,27 @@ export function App() {
     [data, fetched],
   );
 
-  /** At most one refetch in flight; a burst of edits is not a burst of GETs. */
+  /**
+   * At most one refetch in flight; a burst of edits is not a burst of GETs.
+   *
+   * It resolves when the library on the page is up to date, which the upload
+   * panel waits on before it forgets the files it has just added.
+   */
   const pendingRefetch = useRef<Promise<void> | null>(null);
-  const refetch = useCallback(() => {
-    if (pendingRefetch.current) return;
-    pendingRefetch.current = adminApi
+  const refetch = useCallback((): Promise<void> => {
+    const running = pendingRefetch.current;
+    if (running) return running;
+    const next = adminApi
       .timeline()
-      .then((next) => setPatched(next))
+      .then((response) => setPatched(response))
       // A failed background refetch leaves the patched copy standing: it is
       // the server's own reply to the mutation, not a guess.
       .catch(() => undefined)
       .finally(() => {
         pendingRefetch.current = null;
       });
+    pendingRefetch.current = next;
+    return next;
   }, []);
 
   const [selection, setSelection] = useState<SelectionState>(EMPTY_SELECTION);
@@ -215,7 +223,7 @@ export function App() {
       selectAll: (ids) => setSelection((state) => addAll(state, ids)),
       trash: (id) => void startTrash({ kind: 'ids', photoIds: [id] }, id),
       edit: saveEdit,
-      readOnly: false,
+      can: { edit: true, download: true, trash: true },
     }),
     // startTrash and saveEdit read the current render's `data` and
     // `orderedIds`, which is what these dependencies stand for.
@@ -261,7 +269,11 @@ export function App() {
           above={
             // Always large and easy to target; more prominent when there is
             // nothing in the library yet.
-            <UploadPanel onBatchComplete={refetch} emphasized={libraryIsEmpty} />
+            <UploadPanel
+              onLibraryChanged={refetch}
+              emphasized={libraryIsEmpty}
+              photoViewOpen={route.kind === 'photo'}
+            />
           }
         />
         {route.kind === 'photo' ? (

@@ -13,13 +13,23 @@
  *     time.
  *
  * So one processing loop feeds a bounded pool of uploaders.
+ *
+ * The queue is also what the administrator sees and edits during an upload.
+ * Every dropped file's EXIF is read up front, before the serial loop reaches
+ * it, so a tile can show its capture date within a moment of the drop rather
+ * than when its turn comes round; and a date or caption typed while a file is
+ * still in flight is carried into that file's own commit, so the photograph is
+ * never stored with a date its owner has already corrected. See `pending.ts`
+ * for the projection the grid renders.
  */
 
 import { UPLOAD_CONCURRENCY } from '../../shared/constants.ts';
 import type { Rendition } from '../../shared/constants.ts';
 import type { DerivativeDescriptor } from '../../shared/catalog.ts';
-import type { EncodedArtifact } from '../../pipeline/index.ts';
-import type { ProcessOutcome } from '../../pipeline/index.ts';
+import type { EncodedArtifact, SourceMetadata } from '../../pipeline/index.ts';
+import type { ProcessOutcome, ProcessedPhoto } from '../../pipeline/index.ts';
+import type { PhotoEdit } from '../../shared/ui/curation.ts';
+import type { PublicPhoto } from '../../shared/display-api.ts';
 import type { PrepareResult, CommitResult } from '../api.ts';
 
 export type ItemState =
@@ -32,6 +42,22 @@ export type ItemState =
   | 'skipped'
   | 'failed';
 
+/**
+ * The encoded artifacts, held as object URLs so the tile and the photo view
+ * can show the picture before it has been uploaded.
+ *
+ * Two renditions rather than four: the thumbnail for the grid and the 1280 for
+ * the photo view. The `full` and 2560 artifacts are the large ones and are
+ * dropped as soon as they are uploaded, so what a batch keeps alive is roughly
+ * a quarter of a megabyte a photograph, until it is cleared.
+ */
+export interface PendingPreview {
+  thumbUrl: string;
+  displayUrl: string;
+  /** The true shapes, replacing the placeholder the tile started with. */
+  derivatives: Record<Rendition, DerivativeDescriptor>;
+}
+
 export interface QueueItem {
   id: string;
   file: File;
@@ -40,6 +66,20 @@ export interface QueueItem {
   state: ItemState;
   /** 0 to 1 across processing and uploading, for the per-file bar. */
   progress: number;
+  /**
+   * What the photograph says about itself, read ahead of the serial loop so a
+   * tile can show its date immediately. `null` only in the moment between the
+   * drop and that read.
+   */
+  source: SourceMetadata | null;
+  /**
+   * What the administrator typed and saved, which outranks `source` and is
+   * carried into this file's commit — or applied as an ordinary edit, if the
+   * commit has already happened.
+   */
+  edit: PhotoEdit | null;
+  /** The picture, once the encoders have produced it. */
+  preview: PendingPreview | null;
   /** Set for `skipped`: the photo already in the catalog. */
   existingPhotoId?: string;
   /** Set for `done`. */
@@ -65,8 +105,12 @@ export interface QueueSnapshot {
 export interface QueueDependencies {
   processFile(
     file: File,
-    options: { onProgress(fraction: number): void },
+    options: { onProgress(fraction: number): void; metadata: SourceMetadata },
   ): Promise<ProcessOutcome>;
+  /** Read ahead of processing, and handed back to it rather than read twice. */
+  readMetadata(file: File): Promise<SourceMetadata>;
+  /** For an edit typed after this file's own commit has already gone. */
+  editPhoto(photoId: string, edit: PhotoEdit): Promise<PublicPhoto>;
   beginBatch(): Promise<{ batchSeq: number }>;
   prepare(contentHash: string, originalFilename: string): Promise<PrepareResult>;
   uploadArtifact(url: string, artifact: EncodedArtifact): Promise<void>;
@@ -149,17 +193,113 @@ export class UploadQueue {
    */
   async add(files: readonly File[]): Promise<void> {
     const offset = this.items.length;
+    const added: string[] = [];
     for (const [index, file] of files.entries()) {
+      const id = `item-${(nextItemId += 1)}`;
+      added.push(id);
       this.items.push({
-        id: `item-${(nextItemId += 1)}`,
+        id,
         file,
         selectionIndex: offset + index,
         state: 'queued',
         progress: 0,
+        source: null,
+        edit: null,
+        preview: null,
       });
     }
     this.emit();
+
+    // Before the work starts, not as part of it. Reading EXIF is a header
+    // parse, not a decode, so the whole drop can be read in the time one file
+    // takes to encode — and until it is read, a tile has a filename and no
+    // date, which is exactly the photo whose date most needs correcting.
+    await this.readSources(added);
     await this.run();
+  }
+
+  /** Read what each of these files says about itself, in order, ignoring
+   *  anything already read by a processing loop that got there first. */
+  private async readSources(ids: readonly string[]): Promise<void> {
+    for (const id of ids) {
+      const item = this.items.find((candidate) => candidate.id === id);
+      if (!item || item.source) continue;
+      // `readSourceMetadata` reports absent or malformed EXIF as an empty
+      // timestamp rather than throwing, so there is nothing to catch here.
+      this.update(id, { source: await this.deps.readMetadata(item.file) });
+    }
+  }
+
+  /**
+   * Record what the administrator typed for one file, wherever it has got to.
+   *
+   * Two cases, and the difference is meant to be invisible. A file that has
+   * not committed yet simply carries the values into its own commit, so what
+   * was typed during the upload is what lands — no second request, and no
+   * window in which the photograph exists with a date already known to be
+   * wrong. A file that has committed is an ordinary edit of an ordinary photo.
+   *
+   * The one moment it refuses is while the commit is actually in flight: the
+   * body has been built by then and cannot be amended, and saying so is better
+   * than either losing the edit or claiming to have stored it.
+   */
+  async edit(id: string, edit: PhotoEdit): Promise<QueueItem> {
+    const item = this.items.find((candidate) => candidate.id === id);
+    if (!item) throw new Error('That file is no longer in the queue.');
+    if (item.state === 'committing') {
+      throw new Error('That photo is being saved right now. Try again in a moment.');
+    }
+
+    if (!item.photoId) {
+      this.update(id, { edit });
+      return this.require(id);
+    }
+
+    const photo = await this.deps.editPhoto(item.photoId, edit);
+    // What was stored, which is not always what was typed: a caption is
+    // trimmed, and clearing the date clears the time.
+    this.update(id, {
+      edit: {
+        date: photo.captureDate,
+        time: photo.captureTime,
+        caption: photo.caption,
+      },
+    });
+    return this.require(id);
+  }
+
+  /**
+   * Forget the files that are now in the library.
+   *
+   * Called once a batch has settled *and* the timeline has been reloaded, so
+   * the photographs never disappear from the page between the two. What is
+   * left behind is the exceptions — a failure with its Retry, a duplicate with
+   * its link — which are the only rows still worth a glance.
+   */
+  clearCommitted(): void {
+    this.remove((item) => item.state === 'done');
+  }
+
+  /** Forget everything that is not still in flight. */
+  clear(): void {
+    this.remove((item) => !IN_FLIGHT.has(item.state));
+  }
+
+  private remove(matches: (item: QueueItem) => boolean): void {
+    const kept: QueueItem[] = [];
+    for (const item of this.items) {
+      if (matches(item)) revokePreview(item);
+      else kept.push(item);
+    }
+    if (kept.length === this.items.length) return;
+    this.items = kept;
+    this.emit();
+  }
+
+  private require(id: string): QueueItem {
+    const item = this.items.find((candidate) => candidate.id === id);
+    if (!item) throw new Error('That file is no longer in the queue.');
+    return item;
   }
 
   /** Retry one failed file. */
@@ -184,11 +324,18 @@ export class UploadQueue {
 
         // --- Serial half: decode, orient, convert, encode, hash.
         this.update(item.id, { state: 'processing', progress: 0 });
+
+        // Normally already read by `add`. Not so for a file added to a batch
+        // that was already running, which this loop can reach first.
+        if (!item.source) await this.readSources([item.id]);
+        const metadata = this.require(item.id).source!;
+
         let outcome: ProcessOutcome;
         try {
           outcome = await this.deps.processFile(item.file, {
             onProgress: (fraction) =>
               this.update(item.id, { progress: fraction * 0.5 }),
+            metadata,
           });
         } catch (error) {
           this.fail(item.id, error);
@@ -210,6 +357,12 @@ export class UploadQueue {
         if (uploads.length >= this.uploadConcurrency) {
           await Promise.race(uploads);
         }
+
+        // The picture, from the artifacts about to be uploaded. Held from
+        // here until the item is cleared, so the tile stops being a grey
+        // rectangle well before the PUTs finish.
+        revokePreview(item);
+        this.update(item.id, { preview: previewOf(outcome.photo) });
 
         const upload = this.uploadAndCommit(item, outcome.photo).finally(() => {
           const index = uploads.indexOf(upload);
@@ -261,18 +414,32 @@ export class UploadQueue {
         });
       }
 
+      // Set before the edit is read, and `edit` refuses while it is set, so
+      // nothing can be typed into the gap between reading it and sending it.
       this.update(item.id, { state: 'committing', progress: 0.95 });
+
+      // What the administrator typed while this file was in flight, if
+      // anything, in place of what the photograph said about itself.
+      const typed = this.require(item.id).edit;
+      const captureDate = typed ? typed.date : photo.captureDate;
+      const captureTime = typed ? typed.time : photo.captureTime;
 
       const result = await this.deps.commit({
         photoId: prepared.photoId!,
         contentHash: photo.contentHash,
         originalFilename: photo.originalFilename,
         sourceMimeType: photo.sourceMimeType,
-        captureDate: photo.captureDate,
-        captureTime: photo.captureTime,
+        captureDate,
+        captureTime,
         captureUtcOffset: photo.captureUtcOffset,
-        timestampSource: photo.timestampSource,
-        caption: null,
+        // The same rule the edit endpoint applies: a correction outranks
+        // whatever was read at ingest, and recording that keeps a later
+        // re-derivation from silently undoing it.
+        timestampSource:
+          captureDate === photo.captureDate && captureTime === photo.captureTime
+            ? photo.timestampSource
+            : 'manual',
+        caption: typed?.caption ?? null,
         batchSeq: this.batchSeq,
         selectionIndex: item.selectionIndex,
         derivatives: photo.derivatives,
@@ -305,6 +472,43 @@ export class UploadQueue {
       error: error instanceof Error ? error.message : 'Something went wrong.',
     });
   }
+}
+
+/** States in which a file is still on its way into the library. */
+const IN_FLIGHT: ReadonlySet<ItemState> = new Set<ItemState>([
+  'queued',
+  'processing',
+  'uploading',
+  'committing',
+]);
+
+/** Whether this file is still working, for the tile's progress bar. */
+export function isInFlight(state: ItemState): boolean {
+  return IN_FLIGHT.has(state);
+}
+
+/** The two renditions worth keeping in memory; see `PendingPreview`. */
+function previewOf(photo: ProcessedPhoto): PendingPreview {
+  const blobUrl = (rendition: Rendition): string => {
+    const artifact = photo.artifacts.find((each) => each.rendition === rendition);
+    if (!artifact) throw new Error(`The pipeline produced no ${rendition}.`);
+    return URL.createObjectURL(
+      new Blob([artifact.bytes as BlobPart], { type: artifact.contentType }),
+    );
+  };
+  return {
+    thumbUrl: blobUrl('thumb'),
+    displayUrl: blobUrl('display-1280'),
+    derivatives: photo.derivatives,
+  };
+}
+
+/** An object URL is a document-lifetime reference; dropping the item is not
+ *  enough to release the bytes behind it. */
+function revokePreview(item: QueueItem): void {
+  if (!item.preview) return;
+  URL.revokeObjectURL(item.preview.thumbUrl);
+  URL.revokeObjectURL(item.preview.displayUrl);
 }
 
 /** Files that finished cleanly, for the "N added" summary. */

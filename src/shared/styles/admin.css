@@ -90,22 +90,36 @@ button:disabled {
   text-decoration: underline;
 }
 
-/* Upload ----------------------------------------------------------------- */
+/* Upload ---------------------------------------------------------------- */
 
-.upload {
-  margin-bottom: calc(var(--space) * 1.5);
-}
-
+/*
+ * The drop target is pinned to the top of the page.
+ *
+ * The library is one scrolling page years long, so a target at the head of it
+ * is a target you have to scroll back to — and the gesture it exists for
+ * starts outside the window, with a file already held over it. Sticky rather
+ * than fixed, and a direct child of the main column, so it pins for the whole
+ * scroll and still takes its own space at the top.
+ *
+ * It publishes its height to the root, which is what moves the pinned year and
+ * month headings down out from under it. Measured rather than declared: the
+ * hint wraps on a narrow window, and a number written twice is a number that
+ * disagrees with itself.
+ */
 .drop-target {
-  /* Large and easy to target at all times, not only when the library is
-     empty (design.md, "Admin site"). */
-  min-height: 7rem;
+  position: sticky;
+  /* Beneath the selection bar, which pins above everything. */
+  top: var(--selection-bar-height, 0px);
+  /* Above the year heading, which slides under it. */
+  z-index: 3;
+  margin-bottom: calc(var(--space) * 1.5);
+  min-height: 3.25rem;
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: baseline;
   justify-content: center;
-  gap: 0.25rem;
-  padding: var(--space);
+  gap: 0.5rem;
+  padding: 0.625rem var(--space);
   border: 2px dashed var(--border);
   border-radius: 8px;
   background: var(--bg-raised);
@@ -113,8 +127,14 @@ button:disabled {
   text-align: center;
 }
 
-.upload--empty-library .drop-target {
+/* With nothing in the library there is nothing to scroll past and nothing to
+   compete with, so it takes the room it deserves (design.md, "Admin site"). */
+.drop-target--empty-library {
   min-height: 16rem;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
 }
 
 .drop-target--active {
@@ -137,70 +157,41 @@ button:disabled {
   display: none;
 }
 
-.queue {
-  margin-top: var(--space);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+/* What is on its way in: the library's own grid, above the library. */
+.upload__pending {
+  margin-bottom: calc(var(--space) * 2);
 }
 
-.queue__summary {
-  padding: 0.625rem var(--space);
-  border-bottom: 1px solid var(--border);
-  font-size: 0.9375rem;
+/*
+ * Its heading is the library's, one size down and not pinned.
+ *
+ * The grid and the tiles are deliberately the library's own — these are
+ * photographs, not rows in a transfer dialog — but the heading is not a year
+ * and must not read as one, and a second thing pinned to the top under the
+ * drop target would be a third band of chrome across a page whose subject is
+ * the photographs.
+ */
+.upload__pending .timeline__year-heading {
+  position: static;
+  height: auto;
+  padding-bottom: 0.35rem;
+  font-size: 1.25rem;
+  border-bottom-width: 1px;
 }
 
-.queue__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  max-height: 18rem;
-  overflow-y: auto;
+/* A tile's note here is a stack of controls, not two lines of text, so it
+   does not stretch them across the column. */
+.upload__pending .photo-grid__note {
+  align-items: flex-start;
+  gap: 0.25rem;
 }
 
-.queue__item {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem var(--space);
-  border-bottom: 1px solid var(--border);
-  font-size: 0.875rem;
-}
-
-.queue__item:last-child {
-  border-bottom: none;
-}
-
-.queue__name {
-  flex: 1;
-  min-width: 12rem;
-  overflow-wrap: anywhere;
-}
-
-.queue__state {
+.upload__state {
   color: var(--fg-muted);
 }
 
-/* A skipped duplicate is neutral, not an error: re-dropping a folder is the
-   documented way to resume an interrupted batch. */
-.queue__item--skipped .queue__state {
-  color: var(--fg-muted);
-}
-
-.queue__item--failed .queue__state,
-.queue__error {
-  color: #b91c1c;
-}
-
-@media (prefers-color-scheme: dark) {
-  .queue__item--failed .queue__state,
-  .queue__error {
-    color: #fca5a5;
-  }
-}
-
-.queue__progress {
-  width: 8rem;
+.upload__progress {
+  width: 100%;
 }
 
 /* Tiles ------------------------------------------------------------------ */
@@ -309,34 +300,38 @@ button.photo-grid__link {
 /*
  * The pinned headings sit below the bar while it is shown.
  *
- * The bar measures itself and publishes its height to the root, because it
- * wraps on a narrow window; with no bar the variable is absent and every
- * offset below falls back to the viewer's own. These override display.css,
- * which is imported first.
+ * Two things can be pinned above them: the selection bar, and the drop
+ * target. Each measures itself and publishes its own height to the root,
+ * because both wrap on a narrow window and a number written twice is a number
+ * that disagrees with itself; when one is not on the page its variable is
+ * absent and the offset falls back to the viewer's own. These override
+ * display.css, which is imported first.
  */
+:root {
+  --admin-pinned: calc(
+    var(--selection-bar-height, 0px) + var(--drop-target-height, 0px)
+  );
+}
+
 .timeline__year-heading {
-  top: var(--selection-bar-height, 0px);
+  top: var(--admin-pinned);
 }
 
 .timeline__month-heading {
-  top: calc(var(--timeline-year-height) + var(--selection-bar-height, 0px));
+  top: calc(var(--timeline-year-height) + var(--admin-pinned));
 }
 
 .timeline__year {
-  scroll-margin-top: var(--selection-bar-height, 0px);
+  scroll-margin-top: var(--admin-pinned);
 }
 
 .timeline__month {
-  scroll-margin-top: calc(
-    var(--timeline-year-height) + var(--selection-bar-height, 0px)
-  );
+  scroll-margin-top: calc(var(--timeline-year-height) + var(--admin-pinned));
 }
 
 .timeline__day,
 .photo-grid__item {
-  scroll-margin-top: calc(
-    var(--timeline-stack-height) + var(--selection-bar-height, 0px)
-  );
+  scroll-margin-top: calc(var(--timeline-stack-height) + var(--admin-pinned));
 }
 
 /* The edit form, in the photo view ---------------------------------------- */
@@ -393,7 +388,8 @@ button.photo-grid__link {
   gap: 0.75rem;
 }
 
-.edit-form__saved {
+.edit-form__saved,
+.edit-form__unsaved {
   color: var(--fg-muted);
   font-size: 0.875rem;
 }

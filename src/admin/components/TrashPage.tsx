@@ -136,9 +136,9 @@ export function TrashPage({
 
   /**
    * Read-only curation: the same selection gestures as the library, and
-   * nothing that edits or trashes. `readOnly` is what tells the shared photo
-   * view to show no form, no Download, and no Delete, so the two callbacks
-   * below are unreachable rather than merely unused.
+   * nothing that edits or trashes. The three capabilities are what tell the
+   * shared photo view to show no form, no Download, and no Delete, so the two
+   * callbacks below are unreachable rather than merely unused.
    */
   const curation = useMemo<Curation>(
     () => ({
@@ -148,10 +148,10 @@ export function TrashPage({
       extendTo: (id) => setSelection(extendTo(visible, ids, id)),
       selectAll: (all) => setSelection((state) => addAll(state, all)),
       trash: () => {
-        // Unreachable: `readOnly` means no Delete button and no Delete key.
+        // Unreachable: `can.trash` is false, so no Delete button and no key.
       },
       edit: () => Promise.reject(new Error('A trashed photo cannot be edited.')),
-      readOnly: true,
+      can: { edit: false, download: false, trash: false },
     }),
     // Both are recomputed only when the listing itself changes.
     [visible, ids],

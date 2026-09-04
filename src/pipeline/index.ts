@@ -20,6 +20,7 @@ import { encodeArtifacts } from './encode.ts';
 import type { EncodedArtifact } from './encode.ts';
 import { sha256Hex } from './hash.ts';
 import { readSourceMetadata } from './metadata.ts';
+import type { SourceMetadata } from './metadata.ts';
 import { HEADER_PROBE_BYTES, validateSource } from './validate.ts';
 import type { Rejection } from './validate.ts';
 
@@ -45,6 +46,17 @@ export type ProcessStage =
 export interface ProcessOptions {
   onStage?: (stage: ProcessStage) => void;
   onArtifact?: (rendition: Rendition) => void;
+  /**
+   * EXIF already read for this file, to be used instead of reading it again.
+   *
+   * The upload queue reads every dropped file's metadata up front, so a
+   * placeholder can show the capture date long before its turn comes round in
+   * the serial processing loop. Passing that result back in is not an
+   * optimization: it is what makes the date shown in the placeholder and the
+   * date committed the same value by construction, rather than two parses that
+   * are merely expected to agree.
+   */
+  metadata?: SourceMetadata;
 }
 
 const MIME_BY_FORMAT = {
@@ -82,7 +94,7 @@ export async function processFile(
   const bytes = new Uint8Array(await file.arrayBuffer());
 
   onStage?.('reading-metadata');
-  const metadata = await readSourceMetadata(file, file.name);
+  const metadata = options.metadata ?? (await readSourceMetadata(file, file.name));
 
   onStage?.('hashing');
   // Hashed from the *source* bytes, so re-dropping the same file is detected
@@ -121,5 +133,5 @@ export async function processFile(
   };
 }
 
-export { downloadFilenameFor };
-export type { EncodedArtifact, Rejection };
+export { downloadFilenameFor, readSourceMetadata };
+export type { EncodedArtifact, Rejection, SourceMetadata };

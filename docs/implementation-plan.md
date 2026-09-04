@@ -214,7 +214,12 @@ files in the order they were selected or dropped.
    batch merely leaves a harmless gap in the sequence.
 2. **Process locally, one file at a time.** Decoding and encoding are
    strictly serial; the concurrency in step 4 applies to uploads only,
-   because several simultaneous large decodes risk exhausting memory. For
+   because several simultaneous large decodes risk exhausting memory.
+   Ahead of the loop, and outside it, the browser reads every dropped
+   file's EXIF — a header parse, not a decode — so a tile can show its
+   capture date within a moment of the drop rather than when its turn
+   arrives; the result is handed back to the step below rather than parsed
+   twice, so the date on screen and the date committed are one value. For
    each file the browser:
    - validates extension/type and the 50 MB limit;
    - reads dimensions from container/EXIF headers and rejects sources over
@@ -257,7 +262,11 @@ files in the order they were selected or dropped.
    per-file progress and retry. This concurrency governs **uploads only** —
    step 2's decode/encode work stays serial.
 5. **Commit.** The browser calls `commit` with the photo ID, metadata,
-   ordering fields, and descriptors. The API HEAD-verifies all four objects,
+   ordering fields, and descriptors. The metadata is what the administrator
+   typed for that file if they typed anything while it was in flight, and
+   what the file said about itself otherwise; a typed date that differs from
+   the extracted one commits `timestampSource: 'manual'`, the same rule the
+   edit endpoint applies. The API HEAD-verifies all four objects,
    re-checks hash uniqueness, and creates the record in one conditional
    catalog write. The photo is immediately live in the display hierarchy.
 6. **Failure and resume.** No photo record is persisted server-side before
@@ -343,9 +352,12 @@ The Worker runs a daily cron task that:
 4. Build desktop modifier/shift selection across the whole library, the day
    headings' Select all, the sticky selection bar, and delete
    confirmations/Undo. (Marquee dragging was dropped; see decisions.md #35.)
-5. Build the always-large upload drop target above the timeline, with the
-   browser pipeline and upload queue (per-file states: processing, uploading,
-   done, skipped, failed+retry).
+5. Build the pinned upload drop target and the arrivals area above the
+   timeline, with the browser pipeline and upload queue: a dropped file is
+   projected into a `PublicPhoto` and rendered on the shared grid and photo
+   view from the moment it is queued (per-file states: waiting, processing,
+   uploading, finishing, added, skipped, failed+retry), so it can be
+   captioned and dated before it lands.
 6. Build the Trash page on the shared grid and photo view, restore and
    permanent-delete flows, catalog export, and audit visibility where useful.
 7. Remove the read endpoints nothing calls any more.

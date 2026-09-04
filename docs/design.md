@@ -297,19 +297,37 @@ path, and everything below applies on top of the display site's rules.
 
 - The header gains a persistent **Trash** link with an item count and an
   **Export catalog** link. Every thumbnail shows its original filename.
-  The upload drop area sits above the timeline, prominent when the library
-  is empty and large and easy to target thereafter; the in-progress queue
-  shows per-file states (processing, uploading, done, skipped as duplicate,
-  failed with reason and retry). There is no persistent server-side
-  "processing" area; a file either commits fully or leaves no record.
+  The upload drop area is pinned to the top of the page, so a photograph
+  can be dropped wherever the reader has scrolled to in a library years
+  long; it is a large panel while the library is empty and a slim bar once
+  it is not, and it stands down while the photo view is open. There is no
+  persistent server-side "processing" area; a file either commits fully or
+  leaves no record.
+- A dropped file is a photograph on the page immediately: a tile of its
+  own, above the timeline, on the same grid as the library. It carries its
+  filename at once and its own capture date within a moment, its picture as
+  soon as the browser has encoded one — well before the upload finishes —
+  and beneath it the per-file state (waiting, processing, uploading,
+  finishing, added, skipped as a duplicate with a link to the photo already
+  stored, failed with a reason and a retry). It opens into the same photo
+  view and the same edit form as any other photograph, so a wrong date can
+  be corrected and a caption written while the machine is still working: a
+  correction made before the file commits is carried into that commit, and
+  one made afterwards is an ordinary edit. There is nothing to download or
+  delete there, because there is nothing stored yet. Once the batch has
+  settled and the library has been reloaded the photographs that landed
+  leave this area; failures and duplicates stay until cleared.
 - Clicking a thumbnail opens the photo view, which for an admin carries the
   edit form in place of the caption and date text: capture date, capture
   time, caption, and **Save changes**, with **Download**, **Delete**, and
   **Photo info** beneath. The original filename shows at the top right.
-  Nothing is saved until Save; arrowing away or closing discards an
-  unsaved edit. While a field has focus the keyboard belongs to it: arrows
-  move the caret, Escape leaves the field, and only a second Escape closes
-  the view. With focus outside the form, Delete or Backspace is the same
+  Nothing is saved until Save. While an edit is unsaved the previous and
+  next controls are disabled and the arrow keys do nothing, because
+  stepping to another photograph is precisely what would discard it; the
+  form says so. Escape and closing still leave, and still discard — those
+  are asking to go. While a field has focus the keyboard belongs to it:
+  arrows move the caret, Escape leaves the field, and only a second Escape
+  closes the view. With focus outside the form, Delete or Backspace is the same
   as the Delete button.
 - Delete, single or bulk, always confirms through the preview-and-confirm
   dialog, which states the resolved count and applies to exactly the

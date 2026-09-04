@@ -100,7 +100,10 @@ module graph may import from `src/admin/`.
 
 Nothing under `src/shared/` may import from either app. The admin augments the
 shared UI through `CurationContext`; the viewer provides `null`, so the viewer
-bundle carries the branches and never the admin modules.
+bundle carries the branches and never the admin modules. Three listings
+provide one — the library, the trash, and the files still uploading — and they
+differ only in `Curation.can`, so the photo view is one component rather than
+three.
 
 Only the three values in `clientDefines()` (`config/build-env.ts`) are inlined
 into a bundle — no `VITE_` prefix auto-inlining, so a secret cannot reach a
@@ -145,6 +148,10 @@ fixture server.
   artifacts stay mutually consistent.
 - **Decode and encode are strictly serial**, one file at a time
   (`src/pipeline/index.ts`). `UPLOAD_CONCURRENCY` governs uploads only.
+  Reading EXIF is neither, and the queue does it for the whole drop up front
+  so a tile can show its date immediately; it hands the result back to
+  `processFile` rather than letting it parse again, so what is shown and what
+  is committed cannot diverge.
 - **`src/shared/` (outside `ui/` and `styles/`) must stay free of DOM, Node,
   and Workers globals** — it is compiled into all three targets. `ui/` is the
   only place under `src/shared/` where DOM globals are allowed;

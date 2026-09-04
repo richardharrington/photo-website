@@ -540,3 +540,92 @@ second adds nothing to the display bundle but a few branches.
     mobile suites passing unchanged. The second replaced the admin on top of
     it. Splitting them is what made "the viewer did not change" a claim a test
     run could settle rather than a claim about a diff.
+
+## Curating photographs as they arrive — 2026-09-03
+
+Three changes to the admin, made together because they are one complaint: the
+administrator was waiting on the machine. Numbering continues from above.
+
+53. **The drop target is pinned to the top of the page, and is a bar rather
+    than a panel.** The library is one scrolling page years long, so a target
+    at the head of it is a target you have to scroll back to — with a file
+    already held over the window, which is the one moment a scroll is hardest
+    to perform. It is sticky rather than fixed, and a direct child of the main
+    column, so it pins for the whole scroll and still takes its own space at
+    the top; that is why the panel emits it as a sibling of the arrivals area
+    rather than wrapping both in a section, since a wrapper would end the
+    sticky containing block at the top of the page.
+
+    The cost is vertical room, paid on every screen: it is a slim bar once
+    there is a library, and keeps the large panel only while there is not.
+    It publishes its measured height to the root as `--drop-target-height`,
+    joining `--selection-bar-height` in the offset the pinned year and month
+    headings use — measured, not declared, because it wraps on a narrow
+    window. It stands down entirely while a photo view is open, its own
+    included: one photograph fills the screen there, and a target pinned over
+    it would be inviting a drop onto a view that is not the library.
+
+54. **A dropped file is a photograph on the page before it is one on the
+    server.** Waiting for four encodes and four PUTs before the first
+    correction can be made is most of the time it takes to curate a batch, and
+    a batch off a camera is a batch of wrong dates. So a queued file is
+    projected into a `PublicPhoto` (`src/admin/upload/pending.ts`) and
+    rendered by the same grid and the same photo view as the library, in an
+    arrivals area above it — the trash's pattern exactly, and for the same
+    reason: there is no catalog record and so no address, which is why the
+    tiles are buttons and the view is local state.
+
+    Three consequences worth writing down:
+
+    - **Every dropped file's EXIF is read up front**, before the serial
+      processing loop reaches it, so the tile whose date most needs correcting
+      is not the one that has no date for a minute. It is a header parse, not
+      a decode, so it does not violate the serial rule in #21. The result is
+      handed back to `processFile` rather than parsed twice, which makes the
+      date shown and the date committed one value rather than two expected to
+      agree.
+    - **What is typed goes into that file's own commit** when the file has not
+      committed yet, and to the stored photo when it has. The difference is
+      meant to be invisible, and the only moment the queue refuses is while
+      the commit is actually in flight — the body is built by then and cannot
+      be amended, and saying so leaves the edit in the form rather than losing
+      it or claiming to have stored it. A typed date that differs from the
+      extracted one commits `timestampSource: 'manual'`, the same rule
+      `editPhoto` applies.
+    - **The picture appears from memory.** The thumbnail and the 1280 are held
+      as object URLs from the moment the encoders produce them, so the tile
+      stops being a grey rectangle well before the PUTs finish. Roughly a
+      quarter of a megabyte a photograph, released when the item is cleared.
+      Until then the tile reserves a 3:2 rectangle, which is a guess and has
+      to be: the true shape is known only after the decode that orientation is
+      applied in.
+
+    The arrivals area clears itself once the batch has settled *and* the
+    library has been reloaded — never before, or the photographs would blink
+    out of existence between the two — and never while one of those very
+    photographs is open, which would unmount the photo view and take the edit
+    being typed in it along. Failures and duplicates stay behind, being the
+    only rows that say something the library does not.
+
+55. **`Curation.readOnly` became `Curation.can`, three explicit
+    capabilities.** The three listings that provide a context do not differ
+    along one axis: the library allows editing, downloading and trashing; the
+    trash allows none of them; a photograph still uploading allows editing and
+    nothing else, having no stored bytes to download and no record to trash.
+    A single flag cannot say that, and the alternative — a second photo view
+    for arrivals — would be the thing this whole change exists to avoid.
+
+56. **An unsaved edit disables the arrows.** Stepping to another photograph
+    remounts the form on that one's stored values, which is exactly how the
+    edit gets discarded, so the two arrow buttons and both arrow keys refuse
+    while the form differs from what is stored. Escape and closing still leave
+    and still discard: those are asking to go. The form is what says why —
+    "Unsaved changes" beside Save — because a disabled button cannot be
+    hovered for a tooltip on every platform and cannot be focused for a label.
+
+    Dirtiness is a comparison against the record, not a flag: typing a
+    character and deleting it again leaves nothing behind, and a save clears
+    it by arithmetic as soon as the stored photo comes back. Which is why the
+    form now takes the caption back from what was stored as well as the date
+    and time — a caption is stored trimmed, and without that the fields still
+    read as unsaved after a successful save.

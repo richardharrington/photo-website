@@ -5,6 +5,23 @@ import type { ProcessOutcome } from '../../src/pipeline/index.ts';
 import { RENDITIONS } from '../../src/shared/constants.ts';
 import type { Rendition } from '../../src/shared/constants.ts';
 import type { DerivativeDescriptor } from '../../src/shared/catalog.ts';
+import type { SourceMetadata } from '../../src/pipeline/index.ts';
+import type { PublicPhoto } from '../../src/shared/display-api.ts';
+
+/** What a file says about itself, as the queue reads it before processing. */
+function metadata(date: string | null, time: string | null): SourceMetadata {
+  return {
+    timestamp: {
+      date: date as never,
+      time: time as never,
+      utcOffset: null,
+      source: date ? 'exif-datetimeoriginal' : 'none',
+    },
+    orientation: 1,
+    colorProfile: null,
+    hadGpsData: false,
+  };
+}
 
 function fakeFile(name: string): File {
   return { name, size: 1000, type: 'image/heic' } as unknown as File;
@@ -52,6 +69,22 @@ function makeDeps(overrides: Partial<QueueDependencies> = {}): Harness {
       await Promise.resolve();
       events.push(`process:end:${file.name}`);
       return processed(`hash-${file.name}`);
+    }),
+    readMetadata: vi.fn(async (file: File) => {
+      events.push(`metadata:${file.name}`);
+      return metadata('2026-08-02', '12:00:00');
+    }),
+    editPhoto: vi.fn(async (photoId: string, edit) => {
+      events.push(`edit:${photoId}`);
+      return {
+        id: photoId,
+        caption: edit.caption,
+        captureDate: edit.date,
+        captureTime: edit.time,
+        captureUtcOffset: null,
+        originalFilename: 'IMG.HEIC',
+        derivatives: DERIVATIVES,
+      } as PublicPhoto;
     }),
     beginBatch: vi.fn(async () => {
       events.push('beginBatch');
@@ -426,5 +459,205 @@ describe('summarize', () => {
     };
 
     expect(summarize(snapshot)).toBe('1 added');
+  });
+});
+
+/**
+ * Everything a photograph is shown as, and edited as, before it exists.
+ *
+ * The point of the placeholder is that a date can be corrected while the
+ * machine works, so what has to hold is that the correction is not lost
+ * whatever stage the file has reached when it is made — carried into the
+ * commit before, applied to the stored photo after, and refused outright in
+ * the one moment neither is possible.
+ */
+describe('a photo being uploaded', () => {
+  /** A promise a test can hold open, to stop a file at a chosen stage. */
+  function gate(): { wait: Promise<void>; release: () => void } {
+    let release = () => {};
+    const wait = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { wait, release };
+  }
+
+  it('reads every file before the first one is processed', async () => {
+    const { deps, events } = makeDeps();
+    await drain(new UploadQueue(deps), [fakeFile('a.heic'), fakeFile('b.heic')]);
+
+    // Both dates are on screen while the first file is still encoding, which
+    // is the whole reason the read happens up front.
+    expect(events.indexOf('metadata:b.heic')).toBeLessThan(
+      events.indexOf('process:start:a.heic'),
+    );
+  });
+
+  it('hands what it read to the pipeline rather than having it read twice', async () => {
+    const { deps } = makeDeps();
+    await drain(new UploadQueue(deps), [fakeFile('a.heic')]);
+
+    expect(deps.processFile).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ metadata: metadata('2026-08-02', '12:00:00') }),
+    );
+  });
+
+  it('carries a date typed during the upload into the commit', async () => {
+    const held = gate();
+    const { deps } = makeDeps({
+      prepare: vi.fn(async (hash: string) => {
+        await held.wait;
+        return {
+          status: 'ready' as const,
+          photoId: `photo-${hash}`,
+          uploads: Object.fromEntries(
+            RENDITIONS.map((r) => [r, `https://r2.test/${r}`]),
+          ) as Record<Rendition, string>,
+        };
+      }),
+    });
+    const queue = new UploadQueue(deps);
+
+    const running = queue.add([fakeFile('a.heic')]);
+    await vi.waitFor(() => expect(queue.snapshot().items[0]!.state).toBe('uploading'));
+
+    await queue.edit(queue.snapshot().items[0]!.id, {
+      date: '2019-07-04',
+      time: '09:30:00',
+      caption: 'The good one',
+    });
+    held.release();
+    await running;
+
+    // Not a second request: the photograph is never stored with a date its
+    // owner has already corrected.
+    expect(deps.editPhoto).not.toHaveBeenCalled();
+    expect(deps.commit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        captureDate: '2019-07-04',
+        captureTime: '09:30:00',
+        caption: 'The good one',
+        // A correction outranks what was read at ingest, and the record says so.
+        timestampSource: 'manual',
+      }),
+    );
+  });
+
+  it('leaves the timestamp source alone when the date is not what changed', async () => {
+    const held = gate();
+    const { deps } = makeDeps({
+      prepare: vi.fn(async (hash: string) => {
+        await held.wait;
+        return {
+          status: 'ready' as const,
+          photoId: `photo-${hash}`,
+          uploads: Object.fromEntries(
+            RENDITIONS.map((r) => [r, `https://r2.test/${r}`]),
+          ) as Record<Rendition, string>,
+        };
+      }),
+    });
+    const queue = new UploadQueue(deps);
+
+    const running = queue.add([fakeFile('a.heic')]);
+    await vi.waitFor(() => expect(queue.snapshot().items[0]!.state).toBe('uploading'));
+    await queue.edit(queue.snapshot().items[0]!.id, {
+      date: '2026-08-02',
+      time: '12:00:00',
+      caption: 'Only a caption',
+    });
+    held.release();
+    await running;
+
+    expect(deps.commit).toHaveBeenCalledWith(
+      expect.objectContaining({ timestampSource: 'exif-datetimeoriginal' }),
+    );
+  });
+
+  it('edits the stored photo once the commit has gone', async () => {
+    const { deps } = makeDeps();
+    const queue = new UploadQueue(deps);
+    await drain(queue, [fakeFile('a.heic')]);
+
+    const item = queue.snapshot().items[0]!;
+    await queue.edit(item.id, { date: '2019-07-04', time: null, caption: null });
+
+    expect(deps.editPhoto).toHaveBeenCalledWith(item.photoId, {
+      date: '2019-07-04',
+      time: null,
+      caption: null,
+    });
+    // And the tile now shows what was stored, not what was typed.
+    expect(queue.snapshot().items[0]!.edit).toEqual({
+      date: '2019-07-04',
+      time: null,
+      caption: null,
+    });
+  });
+
+  it('refuses an edit in the one moment it could go nowhere', async () => {
+    const held = gate();
+    const { deps } = makeDeps({
+      commit: vi.fn(async (body) => {
+        await held.wait;
+        return { status: 'created' as const, photo: { id: body.photoId } as never };
+      }),
+    });
+    const queue = new UploadQueue(deps);
+
+    const running = queue.add([fakeFile('a.heic')]);
+    await vi.waitFor(() => expect(queue.snapshot().items[0]!.state).toBe('committing'));
+
+    // The body has been built and cannot be amended, and there is no stored
+    // photo to edit yet. Saying so keeps the edit in the form, where it can be
+    // saved a moment later.
+    await expect(
+      queue.edit(queue.snapshot().items[0]!.id, {
+        date: '2019-07-04',
+        time: null,
+        caption: null,
+      }),
+    ).rejects.toThrow(/being saved/);
+
+    held.release();
+    await running;
+  });
+
+  it('holds the picture from the moment it is encoded', async () => {
+    const { deps } = makeDeps();
+    const queue = new UploadQueue(deps);
+    await drain(queue, [fakeFile('a.heic')]);
+
+    const preview = queue.snapshot().items[0]!.preview;
+    expect(preview?.thumbUrl).toMatch(/^blob:/);
+    expect(preview?.displayUrl).toMatch(/^blob:/);
+    // The placeholder's guessed shape is replaced by the real one.
+    expect(preview?.derivatives).toEqual(DERIVATIVES);
+  });
+
+  it('forgets what is in the library and keeps what still needs attention', async () => {
+    const { deps } = makeDeps({
+      prepare: vi.fn(async (hash: string) =>
+        hash === 'hash-b.heic'
+          ? { status: 'duplicate' as const, existingId: 'already-here' }
+          : {
+              status: 'ready' as const,
+              photoId: `photo-${hash}`,
+              uploads: Object.fromEntries(
+                RENDITIONS.map((r) => [r, `https://r2.test/${r}`]),
+              ) as Record<Rendition, string>,
+            },
+      ),
+    });
+    const queue = new UploadQueue(deps);
+    await drain(queue, [fakeFile('a.heic'), fakeFile('b.heic')]);
+
+    queue.clearCommitted();
+    // The added file is on the timeline now; the duplicate is the only thing
+    // left that says something the library does not.
+    expect(queue.snapshot().items.map((item) => item.state)).toEqual(['skipped']);
+
+    queue.clear();
+    expect(queue.snapshot().items).toEqual([]);
   });
 });
