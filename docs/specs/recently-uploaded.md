@@ -95,7 +95,8 @@ and two for another, with nothing on screen explaining why).
   photographs first in descending capture-date order; within one capture date
   delegate to the existing `comparePhotosWithinDay` (timed photos in clock
   order, then date-only in upload order); undated photographs last, ordered by
-  `compareUploadOrder`.
+  `compareUploadOrder` — which is private to `ordering.ts` today; export it,
+  or use its exported wrapper `compareUndatedPhotos`.
 
 This needs one new comparator in `src/shared/ordering.ts`. It is capture
 order *across* dates, which the existing hierarchy never needed because days
@@ -144,8 +145,11 @@ decided server-side, in `src/shared/display-api.ts`, by pure functions
 testable against `fixtures/in-memory-store.ts`.
 
 `timelineResponse(catalog, title)` gains a `nowMs` argument for rule (b). It
-must not read the clock itself; the two Functions, the Worker and the fixture
-server pass it, exactly as `now` is threaded through the mutation path today.
+must not read the clock itself. Its two callers pass it — `readRoute` in
+`netlify/functions/lib/read-routes.ts`, which both Functions share, and the
+fixture server — exactly as `now` is threaded through the mutation path
+today. The Worker never calls `timelineResponse`: it serves image bytes and
+runs the cron, and nothing about it changes.
 
 Rejected: a separate `/api/recent` route (a round trip on a site whose entire
 page is one request, and the same photo arriving from two endpoints); full
@@ -169,7 +173,8 @@ before the year parse. `/recent` alone is `recent`; `/recent/photo/<id>` with
 a valid ID is `recent-photo`; anything else under `/recent` is `not-found`.
 `ADMIN_PAGES` stays `['trash']`.
 
-The nested form is why `parseRoute` changes rather than gaining a list entry:
+The nested form is why `parseRoute` (`src/shared/ui/routes.ts`) changes rather
+than gaining a list entry:
 `extra` matches single-segment pages only (`segments.length === 1`,
 `routes.ts:71`).
 
@@ -198,6 +203,21 @@ Each group renders:
   entirely photographs captured on the day it was uploaded (section 8).
 - **The grid**, one `PhotoGrid` per group.
 
+**The heading and the subtitle pin together**, the way a year heading pins in
+the library: they stay at the top while the group's own grid scrolls past,
+and the next group's heading pushes them off when it arrives. One sitting can
+be an 800-photo import, and the page exists to say which sitting you are in.
+The subtitle pins *with* the heading rather than scrolling away under it, so
+the capture span stays readable through the whole grid. Both are fixed-height
+constants (section 11); a group with no subtitle is simply a shorter pinned
+block. The heading sits at the year heading's size, the subtitle at the day
+heading's, muted.
+
+`RecentPage` carries the same one-shot scroll effect `TimelinePage` has —
+`takeScrollRequest`, then `scrollToElementId` — or closing the photo view
+cannot return to the tile it was opened from. A fresh navigation to `/recent`
+scrolls to the top.
+
 Empty `/recent` renders the `Empty` state, never a 404 — it is a fixed part of
 the site like the Undated section, not a section that exists only if populated.
 With the 50-photo floor this occurs only when the library itself is empty.
@@ -206,20 +226,27 @@ With the 50-photo floor this occurs only when the library itself is empty.
 
 **The heading's time**, computed in the browser from `uploadedAt` in the
 reader's own zone: relative for the past week — "Added today", "Added
-yesterday", "Added Tuesday" — and absolute beyond it: "Added 21 August".
-Include the year when it is not the current one.
+yesterday", then the weekday name ("Added Tuesday") for two to six calendar
+days ago — and absolute from seven days on: "Added August 21", in the
+month-first order every other date on the site uses (`formatCaptureDate`, the
+day headings). Include the year when it is not the current one: "Added
+August 21, 2025". Days are counted as calendar days in the reader's zone, not
+24-hour periods, so an 11pm upload is "yesterday" at 1am.
 
 Staleness is accepted: a page left open overnight says "Added today" about
 yesterday until it is reloaded. Implementer's discretion whether to recompute
 on `visibilitychange`.
 
 **The subtitle**, computed from `captureRange` and `undatedCount`, at the
-coarsest granularity that fits:
+coarsest granularity that fits. A span inside one month always prints its
+days, however many — "September 1–23, 2026" says more than "September 2026",
+and a ceiling on the range would be one more threshold with a cliff at its
+edge, of the kind this spec refuses everywhere else:
 
 | Case | Line |
 | --- | --- |
 | One capture date | `photographs from August 2, 2026` |
-| One month | `photographs from August 2026` |
+| Several days in one month | `photographs from September 1–3, 2026` |
 | One year, several months | `photographs from March–August 1978` |
 | Several years | `photographs from March 1977 – August 1978` |
 | Any undated present | append `, and 4 undated` |
@@ -253,6 +280,15 @@ Reuse `formatCaptureDate` and `formatMonth` from `src/shared/datetime.ts`.
 Capture dates are `YYYY-MM-DD` strings, so min/max is string comparison — do
 not parse them into `Date`.
 
+**The labeller takes `nowMs` and an optional IANA `timeZone`**, and derives
+the reader's calendar day for both `nowMs` and `uploadedAt` through
+`Intl.DateTimeFormat(undefined, { timeZone, ... }).formatToParts`, defaulting
+to the reader's own zone. Node fixes `TZ` at process start, so an explicit
+zone argument is the only way section 14's "read from a zone where the upload
+falls on the next day" test can run in the same process as the others. The
+same reader-zone day feeds the heading and the same-day suppression, so the
+two can never disagree.
+
 ## 9. The photo view
 
 `/recent/photo/<id>` is fully symmetric with `/photo/<id>`: the recent view
@@ -260,13 +296,26 @@ renders underneath and stays mounted, the lightbox opens over it, arrows
 traverse **the recent set in its own order**, and closing returns to the tile
 in `/recent` that was left.
 
-Two shared components gain a prop, both defaulting to today's behaviour:
+**A photo that is live but no longer in the recent set** — a cousin's
+month-old link to `/recent/photo/<id>` — still opens. The detail request
+succeeds, the lightbox renders over `/recent`, and because the id is absent
+from the recent set's ordered list both arrows are disabled (the existing
+`currentPosition === -1` behaviour in `Lightbox`); closing lands at the top of
+`/recent`, since the tile it would scroll to is not on the page. Nothing
+redirects and nothing 404s: the photograph exists, and a URL that stops
+working because time passed is the outcome section 6 refuses.
+
+Three shared components gain a prop, each defaulting to today's behaviour:
 
 - `Lightbox` takes `photoHref?: (id: string) => string`. It currently
   hardcodes `routes.photo(target)` when stepping (`Lightbox.tsx:148`), which
   would silently drop a reader out of `/recent` on the first arrow press.
 - `PhotoPage` takes the ordered id list and `backHref` from its caller rather
   than always deriving them from `indexTimeline`.
+- `PhotoGrid` takes `photoHref?: (id: string) => string` for the same reason:
+  its tiles link to `routes.photo(id)` today, so without it the very first
+  click on a tile in `/recent` would leave the recent view. `RecentPage`
+  passes `routes.recentPhoto`.
 
 The detail response's `group`, `index`, `total`, `previousId` and `nextId`
 stay library-oriented and are unused here; `PhotoPage` already prefers the
@@ -275,7 +324,8 @@ given in its own comment.
 
 ## 10. The toggle, and the unseen marker
 
-Both labels are always visible; the current view is plain text with
+The two labels are **All photos** and **Recently added**, in that order.
+Both are always visible; the current view is plain text with
 `aria-current="page"`, the other is a link. It lives in `Layout`'s existing
 `nav` slot — the viewer passes it, and the admin puts it beside Trash and
 Export catalog.
@@ -289,9 +339,15 @@ Export catalog.
 
 **The unseen marker.** The browser stores the newest `uploadedAt` it has
 rendered on `/recent` (`localStorage`, one key). When the timeline response
-carries a `recent[0].uploadedAt` newer than the stored value, the toggle shows
-a marker — a dot or bolder weight, implementer's discretion — which clears
-when `/recent` is opened.
+carries a `recent[0].uploadedAt` newer than the stored value — or there is no
+stored value at all, as on a first visit or a new device — the toggle shows a
+marker — a dot or bolder weight, implementer's discretion — which clears when
+`/recent` is opened.
+
+On the admin's trash page neither view is current, so both labels are links.
+The admin's own toggle gains the marker once its own upload lands in the
+refetch; accepted, since it clears on one click and the alternative is a
+per-app rule for a dot.
 
 This is **emphasis only**. It never affects set membership, so it is safe for
 it to be absent or wrong: wrap every read and write in `try`/`catch` (private
@@ -312,8 +368,29 @@ differently than a dot).
   not wrap there.
 - Inside the same media query: `.timeline__year-heading` pins at
   `top: var(--layout-header-height)`, `.timeline__month-heading` at the sum of
-  header and year, and `--timeline-stack-height` becomes all three. The header
-  needs a `z-index` above both.
+  header and year, and `--timeline-stack-height` becomes all three. The
+  anchors' `scroll-margin-top` values move with them: `.timeline__year` from
+  `0` to the header height, `.timeline__month` to header plus year. The
+  header needs a `z-index` above both headings and above the admin's drop
+  target (currently 3).
+- The admin's own pinned stack sits *below* the header rather than over it,
+  or the toggle is covered exactly while a selection exists: `.selection-bar`
+  moves from `top: 0` to `top: var(--layout-header-height, 0px)`,
+  `.drop-target` to header plus `--selection-bar-height`, and every
+  `--admin-pinned` override in `admin.css` gains the header height as well.
+  Below 40rem the variable is `0px` and all of this collapses to today's
+  layout. `.admin-banner` stays at `top: 0` above everything; it is transient.
+- `/recent` pins its own two lines, not the library's year and month:
+  `--recent-heading-height` and `--recent-subtitle-height` join the constants,
+  the heading pinned at `top: var(--layout-header-height)` and the subtitle at
+  header plus heading, with the same z-order the year and month use. A group
+  without a subtitle publishes a shorter pinned height. Its tiles'
+  `scroll-margin-top` is therefore header plus heading, plus the subtitle
+  where the group has one, plus `--admin-pinned` in the admin — never
+  `--timeline-stack-height`, which would land a closed photo's tile about
+  5rem too low. A class on the group section (say `recent__group--titled`)
+  is the natural way to make the per-group term a CSS variable rather than a
+  measurement.
 - A fixed height rather than a measured one, on purpose: the year and month
   heights are already constants precisely so that the sticky offsets and the
   anchor `scroll-margin` can agree without measuring. A fourth, measured term
@@ -354,9 +431,17 @@ Also:
 - `removePhotos` in `src/shared/timeline-patch.ts` must patch `recent` too:
   drop the ids, fix each group's `count` and `undatedCount`, and drop a group
   that empties.
-- `upsertPhoto` patches the photo itself; a group's `captureRange` may be
-  stale until the background refetch lands a moment later. Accepted — the
-  refetch is immediate and the range is a subtitle, not navigation.
+- `upsertPhoto` must leave `recent` alone. It is built on `removePhotos`
+  today — remove, then reinsert into the year tree — so once `removePhotos`
+  learns to drop ids from `recent`, an edit would make the photograph vanish
+  from `/recent` until the refetch. Factor the year-tree removal out so an
+  edit never touches `recent`: the groups carry only ids, and the id has not
+  changed. A group's `captureRange`, `undatedCount`, and the photo's position
+  within the group may then be stale until the background refetch lands a
+  moment later. Accepted — the refetch is immediate and none of the three is
+  navigation.
+- `UploadPanel`'s `photoViewOpen` must be true on `recent-photo` as well as
+  `photo`, or the drop target pins over the lightbox.
 - Newly uploaded photographs do not appear in `recent` until the refetch,
   which the upload panel already awaits before clearing its tiles.
 - The pinned upload target stays on `/recent`; it is chrome, not part of the
@@ -396,11 +481,19 @@ Things that will bite an implementer who has not read the surrounding files.
   the window alone; the window exceeding the floor; batch closure pulling in
   photos older than both; a trashed member of an included batch staying out;
   the exact 14-day boundary; determinism of the `(createdAt, id)` order.
-- **Grouping**: a gap of exactly `RECENT_GAP_HOURS` (state which side of the
-  boundary opens a new group and test it); a sitting split across a reload
-  staying one group; two sittings a day apart being two.
+  Every photo in `fixtures/catalog.ts` shares one `createdAt`, so these tests
+  build their own records with explicit timestamps through `makePhoto` rather
+  than reading the shared fixture as it stands.
+- **Grouping**: a gap of exactly `RECENT_GAP_HOURS` stays one group and a
+  millisecond more opens a new one — section 3 says *more than*; a sitting
+  split across a reload staying one group; two sittings a day apart being
+  two.
 - **The range**, one test per row of the table in section 8, including the
-  all-undated and mixed cases.
+  all-undated and mixed cases, and a within-month span longer than a fortnight
+  still printing its days.
+- **The aged-out link**: `/recent/photo/<id>` for a live photo outside the
+  recent set renders the lightbox with both arrows disabled and closes to
+  `/recent`.
 - **Same-day suppression**, with a fixed clock and an explicit zone: a
   single-capture-date group uploaded that same day renders no subtitle; the
   same group read from a zone where the upload falls on the next day renders
@@ -433,5 +526,5 @@ Things that will bite an implementer who has not read the surrounding files.
 
 - The exact marker (dot vs weight) on the toggle.
 - Whether the label recomputes on `visibilitychange`.
-- Which side of the 6-hour boundary opens a new group — pick one and test it.
-- The real value of `--layout-header-height`.
+- The real values of `--layout-header-height`, `--recent-heading-height`,
+  and `--recent-subtitle-height`.
