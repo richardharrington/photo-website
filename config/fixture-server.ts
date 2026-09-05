@@ -20,7 +20,7 @@ import {
   timelineResponse,
   toPublicPhoto,
 } from '../src/shared/display-api.ts';
-import { getLivePhoto, trashedPhotos } from '../src/shared/catalog.ts';
+import { getLivePhoto, livePhotos, trashedPhotos } from '../src/shared/catalog.ts';
 import type { Catalog } from '../src/shared/catalog.ts';
 import { loadCatalog, mutateCatalog } from '../src/shared/catalog-repository.ts';
 import {
@@ -41,6 +41,19 @@ import {
 } from '../src/shared/constants.ts';
 import type { Rendition } from '../src/shared/constants.ts';
 import { encodeJson } from '../src/shared/store.ts';
+import {
+  digestFor,
+  isValidEmailAddress,
+  normalizeEmail,
+} from '../src/shared/notifications.ts';
+import type {
+  DestinationAddress,
+  NotificationState,
+} from '../src/shared/notifications.ts';
+import {
+  loadNotificationState,
+  mutateNotificationState,
+} from '../src/shared/notifications-repository.ts';
 import { generateAuditId, generatePhotoId } from '../src/shared/ids.ts';
 import { downloadFilenameFor } from '../src/shared/filename.ts';
 import { baseSecurityHeaders } from '../src/shared/headers.ts';
@@ -216,6 +229,192 @@ async function handleDisplay(route: string, res: ServerResponse): Promise<boolea
 }
 
 // ---------------------------------------------------------------------------
+// Cloudflare destination addresses, faked
+// ---------------------------------------------------------------------------
+
+/**
+ * The account's destination-address list, in memory.
+ *
+ * In production this is Cloudflare's, reached over its API, and *it* decides
+ * whether an address is verified — there is no local copy. Here it is a Map,
+ * and the verification step is faked by a naming convention: an address whose
+ * local part begins with `pending` never verifies, everything else verifies the
+ * moment it is added. Both states have to be reachable from a test, and one
+ * that had to click a link in a real mailbox would not be a test.
+ */
+const fakeAddresses = new Map<string, DestinationAddress>();
+let fakeAddressSeq = 0;
+
+/** What the local /notify/test "sent", for anyone tailing the dev server. */
+const sentTestDigests: { email: string; count: number; at: string }[] = [];
+
+function addFakeAddress(email: string): DestinationAddress {
+  fakeAddressSeq += 1;
+  const address: DestinationAddress = {
+    id: `dev-address-${fakeAddressSeq}`,
+    email,
+    verified: !email.startsWith('pending'),
+  };
+  fakeAddresses.set(email, address);
+  return address;
+}
+
+function listFakeAddresses(): DestinationAddress[] {
+  return [...fakeAddresses.values()].sort((a, b) => (a.email < b.email ? -1 : 1));
+}
+
+async function notificationState(): Promise<NotificationState> {
+  return (await loadNotificationState(store)).state;
+}
+
+function recipientRow(address: DestinationAddress, state: NotificationState) {
+  const recipient = state.recipients[address.email];
+  return {
+    id: address.id,
+    email: address.email,
+    verified: address.verified,
+    enabled: recipient?.enabled ?? false,
+    lastSent: recipient?.lastSent ?? null,
+  };
+}
+
+/**
+ * The local stand-in for `POST /notify/test` on the asset Worker.
+ *
+ * Production signs a sixty-second grant and posts it across; here the admin
+ * handler calls this directly. It computes exactly what the real one computes
+ * and sends nothing.
+ */
+async function fakeNotifyTest(email: string): Promise<{ count: number } | null> {
+  const address = fakeAddresses.get(email);
+  if (!address?.verified) return null;
+
+  const at = now();
+  const state = await notificationState();
+  const seenThrough = state.recipients[email]?.seenThrough ?? at;
+  const plan = digestFor(livePhotos(await currentCatalog()), email, seenThrough, at);
+
+  sentTestDigests.push({ email, count: plan.count, at });
+  console.log('[fixture] would send test digest', JSON.stringify(plan));
+  return { count: plan.count };
+}
+
+async function handleNotifications(
+  route: string,
+  method: string,
+  body: Body,
+  res: ServerResponse,
+): Promise<boolean> {
+  if (method === 'GET' && route === '/notifications') {
+    const state = await notificationState();
+    sendJson(res, 200, {
+      recipients: listFakeAddresses().map((address) => recipientRow(address, state)),
+    });
+    return true;
+  }
+
+  if (method !== 'POST') return false;
+
+  if (route === '/notifications/add') {
+    const email = normalizeEmail(String(body['email'] ?? ''));
+    if (!isValidEmailAddress(email)) {
+      sendBadRequest(res, 'That is not an email address.');
+      return true;
+    }
+    if (fakeAddresses.has(email)) {
+      // Cloudflare's own refusal, in the shape the admin surfaces it.
+      sendBadRequest(res, 'That address is already a destination address.');
+      return true;
+    }
+
+    const address = addFakeAddress(email);
+    const at = now();
+    await mutateNotificationState(store, (state) => ({
+      state: {
+        ...state,
+        recipients: {
+          ...state.recipients,
+          [email]: { enabled: true, seenThrough: at, lastSent: null },
+        },
+      },
+      value: undefined,
+    }));
+
+    sendJson(res, 200, {
+      recipient: { ...recipientRow(address, await notificationState()) },
+    });
+    return true;
+  }
+
+  if (route === '/notifications/remove') {
+    const id = String(body['id'] ?? '');
+    const address = listFakeAddresses().find((candidate) => candidate.id === id);
+    if (!address) {
+      sendNotFound(res);
+      return true;
+    }
+    fakeAddresses.delete(address.email);
+    await mutateNotificationState(store, (state) => {
+      if (!state.recipients[address.email]) return { state, value: undefined };
+      const recipients = { ...state.recipients };
+      delete recipients[address.email];
+      return { state: { ...state, recipients }, value: undefined };
+    });
+    sendJson(res, 200, { removed: address.email });
+    return true;
+  }
+
+  if (route === '/notifications/set-enabled') {
+    const email = normalizeEmail(String(body['email'] ?? ''));
+    const enabled = body['enabled'] === true;
+    const address = fakeAddresses.get(email);
+    if (!address) {
+      sendNotFound(res);
+      return true;
+    }
+
+    const at = now();
+    const state = await mutateNotificationState(store, (current) => {
+      const existing = current.recipients[email];
+      const wasEnabled = existing?.enabled ?? false;
+      const updated: NotificationState = {
+        ...current,
+        recipients: {
+          ...current.recipients,
+          [email]: {
+            enabled,
+            seenThrough: enabled && !wasEnabled ? at : (existing?.seenThrough ?? at),
+            lastSent: existing?.lastSent ?? null,
+          },
+        },
+      };
+      return { state: updated, value: updated };
+    });
+
+    sendJson(res, 200, { recipient: recipientRow(address, state) });
+    return true;
+  }
+
+  if (route === '/notifications/test') {
+    const email = normalizeEmail(String(body['email'] ?? ''));
+    const outcome = await fakeNotifyTest(email);
+    if (!outcome) {
+      // Production gets a plain 404 from the Worker and says only this much.
+      sendJson(res, 500, {
+        error:
+          'The test could not be sent. Check that the address is verified and ' +
+          'that the mail Worker is configured.',
+      });
+      return true;
+    }
+    sendJson(res, 200, outcome);
+    return true;
+  }
+
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Admin API
 // ---------------------------------------------------------------------------
 
@@ -229,6 +428,17 @@ async function handleAdmin(
   body: Body,
   res: ServerResponse,
 ): Promise<boolean> {
+  // Answered here and nowhere else. This handler is otherwise more permissive
+  // than production — an unrecognized GET falls through to handleDisplay,
+  // which once hid the admin API missing the viewer's read routes entirely
+  // (CLAUDE.md) — so an unknown /notifications path is a 404 here, as it is
+  // in the real function.
+  if (route === '/notifications' || route.startsWith('/notifications/')) {
+    if (await handleNotifications(route, method, body, res)) return true;
+    sendNotFound(res);
+    return true;
+  }
+
   if (method === 'GET') {
     if (route === '/trash') {
       const catalog = await currentCatalog();

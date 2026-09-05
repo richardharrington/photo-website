@@ -172,3 +172,54 @@ export async function verifyConfirmation(
   if (nowSeconds > grant.expiresAt) return { ok: false, reason: 'expired' };
   return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// Notification test grants
+// ---------------------------------------------------------------------------
+
+/**
+ * A one-minute grant letting the admin function ask the Worker to send a test
+ * digest to one address.
+ *
+ * Only the Worker can send — the binding is its own — and the Worker has no
+ * authentication of its own, so this is the whole channel between the two.
+ * The address is inside the MAC, so a captured grant cannot be re-pointed at
+ * somebody else's mailbox, and sixty seconds is as long as it is worth for a
+ * button press (decisions.md, "Notifications").
+ */
+export interface NotificationTestGrant {
+  /** Lowercased, as everywhere below the Cloudflare boundary. */
+  email: string;
+  /** Unix seconds. */
+  expiresAt: number;
+}
+
+/** How long a test grant stays valid: one button press, not one session. */
+export const NOTIFICATION_TEST_TTL_SECONDS = 60;
+
+function notificationTestPayload(grant: NotificationTestGrant): string {
+  return `notify-test:v1:${grant.expiresAt}:${grant.email}`;
+}
+
+export async function signNotificationTest(
+  key: string,
+  grant: NotificationTestGrant,
+): Promise<string> {
+  return hmacHex(key, notificationTestPayload(grant));
+}
+
+export async function verifyNotificationTest(
+  key: string,
+  grant: NotificationTestGrant,
+  signature: string,
+  nowSeconds: number,
+): Promise<GrantVerification> {
+  const expected = await signNotificationTest(key, grant);
+  // Signature first, as in the other two: an expiry check that short-circuits
+  // before the MAC is a probe oracle.
+  if (!timingSafeEqualHex(expected, signature)) {
+    return { ok: false, reason: 'bad-signature' };
+  }
+  if (nowSeconds > grant.expiresAt) return { ok: false, reason: 'expired' };
+  return { ok: true };
+}

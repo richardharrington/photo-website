@@ -117,6 +117,12 @@ export const UPLOAD_CONCURRENCY = 3;
 
 export const R2_KEYS = {
   catalog: 'catalog/current.json',
+  /**
+   * Per-recipient notification state. Deliberately its own object rather than
+   * a field on the catalog: every viewer request loads the catalog through the
+   * Worker, and it should not carry a recipient list.
+   */
+  notifications: 'catalog/notifications.json',
   snapshotPrefix: 'catalog/snapshots/',
   auditPrefix: 'catalog/audit/',
   photoPrefix: 'photos/',

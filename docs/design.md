@@ -55,6 +55,18 @@ trusted.
 - These measures discourage indexing but are not access control.
 - No client analytics, telemetry, external fonts, social metadata, or other
   third-party browser resources are used.
+- The display URL travels by email to verified recipients **by choice**. A
+  family member who asks for the daily notification receives the display path
+  in every message, which is a capability they already hold — it is how they
+  see the photographs at all. Nothing about a photograph travels with it: the
+  message is a count and a link, in plain text, with no images and nothing
+  that could report a read.
+- The only party that ever holds a recipient's email address is Cloudflare,
+  which already holds the photographs. There is no third-party mail service,
+  no marketing platform, and no tracking pixel. The account's destination
+  address list *is* the recipient list; nothing about an address is stored
+  anywhere else except whether the digest goes to it and how far it has been
+  told about.
 
 ## Deployment and account security
 
@@ -398,6 +410,34 @@ path, and everything below applies on top of the display site's rules.
   waits on a reload and never stays out of step for long.
 - Mobile viewing is responsive. Admin workflows are explicitly
   laptop-oriented; touch-specific bulk-selection UI is out of scope.
+
+### Notifications
+
+- A **Notifications** page, beside Trash in the header, is where the
+  administrator decides who is told when new photographs arrive: add an
+  address, remove one, switch an address on or off, see whether its owner has
+  confirmed it, see when they were last sent a digest, and send oneself a test.
+- A recipient who is confirmed and switched on receives **one plain-text email
+  a day**, and only on a day something arrived: how many photographs were added
+  since the last message they were sent, and a link to the Recently added view.
+  No thumbnails, no per-photo text, no HTML, no replies.
+- Adding an address creates a destination address in the Cloudflare account,
+  which is what sends its owner a confirmation link. Nothing is sent to an
+  address until they click it — Cloudflare's rule, and the one click this
+  otherwise-invitationless design asks of a recipient.
+- Each recipient has their own watermark. Switching an address on starts its
+  clock at that moment, so a new recipient is never told about the library that
+  was already there, and switching one off and on again never backfills. A
+  message that fails to send leaves that recipient's watermark alone, so
+  tomorrow's covers both days; nobody else is affected.
+- The count is of *live* photographs, so it matches what the link will show. A
+  photograph uploaded and deleted before the digest is not announced.
+- There is no unsubscribe link: an unsubscribe endpoint would be a new
+  unauthenticated write path on a site whose whole access model is that it has
+  none. The message says to ask whoever runs the site, and the administrator
+  removes the address.
+- The digest runs on the existing daily cron, after the maintenance pass, so
+  the count describes the library as it stands after any purge.
 
 ### Trash
 

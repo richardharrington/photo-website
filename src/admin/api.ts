@@ -81,6 +81,18 @@ export interface TrashItem {
   previewUrl: string;
 }
 
+/**
+ * One row of the Notifications page: Cloudflare's address merged with the R2
+ * state file. `verified` is Cloudflare's answer alone; the rest is ours.
+ */
+export interface Recipient {
+  id: string;
+  email: string;
+  verified: boolean;
+  enabled: boolean;
+  lastSent: { at: string; count: number } | null;
+}
+
 export interface TrashListing {
   items: TrashItem[];
   /** When the signed URLs above stop working. */
@@ -97,6 +109,27 @@ export const adminApi = {
 
   trashCount: (signal?: AbortSignal) =>
     request<{ count: number }>('/trash/count', { signal: signal ?? null }),
+
+  // ---- Notifications ----------------------------------------------------
+  // Every action refetches the whole list rather than patching a row: the
+  // truth is Cloudflare's, the list is tiny, and a verification that landed
+  // between two clicks should show up.
+
+  notifications: (signal?: AbortSignal) =>
+    request<{ recipients: Recipient[] }>('/notifications', { signal: signal ?? null }),
+
+  addRecipient: (email: string) =>
+    post<{ recipient: Recipient }>('/notifications/add', { email }),
+
+  removeRecipient: (id: string) =>
+    post<{ removed: string }>('/notifications/remove', { id }),
+
+  setRecipientEnabled: (email: string, enabled: boolean) =>
+    post<{ recipient: Recipient }>('/notifications/set-enabled', { email, enabled }),
+
+  /** Tonight's digest for one address, sent now and marked as a test. */
+  sendTest: (email: string) =>
+    post<{ count: number }>('/notifications/test', { email }),
 
   // ---- Upload flow ------------------------------------------------------
   beginBatch: () => post<{ batchSeq: number }>('/begin-batch', {}),

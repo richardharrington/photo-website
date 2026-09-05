@@ -68,7 +68,9 @@ apps render the same pages out of `src/shared/ui/` and read the same two
 routes, `/timeline` and `/photo/<id>`. The admin adds selecting, editing,
 trashing, and uploading by providing a `CurationContext`; the viewer provides
 `null`, so its bundle carries the branches that test for it and never the
-admin modules. Nothing under `src/shared/` imports from either app, and the
+admin modules. On top of that it has two pages of its own — **Trash**, and
+**Notifications**, where the administrator manages who receives the daily
+email saying how many photographs have arrived. Nothing under `src/shared/` imports from either app, and the
 two Vite builds are fully independent, so no shared chunk can put admin code
 under the display path.
 

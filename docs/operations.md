@@ -12,6 +12,11 @@ deployed. What remains is the [launch checklist](#launch-checklist) and the
 because they are worth re-running after any change to the gate, the Worker, or
 the account configuration — not because they have never been done.
 
+**Email notifications, 2026-09-05.** Shipped but not yet turned on: it needs a
+domain, and until it has one it is inert rather than broken.
+[Adding email notifications](#adding-email-notifications) is the whole
+procedure, self-contained, and can be followed at any time.
+
 ## Local development
 
 No account of any kind is needed.
@@ -267,6 +272,14 @@ The Worker binds the R2 bucket, so the bucket must already exist.
 - [ ] Confirm the daily cron trigger is registered (`wrangler.toml`,
       `17 4 * * *`).
 
+### 4a. Optional: email notifications
+
+The daily digest needs a domain, and is independent of everything else here.
+It has its own self-contained procedure —
+[Adding email notifications](#adding-email-notifications) — which can be
+followed at any point, before launch or years after it. Skip it and the rest
+of this sequence is unchanged.
+
 ### 5. Verify R2 conditional writes against the live bucket
 
 Needs the bucket, the S3 token, and the deployed Worker — the four checks
@@ -290,8 +303,13 @@ catalog mutation is routed, and that is far cheaper to discover now.
   `SITE_TITLE` is easy to skip because `.env.example` ships a default, but the
   default applies only to local builds: `resolveBuildEnv` throws on a real
   deploy when it is unset, exactly as it does for the path segments
-  (`config/build-env.ts`). `R2_ACCOUNT_ID` is the one value that can be left
-  out, since no code reads it.
+  (`config/build-env.ts`).
+
+  `R2_ACCOUNT_ID` is the one value nothing reads *until* email notifications
+  are turned on, at which point the admin function reads it as the Cloudflare
+  account ID — the addresses live in the account that holds the bucket, so it
+  is reused rather than duplicated under a second name. Set it here anyway;
+  it costs nothing and it is one less thing to remember later.
 
   Set these **before the first build runs**, whether in the create-site flow
   or by connecting the repository only afterwards. Connecting a repository
@@ -361,9 +379,10 @@ Back in the Cloudflare console, now that there is a Netlify origin to name.
   different origin.
 
 Uploads fail until this is in place, so it must precede the launch checklist's
-end-to-end upload. A custom domain later would be a second origin and would
-have to be added here, or uploads break from the new hostname while continuing
-to work from the old one.
+end-to-end upload. A custom domain later is a second origin and has to be
+added here, or uploads break from the new hostname while continuing to work
+from the old one — see
+[Moving the site to the domain](#moving-the-site-to-the-domain).
 
 ### 8. Deploy
 
@@ -590,6 +609,276 @@ The S3 path returns 412 on a stale `If-Match`, the binding returns `null`
 without throwing, and `If-None-Match: *` is refused against an existing
 object. The fallback is not needed, and the two adapters stand as written.
 
+## Adding email notifications
+
+Everything needed to turn the daily digest on, for a site that is already
+deployed and working. Self-contained: nothing above is a prerequisite beyond
+having the site running, `.env` present, and `wrangler` able to reach the
+account. Follow it in order — the Worker must be able to send before the admin
+page can ask it to.
+
+Until this is done nothing sends, and nothing else is affected. The nightly
+cron logs `Notifications are not configured; sending nothing.` beside its
+usual maintenance line and carries on. The Notifications page itself shows
+`Something went wrong` until step 5 gives it a token — a missing environment
+variable is a 500 here exactly as it is on every other admin route
+(`requiredEnv`), so it is the expected face of "not set up yet" rather than a
+fault. The library, the trash, and uploading are untouched either way.
+
+**The one cost is a domain.** Buy it wherever you like — the registrar is
+irrelevant to all of this. What Email Routing requires is that the domain's
+**DNS is hosted at Cloudflare**, which is a free zone in the same account as
+the bucket and a nameserver change at whatever registrar you used. Cloudflare
+Registrar is worth a look only because it sells at cost and skips that step;
+Namecheap or anyone else works identically.
+
+The digest needs the domain only as a From address, so the site can stay on
+`netlify.app` and `workers.dev` and nothing below assumes otherwise. Moving
+the site onto the domain as well is a separate, optional, and much smaller job
+than it sounds — see [Moving the site to the domain](#moving-the-site-to-the-domain).
+
+### 1. A domain, with Email Routing
+
+- [ ] Register a domain anywhere you like, or use one you already have.
+- [ ] Add it to Cloudflare as a zone in **the same account as the R2 bucket**,
+      and change the nameservers at your registrar to the two Cloudflare
+      assigns. The free plan is enough.
+
+      This delegation is the actual requirement — not where the domain was
+      bought, and not transferring the registration. Cloudflare has to serve
+      the DNS because Email Routing works by putting `MX` records there, and
+      on the free plan that means full nameserver delegation rather than
+      Cloudflare's partial CNAME setup. Propagation is usually minutes and
+      Cloudflare emails you when the zone goes active.
+- [ ] Confirm the zone shows as **Active** before continuing. Email Routing
+      cannot be enabled on a pending one.
+- [ ] Enable **Email Routing** on the zone. Cloudflare adds the MX and TXT
+      records itself; accept them.
+- [ ] Optionally add a routing rule forwarding `photos@<domain>` to your own
+      inbox, so a reply to a digest is not silently lost. Note the
+      consequence: the forwarding target then *is* a verified destination
+      address in the account, and will therefore appear as a row on the
+      Notifications page. That is correct — every verified address in the
+      account is a potential recipient (decisions.md #70) — but it is
+      surprising the first time.
+
+### 2. Two API tokens
+
+Both restricted to this account only, and both scoped to Email Routing
+Addresses and nothing else.
+
+- [ ] One with **Email Routing Addresses Write** — for Netlify, which adds and
+      removes addresses. It is stored as `CLOUDFLARE_ADDRESSES_WRITE_TOKEN`.
+- [ ] One with **Email Routing Addresses Read** — for the Worker, which only
+      ever asks whether an address is verified. It is stored as
+      `CLOUDFLARE_ADDRESSES_READ_TOKEN`.
+
+Two rather than one so the cron can never alter the recipient list, whatever
+else goes wrong (decisions.md #70). Each variable is named for the permission
+you tick when creating the token, which is the only check there is: **crossing
+them fails silently in the dangerous direction.** Give Netlify the read-only
+token and the Notifications page throws a permission error the first time you
+add an address — loud, and immediately obvious. Give the *Worker* the
+write-capable one and nothing breaks at all: the digest sends, the test button
+works, no error is logged, and the nightly cron quietly holds the power to
+delete every recipient. Nothing in this system would ever tell you.
+
+### 3. The Worker's four secrets
+
+Take `$DISPLAY_PATH` from `.env` rather than typing it — it is the whole
+access model, and a shell history is not the place for it.
+
+```sh
+set -a; . ./.env; set +a
+SITE="https://<your-site>.netlify.app"
+
+printf '%s' "photos@<your-domain>" | npx wrangler secret put NOTIFY_FROM
+printf '%s' "$SITE/$DISPLAY_PATH"  | npx wrangler secret put DISPLAY_SITE_URL
+printf '%s' "$R2_ACCOUNT_ID"       | npx wrangler secret put CLOUDFLARE_ACCOUNT_ID
+
+# Prompted for rather than piped, so it stays out of shell history.
+# Paste the *read-only* token.
+npx wrangler secret put CLOUDFLARE_ADDRESSES_READ_TOKEN
+```
+
+- [ ] All four set. `DISPLAY_SITE_URL` is the display site's base URL
+      *including its secret path segment*; the digest links to
+      `$DISPLAY_SITE_URL/recent`. Write it without a trailing slash — the
+      Worker strips one, so it is harmless, but this value is what every
+      recipient sees.
+- [ ] `ASSET_SIGNING_KEY` is already set on the Worker from the original
+      setup. It signs the test-send grant as well as the asset URLs, so
+      nothing new is needed — but the test button returns a generic failure if
+      it is somehow absent.
+
+### 4. Deploy the Worker
+
+- [ ] `npx wrangler deploy`. This is what registers the `[[send_email]]`
+      binding declared in `wrangler.toml`; the secrets above are inert without
+      it.
+
+### 5. Netlify: one variable, then a deploy
+
+- [ ] Set `CLOUDFLARE_ADDRESSES_WRITE_TOKEN` — the **write** token from step
+      2. The Worker's is a different token under a different name
+      (`..._READ_TOKEN`), so if you find yourself pasting the same value
+      twice, something has gone wrong.
+- [ ] Confirm `R2_ACCOUNT_ID` is set. Nothing read it before this feature; the
+      admin function reads it now as the Cloudflare account ID. Without it
+      every request to the Notifications page is a 500.
+- [ ] Deploy. An environment-variable change alone does not rebuild the site,
+      and the notification code has to ship anyway, so push to `master` or
+      trigger a deploy by hand.
+
+### 6. Prove it end to end
+
+- [ ] Open the admin site's **Notifications** page. It should list any
+      destination addresses the account already has — including a forwarding
+      target from step 1, if one was added.
+- [ ] Add your own address. Cloudflare emails it a confirmation link; the row
+      shows **Awaiting verification** until you click it.
+- [ ] Click the link, reload the page, and confirm the row now reads
+      **Verified**.
+- [ ] Press **Send test** and read what arrives. Expect
+      `[Test] No new photos on Family Photos` — the address was switched on
+      just now, so its clock starts now and the library that was already there
+      is not new to it (decisions.md #71). Check the link in it opens the
+      Recently added view.
+
+  This is the only way to confirm the domain, the binding, the four secrets,
+  the token, and the link are all right without waiting for 04:17 UTC — and
+  without the family receiving the experiment (decisions.md #73).
+
+- [ ] Optionally watch the next cron run with `npx wrangler tail` and look for
+      the `Digest complete` line beside `Maintenance complete`.
+
+### Then, for real recipients
+
+- [ ] Add each family member's address. Each gets one confirmation email from
+      Cloudflare and must click it once; nothing is sent to them until they
+      do, and the page says so.
+- [ ] Tell them the message is a count and a link, that it arrives at most
+      once a day and only when something has been added, and that there is no
+      unsubscribe link because there is deliberately no unauthenticated write
+      path on this site — they ask you, and you remove the address
+      (decisions.md #74).
+
+## Moving the site to the domain
+
+Optional, and independent of the digest — the digest only needs the domain as
+a From address. Worth reading before assuming it is a big job: **no code
+changes at all**, a handful of configuration edits, and an hour of which most
+is waiting on DNS and a certificate.
+
+The reason there is no code to change: `contentSecurityPolicy`
+(`src/shared/headers.ts`) builds every directive from `'self'` plus two
+env-derived origins — the Worker's, from `WORKER_BASE_URL`, and R2's, from
+`R2_S3_ENDPOINT`. Neither of those moves, and `'self'` is whatever origin
+served the document, so the policy follows the site on its own. Nothing in the
+codebase hardcodes a hostname, both apps fetch relative paths, and the three
+build-time defines (`config/build-env.ts`) are the app base path, the Worker
+URL, and the site title — none of them the site's own origin.
+
+### Which name: apex or subdomain
+
+A free choice; both work and both are one DNS record. Take the apex
+(`<domain>`, no prefix) unless you have a reason not to — it gives the shorter
+URL, and the display URL is already long because the secret path is. That URL
+gets read aloud and pasted by family members, so the saving is worth something
+real.
+
+The reason this needs saying at all is that classic DNS forbids it. A `CNAME`
+must be the *only* record for its name, and enabling Email Routing puts `MX`
+and `TXT` (SPF) records on the apex — so a strict provider would refuse a
+`CNAME` there, which is why sites have historically lived on `www.` or a
+subdomain. **Cloudflare removed that constraint with CNAME flattening**: it
+accepts the `CNAME` at the apex, resolves it itself, and hands out `A` records
+to whoever asks. It is on by default ("Flatten CNAME at root") and invisible
+in the interface. Nothing about it is fragile, and this is a very well-trodden
+configuration.
+
+Mail and web do not otherwise interact. A browser asks for `A`, a mail server
+asks for `MX`; they answer different questions and share a name without
+colliding. Adding a web record cannot break Email Routing.
+
+The case for a subdomain (`photos.<domain>`) is tidiness alone: the apex would
+hold the mail identity and the subdomain the site, with no name doing two
+jobs. If that appeals, take it — nothing else in this document assumes either
+choice.
+
+### Leave the record unproxied
+
+**Grey cloud, not orange.** This one is not a free choice, and it matters more
+than the name. Cloudflare's proxy is optional per record; three reasons to
+leave it off here:
+
+- Netlify issues the certificate through Let's Encrypt, which validates by
+  fetching a file over HTTP from the name being certified. With Cloudflare
+  proxying, that request is answered by Cloudflare rather than Netlify and the
+  issuance can fail.
+- Netlify already is a CDN. A second one in front caches the same assets a
+  second time and adds a hop.
+- Proxied, every request URL passes through Cloudflare's edge — which means
+  the secret display path would appear in Cloudflare's logs for the first
+  time. Cloudflare already holds the photographs, but the path *is* the access
+  model (design.md, "Access and privacy model"), and there is no reason to
+  hand over the capability as well as the contents.
+
+### The changes
+
+Written with the apex as the example; substitute `photos.<domain>` throughout
+if you chose the subdomain. Nothing below differs between the two beyond the
+name itself.
+
+- [ ] **Netlify: add the custom domain.** Site settings → Domain management →
+      add `<domain>`. Netlify shows the DNS record it wants.
+- [ ] **Cloudflare: create that record, unproxied.** DNS → Records → add what
+      Netlify asked for, at `@` for the apex, and click the orange cloud so it
+      turns grey (**DNS only**). A `CNAME` at `@` alongside the existing `MX`
+      records is fine here; CNAME flattening is what makes it so. Then wait
+      for Netlify to report the certificate as issued; minutes, usually.
+- [ ] **Confirm mail still works.** Send a message to `photos@<domain>` — or
+      just check that the `MX` and `TXT` records are still listed after adding
+      the web record. They should be untouched; this is a thirty-second check
+      against having fat-fingered the wrong row.
+- [ ] **R2: add the new origin to the bucket's CORS rule** (step 7's JSON).
+      List *both* origins while the move settles:
+
+  ```json
+  "AllowedOrigins": [
+    "https://<your-site>.netlify.app",
+    "https://<domain>"
+  ]
+  ```
+
+  This is the one change that breaks something if forgotten: uploads are the
+  only cross-origin request either app makes, so the admin would load fine on
+  the new hostname and fail on the first file. Re-run step 7's `curl`
+  preflight against the new origin to confirm.
+
+- [ ] **Worker: repoint `DISPLAY_SITE_URL`**, so digest links go to the new
+      host rather than the old one:
+
+  ```sh
+  set -a; . ./.env; set +a
+  printf '%s' "https://<domain>/$DISPLAY_PATH" \
+    | npx wrangler secret put DISPLAY_SITE_URL
+  ```
+
+  No `wrangler deploy` is needed — a secret takes effect on its own.
+
+### Afterwards
+
+- [ ] Send yourself a test from the Notifications page and check the link in
+      it points at the new host.
+- [ ] Give the family the new display URL. The old one keeps working: Netlify
+      301s `<your-site>.netlify.app` to the primary domain preserving the
+      path, and `Referrer-Policy: no-referrer` means the redirect leaks
+      nothing on the way.
+- [ ] Walk the [launch checklist](#launch-checklist) against the new hostname.
+      Most of it is origin-independent, but it is the cheapest way to confirm
+      the gate, the 404s, and an end-to-end upload all still behave.
+
 ## Backup
 
 The main archives remain Dropbox and Google Photos; this site is a curated
@@ -609,7 +898,13 @@ pixels.
 deleted or purged from R2 disappears locally on the next run, and IDrive
 provides the historical copy. Because trashed photos' objects stay in place,
 the mirror includes the full 30-day trash along with the catalog, its
-snapshots, and the audit log.
+snapshots, the audit log, and `catalog/notifications.json`.
+
+That last one needs mention rather than ceremony. Losing it costs at most one
+digest: who exists and who has verified lives at Cloudflare, not here, so the
+recipients are all still there — every one of them simply reads as switched
+off until the administrator switches them on again, which restarts their
+clocks.
 
 Two guards exist because a backup that quietly stops working is worse than
 none, since it is trusted:
@@ -650,6 +945,12 @@ Photos.
 To recover a single photo, take its record from a snapshot and its objects
 from the mirror; the record's `derivatives` descriptors say what should be
 there.
+
+`catalog/notifications.json` is restored the same way — a conditional write
+against its current ETag — but it is not on the critical path and there is no
+snapshot history for it. If it is gone, do not reconstruct it: switch each
+recipient back on from the Notifications page and accept that their clocks
+start again.
 
 ## Launch checklist
 
@@ -855,6 +1156,13 @@ the photo ID the rest of that group uses.
   ```
 
   `--remote` matters: the point is the real bucket, not an emulated one.
+
+- [ ] **The same run logs the digest pass.** Beside `Maintenance complete`
+      there is a `Digest complete` line with `considered`, `sent`,
+      `skippedUnverified`, `skippedDisabled`, `skippedEmpty`, and `failed` —
+      or, on a deployment without the four secrets,
+      `Notifications are not configured; sending nothing.` Both are
+      acceptable; silence is not. Watch it with `npx wrangler tail`.
 
 - [ ] **One nightly backup completes and mirrors everything.** Run
       `scripts/backup.sh` by hand, per [Backup](#backup), and confirm the

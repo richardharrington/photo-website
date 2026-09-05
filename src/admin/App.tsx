@@ -23,6 +23,7 @@ import type { PreviewResult } from './api.ts';
 import { Confirm, UndoBanner } from './components/Confirm.tsx';
 import { SelectionBar } from './components/SelectionBar.tsx';
 import { TrashPage } from './components/TrashPage.tsx';
+import { NotificationsPage } from './components/NotificationsPage.tsx';
 import { UploadPanel } from './components/Upload.tsx';
 import {
   addAll,
@@ -43,7 +44,7 @@ import type { SelectionQuery } from '../shared/admin-operations.ts';
  * `recent` is not one of them: both apps have it, so the shared parser knows
  * it unconditionally.
  */
-const ADMIN_PAGES = ['trash'] as const;
+const ADMIN_PAGES = ['trash', 'notifications'] as const;
 
 /** Which section of the one page a route is asking for. */
 function targetOf(
@@ -270,7 +271,8 @@ export function App() {
 
   const nav = (
     <>
-      {/* On the trash page neither view is current, so both are links. */}
+      {/* On the trash and notifications pages neither view is current, so
+          both are links. */}
       <ViewToggle
         current={route.kind === 'page' ? null : onRecent ? 'recent' : 'library'}
         unseen={unseen}
@@ -278,6 +280,7 @@ export function App() {
       <Link to={routes.trash()}>
         Trash{trashCount === null ? '' : ` (${trashCount})`}
       </Link>
+      <Link to={routes.notifications()}>Notifications</Link>
       <a href={adminApi.exportUrl()} download>
         Export catalog
       </a>
@@ -305,7 +308,14 @@ export function App() {
    */
   const main =
     route.kind === 'page' ? (
-      <TrashPage nav={nav} onChanged={countTrashAgain} />
+      // The two admin-only pages. `parseRoute` has already refused any name
+      // that is not in ADMIN_PAGES, so there is no third case to fall through
+      // to — and the viewer's parser is never given either name at all.
+      route.name === 'notifications' ? (
+        <NotificationsPage nav={nav} />
+      ) : (
+        <TrashPage nav={nav} onChanged={countTrashAgain} />
+      )
     ) : route.kind === 'not-found' ? (
       <CurationContext.Provider value={curation}>
         <Layout nav={nav}>

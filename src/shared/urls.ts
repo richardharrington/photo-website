@@ -39,6 +39,12 @@ export function appRoutes(base: string) {
     recent: () => `${root}/recent`,
     recentPhoto: (id: string) => `${root}/recent/photo/${id}`,
     trash: () => `${root}/trash`,
+    /**
+     * Admin-only pages, alongside `trash`. Building a URL is not knowing a
+     * route: the viewer's parser is never given either name, so `/trash` and
+     * `/notifications` under the display base are its own 404.
+     */
+    notifications: () => `${root}/notifications`,
     api: (path: string) => `${root}/api${path.startsWith('/') ? path : `/${path}`}`,
   };
 }

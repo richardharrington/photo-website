@@ -1,5 +1,79 @@
 import { useEffect, useRef } from 'react';
+import type { ReactNode } from 'react';
 import type { PreviewResult } from '../api.ts';
+
+interface ConfirmDialogProps {
+  title: string;
+  /** What will happen, in the words of this specific action. */
+  children: ReactNode;
+  confirmLabel: string;
+  destructive?: boolean;
+  /** True when there is nothing to act on, e.g. a preview that resolved to 0. */
+  nothingToDo?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * The dialog every confirmation wears: modal, Escape cancels, focus starts on
+ * the confirm button, and a click on the backdrop is a cancel.
+ *
+ * It knows nothing about photos. `Confirm` below is the photo-counting case,
+ * which is most of them; the Notifications page names an address instead.
+ */
+export function ConfirmDialog({
+  title,
+  children,
+  confirmLabel,
+  destructive = false,
+  nothingToDo = false,
+  onConfirm,
+  onCancel,
+}: ConfirmDialogProps) {
+  const confirmRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    confirmRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') onCancel();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onCancel]);
+
+  return (
+    <div className="confirm-backdrop" onClick={onCancel}>
+      <div
+        className="confirm"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <h2 id="confirm-title">{title}</h2>
+        <p>{children}</p>
+
+        <div className="confirm__actions">
+          <button type="button" onClick={onCancel}>
+            Cancel
+          </button>
+          <button
+            ref={confirmRef}
+            type="button"
+            className={destructive ? 'confirm__destructive' : ''}
+            onClick={onConfirm}
+            disabled={nothingToDo}
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface ConfirmProps {
   /** The resolved preview. Its ID list is exactly what will be acted on. */
@@ -31,56 +105,23 @@ export function Confirm({
   onConfirm,
   onCancel,
 }: ConfirmProps) {
-  const confirmRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    confirmRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onCancel();
-    }
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onCancel]);
-
   const count = preview.count;
 
   return (
-    <div className="confirm-backdrop" onClick={onCancel}>
-      <div
-        className="confirm"
-        role="alertdialog"
-        aria-modal="true"
-        aria-labelledby="confirm-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <h2 id="confirm-title">{title}</h2>
-        <p>
-          {/* The exact number resolved at preview time. */}
-          <strong>
-            {count} photo{count === 1 ? '' : 's'}
-          </strong>{' '}
-          {description}
-        </p>
-
-        <div className="confirm__actions">
-          <button type="button" onClick={onCancel}>
-            Cancel
-          </button>
-          <button
-            ref={confirmRef}
-            type="button"
-            className={destructive ? 'confirm__destructive' : ''}
-            onClick={onConfirm}
-            disabled={count === 0}
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      title={title}
+      confirmLabel={confirmLabel}
+      destructive={destructive}
+      nothingToDo={count === 0}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    >
+      {/* The exact number resolved at preview time. */}
+      <strong>
+        {count} photo{count === 1 ? '' : 's'}
+      </strong>{' '}
+      {description}
+    </ConfirmDialog>
   );
 }
 

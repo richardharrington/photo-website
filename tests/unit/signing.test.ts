@@ -3,9 +3,11 @@ import {
   assetGrantPath,
   signAssetGrant,
   signConfirmation,
+  signNotificationTest,
   timingSafeEqualHex,
   verifyAssetGrant,
   verifyConfirmation,
+  verifyNotificationTest,
 } from '../../src/shared/signing.ts';
 
 const KEY = 'test-signing-key-not-a-real-secret';
@@ -195,5 +197,72 @@ describe('confirmation tokens', () => {
       ok: false,
       reason: 'bad-signature',
     });
+  });
+});
+
+/**
+ * The third grant: the admin function asking the Worker to send a test digest.
+ *
+ * It is the only service-to-service channel between the two tiers, so what
+ * matters is that the address is inside the MAC — a captured grant must not be
+ * re-pointable at somebody else's mailbox — and that it dies quickly.
+ */
+describe('notification test grants', () => {
+  const testGrant = { email: 'aunt@example.com', expiresAt: NOW + 60 };
+
+  it('round-trips', async () => {
+    const sig = await signNotificationTest(KEY, testGrant);
+    expect(await verifyNotificationTest(KEY, testGrant, sig, NOW)).toEqual({
+      ok: true,
+    });
+  });
+
+  it('will not send to a different address', async () => {
+    const sig = await signNotificationTest(KEY, testGrant);
+    const repointed = { ...testGrant, email: 'stranger@example.com' };
+
+    expect(await verifyNotificationTest(KEY, repointed, sig, NOW)).toEqual({
+      ok: false,
+      reason: 'bad-signature',
+    });
+  });
+
+  it('will not accept a stretched expiry', async () => {
+    const sig = await signNotificationTest(KEY, testGrant);
+    const stretched = { ...testGrant, expiresAt: testGrant.expiresAt + 3600 };
+
+    expect(await verifyNotificationTest(KEY, stretched, sig, NOW)).toEqual({
+      ok: false,
+      reason: 'bad-signature',
+    });
+  });
+
+  it('rejects a signature made with another key', async () => {
+    const sig = await signNotificationTest(OTHER_KEY, testGrant);
+    expect(await verifyNotificationTest(KEY, testGrant, sig, NOW)).toEqual({
+      ok: false,
+      reason: 'bad-signature',
+    });
+  });
+
+  it('expires', async () => {
+    const sig = await signNotificationTest(KEY, testGrant);
+    expect(
+      await verifyNotificationTest(KEY, testGrant, sig, testGrant.expiresAt + 1),
+    ).toEqual({ ok: false, reason: 'expired' });
+  });
+
+  it('is not interchangeable with an asset grant', async () => {
+    // Different payload prefixes, so neither family's signature verifies as
+    // the other's however the fields line up.
+    const sig = await signNotificationTest(KEY, testGrant);
+    expect(
+      await verifyAssetGrant(
+        KEY,
+        { photoId: 'a'.repeat(32), rendition: 'full', expiresAt: testGrant.expiresAt },
+        sig,
+        NOW,
+      ),
+    ).toEqual({ ok: false, reason: 'bad-signature' });
   });
 });

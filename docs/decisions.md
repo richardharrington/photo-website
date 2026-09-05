@@ -809,3 +809,159 @@ its ordering, and its URLs are unchanged.
     `Date.now() - 26 hours`. `makePhoto`'s own literal deliberately stayed: it
     is the unit tests' factory, and several of them pin a fixed `NOW_MS`
     against it.
+
+## Telling the family something arrived — 2026-09-05
+
+68. **Cloudflare Email Service, from the Worker already there.** Sends to
+    *verified destination addresses* in the account are free and unlimited on
+    the Workers Free plan and count against no quota; sending to an arbitrary
+    address needs the paid plan, and this feature never does. The From address
+    must be on a zone whose DNS is at Cloudflare with Email Routing enabled —
+    a nameserver delegation, not a registration, so the domain can be bought
+    anywhere and the feature costs one domain at registrar price and nothing
+    else. The
+    domain is used for this alone to begin with: the site stays on
+    `netlify.app` and `workers.dev`, because moving it is a separate decision
+    that buys nothing the digest needs.
+
+    It is worth being accurate about what moving would cost, because the first
+    draft of this entry overstated it and would have talked someone out of
+    something cheap. **No code changes at all.** `contentSecurityPolicy` builds
+    every directive from `'self'` plus two env-derived origins — the Worker's
+    and R2's, neither of which moves — and `'self'` is whatever origin served
+    the document, so the CSP follows the site by itself. Nothing in the
+    codebase hardcodes an origin, and both apps fetch relative paths. What
+    actually changes is configuration: a Netlify custom domain and its DNS
+    records, the bucket's CORS `AllowedOrigins`, the Worker's
+    `DISPLAY_SITE_URL` secret, and telling the family the new URL. The site
+    can sit on the apex beside the mail records — Cloudflare's CNAME
+    flattening is what makes that legal, and it is the default — so the
+    shorter URL is available if wanted. See operations.md, "Moving the site to
+    the domain".
+
+    The alternatives, and why not. **Proton**: SMTP submission needs a paid
+    plan *and* a custom domain, and Proton Bridge needs a machine that is
+    always on. **A personal mailbox over SMTP** (iCloud and the like): it puts
+    a credential that can send *as the administrator* into a cron job, which
+    the administrator declined. **Brevo, Mailtrap, SMTP2GO, Resend**: a third
+    company would hold the recipient list, and the marketing-oriented ones add
+    an open-tracking pixel to a site whose privacy model is that nothing
+    third-party ever loads. Resend needs a domain anyway, at which point
+    Cloudflare dominates it. **Netlify**: has no email sending at all.
+
+69. **The one click.** The original wish was for a recipient to have to do
+    nothing at all. Cloudflare will not deliver to an address whose owner has
+    not confirmed it once, and that is not negotiable, so the design bends by
+    exactly one click per recipient and the page says plainly that nothing is
+    sent until it happens. It is also, on reflection, the correct behaviour:
+    the message carries the display path, and handing a capability to an
+    address nobody has confirmed is how a capability ends up in a stranger's
+    mailbox.
+
+70. **Cloudflare's list is the list.** There is no second copy of who exists
+    and no local `verified` flag. The account's destination-address list is
+    read live on every page load and every digest run, because `verified` is
+    Cloudflare's answer and a cached copy of it would be wrong the moment
+    somebody clicks their link. R2 holds only what Cloudflare cannot: whether
+    the digest goes to an address, and how far it has been told about.
+
+    That makes every mutation two writes across two systems, so the order is
+    fixed: **Cloudflare first, then R2**. A failure after the first leaves a
+    state entry missing, which both the page and the cron read as *switched
+    off* — visible, harmless, and fixed by one click. The other order would
+    leave state for an address that does not exist, which is invisible.
+    Entries with no address behind them are pruned on the next write.
+
+    Two API tokens rather than one, both scoped to the account and to Email
+    Routing Addresses: the Netlify function's can write, the Worker's can only
+    read. The cron can then never alter the list, whatever else goes wrong.
+
+    They are named for their permission — `CLOUDFLARE_ADDRESSES_WRITE_TOKEN`
+    and `CLOUDFLARE_ADDRESSES_READ_TOKEN` — and not, as first written, given
+    one shared name across the two platforms. Sharing a name was a real
+    mistake, because the two ways of crossing them are not symmetric. The
+    read-only token in Netlify throws a permission error on the first add:
+    loud and self-correcting. The write token on the *Worker* works perfectly
+    — same sends, same logs, no error anywhere — while handing the cron
+    exactly the power these two tokens exist to withhold. A silent failure
+    guarded only by a person getting two identically-named prompts right,
+    minutes apart, is not a guard.
+
+    It also cut against this repository's own convention: `ASSET_SIGNING_KEY`
+    shares a name across both tiers *because it must be the same value*.
+    Someone who had learned that rule and then noticed these two differing
+    would have had good reason to "fix" it.
+
+71. **A watermark per recipient, and no global one.** Each address records the
+    newest `createdAt` it has been told about. A digest counts what is strictly
+    newer, and on success advances to *the newest photograph it counted* —
+    never to "now", which would swallow anything committed while the run was in
+    flight. A failed send writes nothing, so tomorrow's message for that
+    address covers both days while everyone else advances normally. Cloudflare
+    does not retry a failed scheduled run; per-address watermarks are what make
+    that harmless rather than a lost day.
+
+    Switching an address on sets its watermark to that moment. A new recipient
+    is therefore never told about the library that was already there, and
+    switching off and on again is not a way to make the site re-announce
+    itself.
+
+72. **The state file is not in the catalog.** Every viewer request loads the
+    catalog through the Worker. A list of family email addresses has no
+    business travelling on the read path for a thumbnail, so it is a second
+    object, `catalog/notifications.json`, written through the same store seam
+    with the same ETag-guarded conditional write and the same reload-and-retry.
+
+73. **A test button, despite what it costs.** Only the Worker can send — the
+    binding is its own — and the Worker has no authentication, so a test button
+    means a new signed cross-runtime route: a third HMAC grant beside the asset
+    and confirmation grants, a sixty-second lifetime, the address inside the
+    MAC, and the Worker's first and only POST. That was accepted because the
+    alternative is worse: the administrator's only way to see what a recipient
+    sees would be to enable an address, wait for 04:17 UTC, and find out
+    tomorrow whether the domain, the binding, the secrets, and the link were
+    all right — with the family receiving the experiment. The test computes
+    tonight's digest for one address, marks it `[Test]`, sends it even when the
+    count is zero, and writes nothing back.
+
+    The Worker refuses everything else about it with the same plain 404 it uses
+    for an unknown photo: a bad grant, an expired one, an address nobody has
+    verified, a malformed body, an unconfigured deployment. It does check
+    `verified` — Cloudflare would refuse anyway, and the failure would be
+    opaque — but it deliberately does not check `enabled`, because testing
+    before switching on is the whole use.
+
+74. **No unsubscribe link.** An unsubscribe endpoint would be an
+    unauthenticated write path on a site whose entire access model is that it
+    has no authenticated ones, and it would have to be reachable from a link
+    that travels in mail. The footer says to ask whoever runs the site; the
+    administrator removes the address on the Notifications page, which deletes
+    it at Cloudflare. For a list of family members this is the right size of
+    mechanism.
+
+75. **The header ran out of room, and the row scrolls rather than the page.**
+    Notifications is a sixth item in the admin's nav, beside All photos, the
+    recency notice, Recently added, Trash, and Export catalog. Measured, it
+    breaks the line #65 recorded: at 640px the admin's title is already
+    collapsed to nothing and the nav was fitting exactly, so the new link
+    pushed the page into horizontal scroll while the unseen notice was
+    showing.
+
+    The header's 3.5rem height is the invariant every sticky offset is built
+    from and it is untouched; what gives now is the nav itself, which takes
+    `max-width: 100%` and `overflow-x: auto` in the admin's own stylesheet. A
+    page that scrolls sideways moves the photographs, which is the one thing on
+    it that matters; a row that scrolls sideways moves six links. `max-width`
+    rather than making the nav a shrinkable flex item, because the title must
+    still yield first — a shrinkable nav would take from itself while the title
+    sat there at full width. The rule is unconditional rather than inside the
+    40rem query, which also fixes the admin's pre-existing sideways scroll on a
+    phone.
+
+76. **Maintenance and the digest are wrapped separately.** They share a cron
+    invocation and nothing else. Maintenance runs first so the count describes
+    the library after a purge, and a throw in either is caught and logged so
+    the other still runs — a bad night at the Cloudflare API must not stop the
+    trash from emptying, and vice versa. A deployment with no domain, no send
+    binding, or missing secrets logs one line and sends nothing rather than
+    throwing into the pass beside it.

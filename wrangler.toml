@@ -3,9 +3,22 @@ main = "worker/src/index.ts"
 compatibility_date = "2026-08-01"
 workers_dev = true
 
-# Daily maintenance: trash purge, orphan sweep, snapshot pruning.
+# Daily maintenance: trash purge, orphan sweep, snapshot pruning; then the
+# notification digest, which counts what the purge left behind.
 [triggers]
 crons = ["17 4 * * *"]
+
+# Cloudflare Email Service. Sends to *verified destination addresses* in this
+# account are free and unlimited; this feature never sends anywhere else.
+# Requires a zone in this account with Email Routing enabled — see "Adding
+# email notifications" in docs/operations.md.
+# `name`, not `binding` — send_email is the one binding type that spells this
+# field differently, and wrangler refuses the whole config if it is wrong.
+# No destination_address or allowed_destination_addresses: the recipient list
+# is the account's verified destination addresses, read at run time, so
+# pinning it here would freeze it (decisions.md #70).
+[[send_email]]
+name = "EMAIL"
 
 [observability.logs]
 enabled = true
@@ -16,7 +29,18 @@ binding = "PHOTOS"
 bucket_name = "family-photos"
 preview_bucket_name = "family-photos-dev"
 
-# ASSET_SIGNING_KEY is a secret, set with `wrangler secret put ASSET_SIGNING_KEY`.
-# It is never placed in this file.
+# Secrets, each set with `wrangler secret put <NAME>`. None is ever placed in
+# this file:
+#   ASSET_SIGNING_KEY            shared with Netlify; signs asset and test grants
+#   NOTIFY_FROM                  photos@<domain>, the digest's From address
+#   DISPLAY_SITE_URL             display site base URL incl. its secret path
+#   CLOUDFLARE_ACCOUNT_ID        the account holding the bucket and the addresses
+#   CLOUDFLARE_ADDRESSES_READ_TOKEN
+#                                read-only "Email Routing Addresses Read".
+#                                Netlify holds a separate write-capable token
+#                                under a separate name; never cross them.
 [vars]
 CATALOG_CACHE_SECONDS = "60"
+# The site's own name, already public in src/display/index.html. It is the
+# digest's From display name and appears in its subject line.
+SITE_TITLE = "Family Photos"

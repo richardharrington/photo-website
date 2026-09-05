@@ -44,11 +44,27 @@ import {
 } from '../../src/shared/ids.ts';
 import { downloadFilenameFor } from '../../src/shared/filename.ts';
 import {
+  NOTIFICATION_TEST_TTL_SECONDS,
   assetGrantPath,
   signAssetGrant,
   signConfirmation,
+  signNotificationTest,
   verifyConfirmation,
 } from '../../src/shared/signing.ts';
+import {
+  cloudflareAddresses,
+  CloudflareApiError,
+} from '../../src/shared/cloudflare-addresses.ts';
+import type { FetchLike } from '../../src/shared/cloudflare-addresses.ts';
+import { isValidEmailAddress, normalizeEmail } from '../../src/shared/notifications.ts';
+import type {
+  DestinationAddress,
+  NotificationState,
+} from '../../src/shared/notifications.ts';
+import {
+  loadNotificationState,
+  mutateNotificationState,
+} from '../../src/shared/notifications-repository.ts';
 import { toPublicPhoto } from '../../src/shared/display-api.ts';
 import { S3ObjectStore } from './lib/s3-store.ts';
 import { readRoute } from './lib/read-routes.ts';
@@ -94,6 +110,7 @@ export default async function handler(request: Request): Promise<Response> {
     if (method === 'GET' && path === '/export') return exportCatalog();
     if (method === 'GET' && path === '/trash') return listTrash();
     if (method === 'GET' && path === '/trash/count') return trashCount();
+    if (method === 'GET' && path === '/notifications') return listNotifications();
 
     const download = /^\/download\/([0-9a-f]{32})$/.exec(path);
     if (method === 'GET' && download) return downloadLink(download[1]!);
@@ -127,10 +144,21 @@ export default async function handler(request: Request): Promise<Response> {
         return await handlePreview(request, 'permanent-delete');
       case '/permanent-delete/confirm':
         return await handlePermanentDeleteConfirm(request);
+      case '/notifications/add':
+        return await handleAddRecipient(request);
+      case '/notifications/remove':
+        return await handleRemoveRecipient(request);
+      case '/notifications/set-enabled':
+        return await handleSetEnabled(request);
+      case '/notifications/test':
+        return await handleSendTest(request);
       default:
         return notFound();
     }
   } catch (error) {
+    // Cloudflare knows why it refused an address and this code does not, so
+    // its wording reaches the administrator rather than a generic failure.
+    if (error instanceof CloudflareApiError) return badRequest(error.message);
     console.error('Admin API failure', error);
     return serverError();
   }
@@ -606,4 +634,257 @@ async function exportCatalog(): Promise<Response> {
       'Referrer-Policy': 'no-referrer',
     },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+/**
+ * The recipient list is Cloudflare's, not ours.
+ *
+ * The account's destination-address list *is* the list, and whether an address
+ * has verified is Cloudflare's answer alone. R2 holds only what Cloudflare
+ * cannot: whether the digest goes to an address, and how far it has been told
+ * about (decisions.md, "Notifications").
+ *
+ * `R2_ACCOUNT_ID` is reused rather than joined by a second name for the same
+ * value: the addresses live in the account that holds the bucket.
+ */
+function addressClient() {
+  return cloudflareAddresses(
+    // The global is read here, at the runtime edge, and passed down — nothing
+    // under src/shared/ reaches for it.
+    globalThis.fetch as unknown as FetchLike,
+    requiredEnv('R2_ACCOUNT_ID'),
+    requiredEnv('CLOUDFLARE_ADDRESSES_WRITE_TOKEN'),
+  );
+}
+
+interface RecipientRow {
+  id: string;
+  email: string;
+  verified: boolean;
+  enabled: boolean;
+  lastSent: { at: string; count: number } | null;
+}
+
+/**
+ * One row of the Notifications page.
+ *
+ * A verified address with no state entry is shown as switched off rather than
+ * hidden. That is what makes the write order in `add` safe: if the R2 write
+ * fails after the Cloudflare one, the address still appears, and the cron
+ * reads the same missing entry the same way.
+ */
+function recipientRow(
+  address: DestinationAddress,
+  state: NotificationState,
+): RecipientRow {
+  const recipient = state.recipients[address.email];
+  return {
+    id: address.id,
+    email: address.email,
+    verified: address.verified,
+    enabled: recipient?.enabled ?? false,
+    lastSent: recipient?.lastSent ?? null,
+  };
+}
+
+async function listNotifications(): Promise<Response> {
+  const [addresses, { state }] = await Promise.all([
+    addressClient().list(),
+    loadNotificationState(store()),
+  ]);
+
+  // Deliberately read-only: an entry whose address Cloudflare no longer holds
+  // is already invisible here, and pruning it is the next write's business.
+  return json({
+    recipients: addresses.map((address) => recipientRow(address, state)),
+  });
+}
+
+/** One address, lowercased, or the refusal to send back. */
+function readEmail(value: unknown): string | Response {
+  if (typeof value !== 'string') return badRequest('An email address is required.');
+  const email = normalizeEmail(value);
+  if (!isValidEmailAddress(email)) return badRequest('That is not an email address.');
+  return email;
+}
+
+interface AddBody {
+  email?: unknown;
+}
+
+/**
+ * Add an address: Cloudflare first, then R2.
+ *
+ * Creating it at Cloudflare is what sends the verification email — there is no
+ * separate "invite" step, and nothing is sent to the address until its owner
+ * clicks that link. The order matters: if the second write fails the state is
+ * at worst missing an entry, which reads as switched off. The other order
+ * would leave a state entry for an address that does not exist.
+ */
+async function handleAddRecipient(request: Request): Promise<Response> {
+  const body = await readJson<AddBody>(request);
+  const email = readEmail(body?.email);
+  if (email instanceof Response) return email;
+
+  const address = await addressClient().create(email);
+  const at = nowIso();
+
+  await mutateNotificationState(store(), (state) => ({
+    state: {
+      ...state,
+      recipients: {
+        ...state.recipients,
+        // Enabling starts the clock: `seenThrough` is now, so the first digest
+        // never announces the library that was already there.
+        [address.email]: { enabled: true, seenThrough: at, lastSent: null },
+      },
+    },
+    value: undefined,
+  }));
+
+  return json({
+    recipient: {
+      id: address.id,
+      email: address.email,
+      verified: address.verified,
+      enabled: true,
+      lastSent: null,
+    } satisfies RecipientRow,
+  });
+}
+
+interface RemoveBody {
+  id?: unknown;
+}
+
+/**
+ * Remove an address. A POST rather than a DELETE because this function accepts
+ * only GET and POST.
+ *
+ * The state entry goes with it and is not kept: an address deleted and re-added
+ * gets a new Cloudflare id, and its old watermark should not survive that.
+ */
+async function handleRemoveRecipient(request: Request): Promise<Response> {
+  const body = await readJson<RemoveBody>(request);
+  if (typeof body?.id !== 'string' || body.id === '') {
+    return badRequest('An address id is required.');
+  }
+
+  const client = addressClient();
+  const address = (await client.list()).find((candidate) => candidate.id === body.id);
+  if (!address) return notFound();
+
+  await client.remove(address.id);
+
+  await mutateNotificationState(store(), (state) => {
+    if (!state.recipients[address.email]) return { state, value: undefined };
+    const recipients = { ...state.recipients };
+    delete recipients[address.email];
+    return { state: { ...state, recipients }, value: undefined };
+  });
+
+  return json({ removed: address.email });
+}
+
+interface SetEnabledBody {
+  email?: unknown;
+  enabled?: unknown;
+}
+
+/**
+ * Switch the digest on or off for one address.
+ *
+ * Going off→on sets `seenThrough` to now, always. Turning an address off and on
+ * again never backfills: the switch means "from here on", not "catch me up".
+ */
+async function handleSetEnabled(request: Request): Promise<Response> {
+  const body = await readJson<SetEnabledBody>(request);
+  const email = readEmail(body?.email);
+  if (email instanceof Response) return email;
+  if (typeof body?.enabled !== 'boolean')
+    return badRequest('enabled must be a boolean.');
+
+  const enabled = body.enabled;
+  const at = nowIso();
+
+  const addresses = await addressClient().list();
+  const address = addresses.find((candidate) => candidate.email === email);
+  if (!address) return notFound();
+
+  const state = await mutateNotificationState(store(), (current) => {
+    const existing = current.recipients[email];
+    const wasEnabled = existing?.enabled ?? false;
+    const next = {
+      enabled,
+      // Only when the clock actually starts. Switching off, or setting on to
+      // on, leaves the watermark exactly where it was.
+      seenThrough: enabled && !wasEnabled ? at : (existing?.seenThrough ?? at),
+      lastSent: existing?.lastSent ?? null,
+    };
+    const updated: NotificationState = {
+      ...current,
+      recipients: { ...current.recipients, [email]: next },
+    };
+    return { state: updated, value: updated };
+  });
+
+  return json({ recipient: recipientRow(address, state) });
+}
+
+interface TestBody {
+  email?: unknown;
+}
+
+/**
+ * "Send test": ask the Worker to send tonight's digest for one address now.
+ *
+ * Only the Worker holds the send binding, and it has no authentication of its
+ * own, so this signs a sixty-second grant over the address and posts it. The
+ * Worker answers 404 to anything it will not do, which is deliberate — but it
+ * makes a hung Worker indistinguishable from a slow one, so the fetch carries
+ * its own deadline well inside Netlify's ten seconds.
+ */
+async function handleSendTest(request: Request): Promise<Response> {
+  const body = await readJson<TestBody>(request);
+  const email = readEmail(body?.email);
+  if (email instanceof Response) return email;
+
+  const expiresAt = nowSeconds() + NOTIFICATION_TEST_TTL_SECONDS;
+  const sig = await signNotificationTest(requiredEnv('ASSET_SIGNING_KEY'), {
+    email,
+    expiresAt,
+  });
+  const workerBase = requiredEnv('WORKER_BASE_URL').replace(/\/+$/, '');
+
+  let response: Response;
+  try {
+    response = await fetch(`${workerBase}/notify/test`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, exp: expiresAt, sig }),
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch (error) {
+    console.error('Test send could not reach the Worker', error);
+    return serverError('The test could not be sent. The mail Worker did not answer.');
+  }
+
+  if (!response.ok) {
+    // The Worker refuses with a plain 404 whether the address is unverified,
+    // the grant is stale, or notifications are unconfigured — so this is the
+    // most it can honestly say.
+    return serverError(
+      'The test could not be sent. Check that the address is verified and ' +
+        'that the mail Worker is configured.',
+    );
+  }
+
+  const result = (await response.json().catch(() => null)) as {
+    count?: unknown;
+  } | null;
+  return json({ count: typeof result?.count === 'number' ? result.count : 0 });
 }

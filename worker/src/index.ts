@@ -24,19 +24,47 @@ import type { Catalog, PhotoRecord } from '../../src/shared/catalog.ts';
 import { loadCatalog } from '../../src/shared/catalog-repository.ts';
 import { baseSecurityHeaders } from '../../src/shared/headers.ts';
 import { isValidPhotoId } from '../../src/shared/ids.ts';
-import { verifyAssetGrant } from '../../src/shared/signing.ts';
+import { verifyAssetGrant, verifyNotificationTest } from '../../src/shared/signing.ts';
+import { isValidEmailAddress, normalizeEmail } from '../../src/shared/notifications.ts';
+import type { FetchLike } from '../../src/shared/cloudflare-addresses.ts';
 import { R2BindingStore } from './binding-store.ts';
 import type { R2Like } from './binding-store.ts';
 import { runMaintenance } from './maintenance.ts';
+import { runDigest, runDigestTest } from './digest.ts';
+import type { DigestDeps, SendEmailLike } from './digest.ts';
 
 export interface Env {
   PHOTOS: R2Like;
   ASSET_SIGNING_KEY: string;
   CATALOG_CACHE_SECONDS?: string;
+
+  /**
+   * The notification half. All optional: a deployment without a domain, a
+   * send binding, or the two Cloudflare API values is a Worker that serves
+   * photographs and sends nothing, which is exactly what it did before this
+   * existed.
+   */
+  EMAIL?: SendEmailLike;
+  SITE_TITLE?: string;
+  NOTIFY_FROM?: string;
+  DISPLAY_SITE_URL?: string;
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  /**
+   * Read-only: "Email Routing Addresses Read". Named for its permission, not
+   * for what it talks to, so it cannot be quietly swapped with Netlify's
+   * write-capable token — that mistake would work perfectly and hand the cron
+   * the ability to delete recipients (decisions.md #70).
+   */
+  CLOUDFLARE_ADDRESSES_READ_TOKEN?: string;
+  /** Test seam: the digest's HTTP client. Production uses the global. */
+  FETCH?: FetchLike;
 }
 
 const CAPABILITY_ROUTE = /^\/p\/([0-9a-f]{32})\/([a-z0-9-]+)$/;
 const SIGNED_ROUTE = /^\/d\/([0-9a-f]{32})\/([a-z0-9-]+)$/;
+
+/** The one POST this Worker answers. Matched before the method check below. */
+const NOTIFY_TEST_ROUTE = '/notify/test';
 
 /**
  * Every refusal is the same: unknown photo, trashed photo, wrong rendition,
@@ -172,7 +200,6 @@ async function handleSigned(
   // DataError, which reaches the visitor as a Cloudflare 1101 page and tells
   // the operator nothing at all.
   if (!env.ASSET_SIGNING_KEY) {
-    // eslint-disable-next-line no-console
     console.error('ASSET_SIGNING_KEY is not set; refusing every signed URL.');
     return notFound();
   }
@@ -222,12 +249,126 @@ function sanitizeForHeader(filename: string): string {
   return filename.replace(new RegExp('[\\u0000-\\u001f"\\\\]', 'g'), '');
 }
 
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+/**
+ * The digest's dependencies, or null when the deployment has not been given
+ * what it needs to send.
+ *
+ * A Worker without a domain, a send binding, or the two Cloudflare API values
+ * is a Worker that serves photographs and sends nothing. That is a deployment
+ * state, not a request fault, so it is logged once and never thrown: the
+ * maintenance pass beside it must still run.
+ */
+function digestDeps(env: Env, now: () => Date): DigestDeps | null {
+  const missing = [
+    ['EMAIL binding', env.EMAIL],
+    ['NOTIFY_FROM', env.NOTIFY_FROM],
+    ['DISPLAY_SITE_URL', env.DISPLAY_SITE_URL],
+    ['CLOUDFLARE_ACCOUNT_ID', env.CLOUDFLARE_ACCOUNT_ID],
+    ['CLOUDFLARE_ADDRESSES_READ_TOKEN', env.CLOUDFLARE_ADDRESSES_READ_TOKEN],
+  ]
+    .filter(([, value]) => !value)
+    .map(([name]) => name as string);
+
+  if (missing.length > 0) {
+    console.warn(
+      'Notifications are not configured; sending nothing.',
+      JSON.stringify({ missing }),
+    );
+    return null;
+  }
+
+  return {
+    store: new R2BindingStore(env.PHOTOS),
+    email: env.EMAIL!,
+    fetch: env.FETCH ?? (globalThis.fetch as unknown as FetchLike),
+    accountId: env.CLOUDFLARE_ACCOUNT_ID!,
+    apiToken: env.CLOUDFLARE_ADDRESSES_READ_TOKEN!,
+    from: env.NOTIFY_FROM!,
+    siteTitle: env.SITE_TITLE ?? 'Family Photos',
+    displaySiteUrl: env.DISPLAY_SITE_URL!,
+    now,
+  };
+}
+
+interface NotifyTestBody {
+  email?: unknown;
+  exp?: unknown;
+  sig?: unknown;
+}
+
+/**
+ * `POST /notify/test` — the admin page's "Send test", relayed.
+ *
+ * Only the Worker holds the send binding and the Worker has no authentication
+ * of its own, so a sixty-second HMAC grant over the address is the entire
+ * channel between the two tiers. Every refusal is the same 404 as everywhere
+ * else: a bad signature, an expired one, an address nobody has verified, a
+ * malformed body, and an unconfigured deployment are indistinguishable.
+ */
+async function handleNotifyTest(
+  request: Request,
+  env: Env,
+  nowMs: number,
+): Promise<Response> {
+  // Fail closed, as the signed asset route does: without the key no grant can
+  // be verified, so nothing may be sent.
+  if (!env.ASSET_SIGNING_KEY) {
+    console.error('ASSET_SIGNING_KEY is not set; refusing every test send.');
+    return notFound();
+  }
+
+  const body = (await request.json().catch(() => null)) as NotifyTestBody | null;
+  if (typeof body?.email !== 'string' || typeof body.sig !== 'string') {
+    return notFound();
+  }
+
+  const expiresAt = Number(body.exp);
+  if (!Number.isFinite(expiresAt)) return notFound();
+
+  const email = normalizeEmail(body.email);
+  if (!isValidEmailAddress(email)) return notFound();
+
+  const verified = await verifyNotificationTest(
+    env.ASSET_SIGNING_KEY,
+    { email, expiresAt },
+    body.sig,
+    Math.floor(nowMs / 1000),
+  );
+  if (!verified.ok) return notFound();
+
+  const deps = digestDeps(env, () => new Date(nowMs));
+  if (!deps) return notFound();
+
+  const outcome = await runDigestTest(deps, email);
+  if (!outcome) return notFound();
+
+  return new Response(JSON.stringify(outcome), {
+    status: 200,
+    headers: {
+      ...baseSecurityHeaders(),
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-    if (request.method !== 'GET' && request.method !== 'HEAD') return notFound();
-
     const url = new URL(request.url);
     const nowMs = Date.now();
+
+    // Before the method check below, and only for this one path: everything
+    // else this Worker does is a GET or a HEAD.
+    if (url.pathname === NOTIFY_TEST_ROUTE) {
+      if (request.method !== 'POST') return notFound();
+      return handleNotifyTest(request, env, nowMs);
+    }
+
+    if (request.method !== 'GET' && request.method !== 'HEAD') return notFound();
 
     const capability = CAPABILITY_ROUTE.exec(url.pathname);
     if (capability) {
@@ -246,14 +387,41 @@ export default {
     return notFound();
   },
 
+  /**
+   * The daily cron: maintenance, then the digest.
+   *
+   * Maintenance first because it can purge photographs, and tonight's count
+   * should describe the library as the link will show it. The two are wrapped
+   * separately on purpose — a failure in either must not take the other down
+   * with it, and neither is worth retrying inside one invocation (Cloudflare
+   * does not retry a failed scheduled run, which per-address watermarks make
+   * harmless).
+   */
   async scheduled(_event: unknown, env: Env): Promise<void> {
-    const store = new R2BindingStore(env.PHOTOS);
-    const report = await runMaintenance(store, () => new Date());
-    // The cron just changed the catalog; the next request must not serve a
-    // cached copy that still contains purged photos.
-    resetCatalogCache();
-    // Operational summary; visible in `wrangler tail` and the Cloudflare log.
-    // eslint-disable-next-line no-console
-    console.log('Maintenance complete', JSON.stringify(report));
+    try {
+      const store = new R2BindingStore(env.PHOTOS);
+      const report = await runMaintenance(store, () => new Date());
+      // The cron just changed the catalog; the next request must not serve a
+      // cached copy that still contains purged photos.
+      resetCatalogCache();
+      // Operational summary; visible in `wrangler tail` and the Cloudflare log.
+      // eslint-disable-next-line no-console
+      console.log('Maintenance complete', JSON.stringify(report));
+    } catch (error) {
+      console.error('Maintenance failed', error);
+    }
+
+    try {
+      const deps = digestDeps(env, () => new Date());
+      if (deps) {
+        // Reads the catalog fresh through `loadCatalog` rather than the
+        // request cache, which the maintenance pass has just dropped anyway.
+        const report = await runDigest(deps);
+        // eslint-disable-next-line no-console
+        console.log('Digest complete', JSON.stringify(report));
+      }
+    } catch (error) {
+      console.error('Digest failed', error);
+    }
   },
 };

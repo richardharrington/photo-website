@@ -158,6 +158,7 @@ Use generated random photo IDs, never hashes or original names, in paths.
 
 ```text
 catalog/current.json
+catalog/notifications.json
 catalog/snapshots/<timestamp>.json
 catalog/audit/<timestamp>-<random>.json
 photos/<photo-id>/full.jpg
@@ -165,6 +166,16 @@ photos/<photo-id>/thumb.webp
 photos/<photo-id>/display-1280.webp
 photos/<photo-id>/display-2560.webp
 ```
+
+`notifications.json` is per-recipient notification state — whether the daily
+digest goes to an address, how far it has been told about, and when it was
+last sent — keyed by the lowercased address. Deliberately *not* a field on the
+catalog: every viewer request loads the catalog through the Worker, and it
+should not carry a recipient list (decisions.md #72). It is written through
+the same store seam, with the same ETag-guarded conditional write and the same
+reload-and-retry, by `src/shared/notifications-repository.ts`. Which addresses
+exist, and whether each has been verified, is not stored here at all — that is
+Cloudflare's destination-address list, read live (decisions.md #70).
 
 Four objects per photo; derivatives are WebP-only because every supported
 browser decodes WebP. Objects never move: trash state lives in the catalog,
@@ -324,7 +335,15 @@ open. Signed download URLs last about five minutes.
 - current catalog JSON export;
 - trash listing (returns signed thumbnail and preview URLs, since the Worker
   refuses capability-URL access to trashed photos; it never signs
-  full-resolution URLs for trashed photos).
+  full-resolution URLs for trashed photos);
+- notification recipients: `GET /notifications` merges Cloudflare's
+  destination-address list with the R2 state file;
+  `POST /notifications/add`, `/notifications/remove`,
+  `/notifications/set-enabled`, and `/notifications/test`. Removal is a POST
+  because this function accepts only GET and POST. `add` and `remove` write
+  Cloudflare first and R2 second, always (decisions.md #70), and `test` signs
+  a sixty-second grant and relays it to the Worker with a five-second
+  `AbortSignal.timeout` so a hung Worker cannot become a Netlify timeout.
 
 Every destructive request is a two-step preview/confirm: the preview endpoint
 resolves the selection or date-group query to an **explicit photo ID list**,
@@ -347,6 +366,14 @@ replay.
   downloads (with `Content-Disposition` using the sanitized download
   filename) and for admin trash-view thumbnails. Invalid or expired links
   return 404.
+- `POST /notify/test` — the Worker's one and only non-GET route, matched
+  *before* the method check that refuses everything but GET and HEAD. It
+  carries a `NotificationTestGrant` (`email`, `exp`, `sig`; sixty seconds,
+  HMAC over the address with `ASSET_SIGNING_KEY`) and sends that address the
+  digest it would get tonight, marked `[Test]`, without advancing its
+  watermark. A bad or expired grant, an address Cloudflare has not verified, a
+  malformed body, or a deployment with notifications unconfigured is the same
+  plain 404 as everything else (decisions.md #73).
 
 The Worker runs a daily cron task that:
 
@@ -357,6 +384,13 @@ The Worker runs a daily cron task that:
    than the 24-hour grace period;
 3. prunes catalog snapshots: keep all snapshots newer than 30 days, thin
    older ones to one per day.
+
+and then, wrapped separately so neither pass can take the other down with it,
+sends the notification digest: read Cloudflare's addresses, read the catalog
+fresh, and send one plain-text message per verified, enabled address with
+photographs newer than its watermark. Maintenance runs first so the count
+describes the library after a purge. Each successful send advances only its
+own recipient's watermark; a failure leaves it alone (decisions.md #71, #75).
 
 ## UI implementation order
 
