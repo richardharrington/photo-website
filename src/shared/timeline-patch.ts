@@ -18,6 +18,7 @@
 import { timeSortKey } from './datetime.ts';
 import type {
   PublicPhoto,
+  RecentGroup,
   TimelineDay,
   TimelineMonth,
   TimelineResponse,
@@ -53,19 +54,19 @@ function notNull<T>(value: T | null): value is T {
 }
 
 /**
- * Drop photos from the timeline, and any day, month, or year left empty.
+ * Drop photos from the year tree and the undated group, carrying `recent`
+ * through untouched.
  *
- * An empty group is not a valid part of the page — a well-formed route for one
- * is a 404, not an empty grid — so a delete that empties a day has to take the
- * day with it.
+ * Separated from `removePhotos` because an *edit* is a remove and a reinsert,
+ * and an edit must not touch `recent`: the groups carry ids, the id has not
+ * changed, and a photograph that vanished from the Recently Uploaded view for
+ * the moment between an edit and the refetch would be a lie about when it
+ * arrived.
  */
-export function removePhotos(
+function withoutFromLibrary(
   timeline: TimelineResponse,
-  ids: Iterable<string>,
+  removed: ReadonlySet<string>,
 ): TimelineResponse {
-  const removed = new Set(ids);
-  if (removed.size === 0) return timeline;
-
   const years = timeline.years
     .map((year) =>
       withMonths(
@@ -98,6 +99,62 @@ export function removePhotos(
     years,
     undated: { count: undatedPhotos.length, photos: undatedPhotos },
     total: totalOf(years, undatedPhotos.length),
+    recent: timeline.recent,
+  };
+}
+
+/**
+ * Drop ids from the upload sittings, and any sitting left empty.
+ *
+ * `captureRange` is deliberately left as it was. Narrowing it means knowing
+ * every remaining photograph's capture date, which is a rebuild rather than a
+ * patch, and the background refetch that follows every mutation settles it a
+ * moment later.
+ */
+function removeFromRecent(
+  timeline: TimelineResponse,
+  removed: ReadonlySet<string>,
+): RecentGroup[] {
+  const undatedIds = new Set(timeline.undated.photos.map((photo) => photo.id));
+
+  return timeline.recent
+    .map((group): RecentGroup | null => {
+      const photoIds = group.photoIds.filter((id) => !removed.has(id));
+      if (photoIds.length === group.photoIds.length) return group;
+      if (photoIds.length === 0) return null;
+
+      const undatedGone = group.photoIds.filter(
+        (id) => removed.has(id) && undatedIds.has(id),
+      ).length;
+      return {
+        uploadedAt: group.uploadedAt,
+        count: photoIds.length,
+        captureRange: group.captureRange,
+        undatedCount: Math.max(0, group.undatedCount - undatedGone),
+        photoIds,
+      };
+    })
+    .filter(notNull);
+}
+
+/**
+ * Drop photos from the timeline, and any day, month, year, or upload sitting
+ * left empty.
+ *
+ * An empty group is not a valid part of the page — a well-formed route for one
+ * is a 404, not an empty grid — so a delete that empties a day has to take the
+ * day with it.
+ */
+export function removePhotos(
+  timeline: TimelineResponse,
+  ids: Iterable<string>,
+): TimelineResponse {
+  const removed = new Set(ids);
+  if (removed.size === 0) return timeline;
+
+  return {
+    ...withoutFromLibrary(timeline, removed),
+    recent: removeFromRecent(timeline, removed),
   };
 }
 
@@ -121,7 +178,11 @@ export function upsertPhoto(
   timeline: TimelineResponse,
   photo: PublicPhoto,
 ): TimelineResponse {
-  const without = removePhotos(timeline, [photo.id]);
+  // Not `removePhotos`: an edit leaves the upload sittings exactly as they
+  // are. A group's capture range, its undated count, and the photograph's
+  // position within it may be stale until the refetch lands a moment later,
+  // and none of the three is navigation.
+  const without = withoutFromLibrary(timeline, new Set([photo.id]));
 
   if (photo.captureDate === null) {
     const photos = [...without.undated.photos, photo];
@@ -144,6 +205,7 @@ export function upsertPhoto(
     years,
     undated: without.undated,
     total: totalOf(years, without.undated.count),
+    recent: without.recent,
   };
 }
 

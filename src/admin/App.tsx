@@ -9,8 +9,11 @@ import { Layout } from '../shared/ui/Layout.tsx';
 import { NotFound } from '../shared/ui/States.tsx';
 import { TimelinePage } from '../shared/ui/TimelinePage.tsx';
 import type { TimelineTarget } from '../shared/ui/TimelinePage.tsx';
+import { RecentPage } from '../shared/ui/RecentPage.tsx';
 import { PhotoPage } from '../shared/ui/PhotoPage.tsx';
-import { indexTimeline } from '../shared/ui/timeline-index.ts';
+import { ViewToggle } from '../shared/ui/ViewToggle.tsx';
+import { useUnseenRecent } from '../shared/ui/unseen.ts';
+import { indexTimeline, recentOrderedIds } from '../shared/ui/timeline-index.ts';
 import { CurationContext } from '../shared/ui/curation.ts';
 import type { Curation, PhotoEdit } from '../shared/ui/curation.ts';
 import { removePhotos, upsertPhoto } from '../shared/timeline-patch.ts';
@@ -34,12 +37,20 @@ import type { SelectionState } from './selection.ts';
 import type { PublicPhoto, TimelineResponse } from '../shared/display-api.ts';
 import type { SelectionQuery } from '../shared/admin-operations.ts';
 
-/** The admin's own top-level pages, on top of the routes both apps share. */
+/**
+ * The admin's own top-level pages, on top of the routes both apps share.
+ *
+ * `recent` is not one of them: both apps have it, so the shared parser knows
+ * it unconditionally.
+ */
 const ADMIN_PAGES = ['trash'] as const;
 
 /** Which section of the one page a route is asking for. */
 function targetOf(
-  route: Exclude<Route, { kind: 'not-found' | 'photo' | 'page' }>,
+  route: Exclude<
+    Route,
+    { kind: 'not-found' | 'photo' | 'page' | 'recent' | 'recent-photo' }
+  >,
 ): TimelineTarget {
   switch (route.kind) {
     case 'home':
@@ -130,10 +141,26 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const dismissUndo = useCallback(() => setUndo(null), []);
 
-  const orderedIds = useMemo(
-    () => (data ? indexTimeline(data).orderedIds : []),
-    [data],
-  );
+  /**
+   * Which listing the reader is standing in. The Recently Uploaded view is
+   * the family's page plus full curation, so everything below works there
+   * unchanged — except the order it all reasons about.
+   */
+  const onRecent = route.kind === 'recent' || route.kind === 'recent-photo';
+
+  /**
+   * The order the selection measures in: whatever is actually on screen.
+   *
+   * A shift-range, the advance after a delete, and the pruning that keeps a
+   * bulk action honest all take this list. In the Recently Uploaded view the
+   * photographs are in a different order, and a range measured in library
+   * order would quietly select photographs scattered across years and look as
+   * though it had worked.
+   */
+  const orderedIds = useMemo(() => {
+    if (!data) return [];
+    return onRecent ? recentOrderedIds(data) : indexTimeline(data).orderedIds;
+  }, [data, onRecent]);
 
   // Pruned on every render, never the raw state: a delete takes photos off the
   // page without touching the selection, and a bulk action must never reach a
@@ -176,8 +203,11 @@ export function App() {
 
       if (from) {
         // A replace, so Back from the next photo does not land on the one just
-        // trashed — which is a 404 now.
-        navigate(next ? routes.photo(next) : routes.home(), { replace: true });
+        // trashed — which is a 404 now. It stays in whichever view the delete
+        // was made from.
+        const photoRoute = onRecent ? routes.recentPhoto : routes.photo;
+        const listing = onRecent ? routes.recent : routes.home;
+        navigate(next ? photoRoute(next) : listing(), { replace: true });
       }
       countTrashAgain();
       refetch();
@@ -231,8 +261,20 @@ export function App() {
     [visible, orderedIds, data],
   );
 
+  /**
+   * The marker follows the admin's own uploads too, since they land in the
+   * refetch like anything else. Accepted: it clears on one click, and the
+   * alternative is a per-app rule for a dot.
+   */
+  const unseen = useUnseenRecent(data?.recent[0]?.uploadedAt ?? null, onRecent);
+
   const nav = (
     <>
+      {/* On the trash page neither view is current, so both are links. */}
+      <ViewToggle
+        current={route.kind === 'page' ? null : onRecent ? 'recent' : 'library'}
+        unseen={unseen}
+      />
       <Link to={routes.trash()}>
         Trash{trashCount === null ? '' : ` (${trashCount})`}
       </Link>
@@ -243,6 +285,17 @@ export function App() {
   );
 
   const libraryIsEmpty = data !== null && data.total === 0 && data.undated.count === 0;
+
+  // Always large and easy to target; more prominent when there is nothing in
+  // the library yet. It stands down under either photo view, or it would pin
+  // over the lightbox and invite a drop onto a view that is not a listing.
+  const uploadPanel = (
+    <UploadPanel
+      onLibraryChanged={refetch}
+      emphasized={libraryIsEmpty}
+      photoViewOpen={route.kind === 'photo' || route.kind === 'recent-photo'}
+    />
+  );
 
   /**
    * The trash provides its own read-only curation, so the library's selection
@@ -261,23 +314,37 @@ export function App() {
       </CurationContext.Provider>
     ) : (
       <CurationContext.Provider value={curation}>
-        <TimelinePage
-          resource={timeline}
-          // A photo route must not move the page underneath the photo view.
-          target={route.kind === 'photo' ? null : targetOf(route)}
-          nav={nav}
-          above={
-            // Always large and easy to target; more prominent when there is
-            // nothing in the library yet.
-            <UploadPanel
-              onLibraryChanged={refetch}
-              emphasized={libraryIsEmpty}
-              photoViewOpen={route.kind === 'photo'}
-            />
-          }
-        />
+        {/* One listing at a time and never both: a tile's element id is
+            document-unique, and every scroll depends on it. The upload target
+            stays on either — it is chrome, not part of a listing. */}
+        {onRecent ? (
+          <RecentPage
+            resource={timeline}
+            target={route.kind === 'recent-photo' ? null : 'top'}
+            nav={nav}
+            above={uploadPanel}
+          />
+        ) : (
+          <TimelinePage
+            resource={timeline}
+            // A photo route must not move the page underneath the photo view.
+            target={route.kind === 'photo' ? null : targetOf(route)}
+            nav={nav}
+            above={uploadPanel}
+          />
+        )}
+
         {route.kind === 'photo' ? (
           <PhotoPage id={route.id} timeline={timeline} />
+        ) : null}
+        {route.kind === 'recent-photo' ? (
+          <PhotoPage
+            id={route.id}
+            timeline={timeline}
+            orderedIds={orderedIds}
+            backHref={routes.recent()}
+            photoHref={routes.recentPhoto}
+          />
         ) : null}
 
         {chosen.length > 0 ? (

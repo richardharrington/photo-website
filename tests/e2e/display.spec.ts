@@ -146,9 +146,27 @@ test.describe('the timeline', () => {
   test('the year and month headings stay pinned while scrolling', async ({ page }) => {
     await page.goto(`${BASE}/2025/12/25`);
 
+    /*
+     * Directly under the header, which pins above them at this width so the
+     * toggle between the two views stays reachable in a page years long. Its
+     * height is a declared constant, and the same constant is what moves the
+     * headings down and gives the anchored section its scroll-margin — so the
+     * heading landing at exactly that offset is the whole arrangement agreeing.
+     */
+    const header = await page
+      .locator('.layout__header')
+      .evaluate((node) => node.getBoundingClientRect().height);
+    expect(header).toBeGreaterThan(0);
+
     const year = page.locator('#y-2025 .timeline__year-heading');
     const top = await year.evaluate((node) => node.getBoundingClientRect().top);
-    expect(top).toBeLessThan(4);
+    expect(Math.abs(top - header)).toBeLessThan(4);
+
+    // The header is above both of them, not the other way round.
+    const headerTop = await page
+      .locator('.layout__header')
+      .evaluate((node) => node.getBoundingClientRect().top);
+    expect(headerTop).toBeLessThan(4);
 
     // A month heading slides up behind its year as the month runs out; both
     // are opaque, so the year has to be the one that stays legible.

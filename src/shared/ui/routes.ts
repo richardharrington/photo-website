@@ -17,6 +17,15 @@ export type Route =
   | { kind: 'undated' }
   | { kind: 'photo'; id: string }
   /**
+   * The Recently Uploaded view, and a photograph opened from it. Parsed
+   * unconditionally for both apps: unlike `trash` there is no app-specific
+   * vocabulary here, and the nested photo form is why this is a branch of the
+   * parser rather than an `extra` entry — `extra` matches single segments
+   * only.
+   */
+  | { kind: 'recent' }
+  | { kind: 'recent-photo'; id: string }
+  /**
    * A page one app has and the other does not. The admin passes `['trash']`
    * and gets `{ kind: 'page', name: 'trash' }`; the viewer passes nothing, so
    * `/trash` under the display base is its own 404 — the same parser, and no
@@ -62,6 +71,14 @@ export function parseRoute(
     const id = segments[1];
     if (segments.length !== 2 || !id || !isValidPhotoId(id)) return NOT_FOUND;
     return { kind: 'photo', id };
+  }
+
+  if (segments[0] === 'recent') {
+    if (segments.length === 1) return { kind: 'recent' };
+    const id = segments[2];
+    if (segments.length !== 3 || segments[1] !== 'photo') return NOT_FOUND;
+    if (!id || !isValidPhotoId(id)) return NOT_FOUND;
+    return { kind: 'recent-photo', id };
   }
 
   const first = segments[0];

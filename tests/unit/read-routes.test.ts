@@ -14,16 +14,17 @@ import { fixtureCatalog, FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
  */
 
 const catalog = fixtureCatalog();
+const NOW_MS = Date.parse('2026-09-04T12:00:00.000Z');
 
 describe('readRoute', () => {
   it('returns null for a path that is not a read route', () => {
     for (const path of ['/trash', '/export', '/begin-batch', '/', '/photos']) {
-      expect(readRoute(catalog, path)).toBeNull();
+      expect(readRoute(catalog, path, NOW_MS)).toBeNull();
     }
   });
 
   it('serves the whole timeline', async () => {
-    const response = readRoute(catalog, '/timeline');
+    const response = readRoute(catalog, '/timeline', NOW_MS);
     expect(response?.status).toBe(200);
     const body = (await response!.json()) as {
       years: { months: { days: { photos: unknown[] }[] }[] }[];
@@ -36,17 +37,17 @@ describe('readRoute', () => {
 
   it('serves a live photo, and 404s an unknown one', () => {
     const id = FIXTURE_PHOTO_IDS['beach-early']!;
-    expect(readRoute(catalog, `/photo/${id}`)?.status).toBe(200);
-    expect(readRoute(catalog, `/photo/${'0'.repeat(32)}`)?.status).toBe(404);
+    expect(readRoute(catalog, `/photo/${id}`, NOW_MS)?.status).toBe(200);
+    expect(readRoute(catalog, `/photo/${'0'.repeat(32)}`, NOW_MS)?.status).toBe(404);
   });
 
   it('404s a trashed photo rather than exposing it', () => {
     const id = FIXTURE_PHOTO_IDS['deleted-0']!;
-    expect(readRoute(catalog, `/photo/${id}`)?.status).toBe(404);
+    expect(readRoute(catalog, `/photo/${id}`, NOW_MS)?.status).toBe(404);
   });
 
   it('does not treat a malformed photo id as a read route', () => {
-    expect(readRoute(catalog, '/photo/not-a-valid-id')).toBeNull();
+    expect(readRoute(catalog, '/photo/not-a-valid-id', NOW_MS)).toBeNull();
   });
 
   /**
@@ -57,7 +58,7 @@ describe('readRoute', () => {
    */
   it('no longer recognises the hierarchy, day, or undated routes', () => {
     for (const path of ['/hierarchy', '/undated', '/day/2026/08/02']) {
-      expect(readRoute(catalog, path), path).toBeNull();
+      expect(readRoute(catalog, path, NOW_MS), path).toBeNull();
     }
   });
 });

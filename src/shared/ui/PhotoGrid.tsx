@@ -24,6 +24,12 @@ interface PhotoGridProps {
    * so there is no address to link a tile to, and its tile is a button.
    */
   open?: (photo: PublicPhoto) => void;
+  /**
+   * Where a tile links to. The default is the photograph's place in the
+   * library; the Recently Uploaded view passes its own route, or the very
+   * first click on a tile would leave the view being read.
+   */
+  photoHref?: (id: string) => string;
 }
 
 /**
@@ -91,7 +97,13 @@ function onTileClick(
  * carries the selection's marking and gestures. The viewer's tiles never do —
  * a filename says nothing to the family, and there is nothing to select.
  */
-export function PhotoGrid({ photos, imageSrc, note, open }: PhotoGridProps) {
+export function PhotoGrid({
+  photos,
+  imageSrc,
+  note,
+  open,
+  photoHref = routes.photo,
+}: PhotoGridProps) {
   const curation = useCuration();
 
   return (
@@ -141,7 +153,7 @@ export function PhotoGrid({ photos, imageSrc, note, open }: PhotoGridProps) {
               </button>
             ) : (
               <Link
-                to={routes.photo(photo.id)}
+                to={photoHref(photo.id)}
                 className={tileClass}
                 {...marks}
                 onClick={(event) => {

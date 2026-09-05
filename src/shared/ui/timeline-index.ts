@@ -47,3 +47,16 @@ export function indexTimeline(data: TimelineResponse): TimelineIndex {
 
   return { orderedIds, photos, groups };
 }
+
+/**
+ * Every photo ID in *recent* display order: groups newest first, and each
+ * group's own capture order within it.
+ *
+ * The Recently Uploaded view puts the same photographs in a different order,
+ * so the admin's selection has to reason about that order while it is the one
+ * on screen — a shift-range measured in library order would quietly pick up
+ * photographs scattered across years and look as though it had worked.
+ */
+export function recentOrderedIds(data: TimelineResponse): string[] {
+  return data.recent.flatMap((group) => group.photoIds);
+}

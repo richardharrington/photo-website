@@ -30,13 +30,25 @@ export function takeScrollRequest(): string | null {
 /**
  * Bring an element into view, reporting whether it was there to scroll to.
  *
- * The offset for the pinned year and month headings comes from each element's
- * own `scroll-margin-top`, so the CSS that decides how tall those headings are
- * is the only place that number is written down.
+ * The offset for whatever is pinned above it comes from the element's own
+ * `scroll-margin-top`, so the CSS that decides how tall those bands are is
+ * still the only place that number is written down.
+ *
+ * The position is computed and scrolled to rather than handed to
+ * `scrollIntoView`, which is what this was. WebKit gets that wrong for an
+ * element inside a multi-column container taller than the viewport: it scrolls
+ * to the bottom of the page instead, apparently measuring in the flow rather
+ * than in the fragment the element is actually painted in. The library never
+ * hit it because a day's grid is short; one upload sitting can be an
+ * 800-photo import, so the Recently Uploaded view hits it on its first tile.
+ * `getBoundingClientRect` is correct in every engine.
  */
 export function scrollToElementId(elementId: string): boolean {
   const element = document.getElementById(elementId);
   if (!element) return false;
-  element.scrollIntoView({ block: 'start' });
+  const margin = Number.parseFloat(getComputedStyle(element).scrollMarginTop);
+  const offset = Number.isFinite(margin) ? margin : 0;
+  const top = element.getBoundingClientRect().top + window.scrollY - offset;
+  window.scrollTo(0, Math.max(0, top));
   return true;
 }

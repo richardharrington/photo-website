@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   buildHierarchy,
+  comparePhotosByCapture,
   comparePhotosWithinDay,
   compareUndatedPhotos,
   findDay,
@@ -248,5 +249,93 @@ describe('siblingsWithinGroup', () => {
     expect(one.previous).toBeNull();
     expect(one.next).toBeNull();
     expect(one.total).toBe(1);
+  });
+});
+
+/**
+ * Capture order across dates, which the hierarchy never needed because a day
+ * was always the container. The Recently Uploaded view has no such container,
+ * so the rule the rest of the site follows is stated once, in full.
+ */
+describe('comparePhotosByCapture', () => {
+  const augustTimed = makePhoto({
+    id: testPhotoId('august-timed'),
+    captureDate: '2026-08-02',
+    captureTime: '08:15:02',
+  });
+  const augustLater = makePhoto({
+    id: testPhotoId('august-later'),
+    captureDate: '2026-08-02',
+    captureTime: '17:48:50',
+  });
+  const augustDateOnly = makePhoto({
+    id: testPhotoId('august-date-only'),
+    captureDate: '2026-08-02',
+    captureTime: null,
+  });
+  const march = makePhoto({
+    id: testPhotoId('march'),
+    captureDate: '2026-03-01',
+    captureTime: '14:22:19',
+  });
+  const undatedFirst = makePhoto({
+    id: testPhotoId('undated-first'),
+    captureDate: null,
+    captureTime: null,
+    batchSeq: 6,
+    selectionIndex: 0,
+  });
+  const undatedSecond = makePhoto({
+    id: testPhotoId('undated-second'),
+    captureDate: null,
+    captureTime: null,
+    batchSeq: 6,
+    selectionIndex: 1,
+  });
+
+  /**
+   * Dates descend, but a single date keeps the library's own within-day rule:
+   * timed photographs in clock order, then date-only ones. Delegating rather
+   * than restating it is what keeps the two views agreeing about a day.
+   */
+  it('puts newer capture dates first, timed before date-only, undated last', () => {
+    const shuffled = [
+      undatedSecond,
+      augustDateOnly,
+      march,
+      undatedFirst,
+      augustTimed,
+      augustLater,
+    ];
+    expect(shuffled.sort(comparePhotosByCapture).map((photo) => photo.id)).toEqual([
+      augustTimed.id,
+      augustLater.id,
+      augustDateOnly.id,
+      march.id,
+      undatedFirst.id,
+      undatedSecond.id,
+    ]);
+  });
+
+  it('is a total order, so the same photo compares equal to itself', () => {
+    expect(comparePhotosByCapture(march, march)).toBe(0);
+    expect(comparePhotosByCapture(march, augustTimed)).toBeGreaterThan(0);
+    expect(comparePhotosByCapture(augustTimed, march)).toBeLessThan(0);
+  });
+
+  it('compares capture dates as strings, never as instants', () => {
+    // An early-morning photo is the case a timezone bug misfiles; here the
+    // comparison is lexical and cannot depend on the machine's zone.
+    const earlyMorning = makePhoto({
+      id: testPhotoId('early'),
+      captureDate: '2025-12-26',
+      captureTime: '00:30:00',
+    });
+    const christmas = makePhoto({
+      id: testPhotoId('christmas'),
+      captureDate: '2025-12-25',
+      captureTime: '09:00:00',
+    });
+    expect(comparePhotosByCapture(earlyMorning, christmas)).toBeLessThan(0);
   });
 });

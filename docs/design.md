@@ -249,6 +249,46 @@ queue with overall and per-file status rather than an arbitrary batch limit.
   since the address bar follows whatever section is being read. The current year and
   month headings pin to the top of the viewport while scrolling; a month slides
   up behind its year rather than over it.
+- There are **two views of the library**, and a toggle beside the site title
+  moves between them: **All photos**, the page just described, and **Recently
+  added** at `/recent`. The current view is plain text; the other is a link.
+  Capture date is right for finding a photograph and useless for noticing one —
+  a box of scanned 1978 prints is new, and on the timeline it sits at the
+  bottom of the page under a 1978 heading. The Recently added view is the only
+  place on the site ordered by anything but the camera. A dot on the toggle
+  says something has arrived that this browser has not been shown; it is
+  remembered per device, is emphasis only, and clears on one visit.
+- Below 40rem the header stays in normal flow and scrolls away, as the site
+  title always has. At 40rem and above it pins, because the toggle has to be
+  reachable from anywhere in a page that is years long. Everything else that
+  pins — the year and month headings, and the admin's selection bar and upload
+  target — sits below it.
+- **What counts as recently added** is a property of the photographs, not of
+  the viewer: the 50 newest by arrival, everything that arrived in the last 14
+  days, and every photograph sharing an upload batch with either. The floor
+  keeps the view from being thin in a quiet month, the window keeps a heavy
+  fortnight from being truncated, and the batch rule keeps one upload from
+  being shown cut in half. There is no ceiling, so an import of 800 photographs
+  appears whole. Trashed photographs are excluded throughout.
+- Those photographs are grouped by **upload sitting**, not by calendar day: a
+  new group starts wherever more than six hours passes between two arrivals.
+  The server names no day — an arrival is a genuine instant, and the family is
+  scattered across timezones — so the browser labels each group in the reader's
+  own zone: "Added today", "Added yesterday", the weekday name for two to six
+  days ago, and a month-first date from seven days on. Beneath the heading, a
+  line naming the capture span the sitting covers, at the coarsest granularity
+  that fits: "photographs from September 1–3, 2026", "photographs from March
+  1977 – August 1978", "and 4 undated". It is omitted only when it would
+  restate the heading exactly — everything captured on the very day it was
+  uploaded. Groups are newest first; within one, photographs follow the site's
+  own capture order, newest capture first and undated last. Heading and
+  subtitle pin together while the group's photographs scroll past.
+- Upload sittings have **no addresses of their own**: the headings are plain
+  text, and there is no `/recent/<date>`. A link to one sitting would stop
+  meaning anything as soon as it aged out of the set. `/recent` itself is
+  stable and shareable, and so is `/recent/photo/<id>`, which opens over the
+  recent view and traverses it. A photograph whose sitting has aged out still
+  opens from such a link; both arrows are simply disabled.
 - The three levels are told apart by size before they are read — 32px, 20px,
   14px — and by a rule under the year headings only. A month and a day get
   none: their own photographs are the boundary.
@@ -257,7 +297,8 @@ queue with overall and per-file status rather than an arbitrary batch limit.
   own day's block, and are never repeated as representative thumbnails on a
   heading.
 - Individual years, months, days, and photos have stable deep URLs below the
-  opaque display base. A year, month, or day URL renders the same page scrolled
+  opaque display base, as do the Recently added view and a photograph opened
+  from it. A year, month, or day URL renders the same page scrolled
   to that section; clicking a heading rewrites the address bar to its URL
   without adding a history entry. A photo’s ID-based detail URL is independent
   of its date, so date corrections do not break bookmarks. A well-formed URL for

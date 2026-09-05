@@ -46,6 +46,12 @@ interface LightboxProps {
    * only the one rendition is signed.
    */
   imageSrc?: string;
+  /**
+   * Where a stepped-to photograph lives. Defaults to its place in the
+   * library; the Recently Uploaded view passes its own route, or the first
+   * arrow press would silently drop the reader out of that view.
+   */
+  photoHref?: (id: string) => string;
 }
 
 /**
@@ -93,6 +99,7 @@ export function Lightbox({
   onClose,
   onStep,
   imageSrc,
+  photoHref = routes.photo,
 }: LightboxProps) {
   const curation = useCuration();
   const editable = curation?.can.edit ?? false;
@@ -145,9 +152,9 @@ export function Lightbox({
       const target = orderedIds[position + delta];
       if (!target) return;
       if (onStep) onStep(target);
-      else navigate(routes.photo(target));
+      else navigate(photoHref(target));
     },
-    [orderedIds, onStep, photo.id, dirty],
+    [orderedIds, onStep, photo.id, dirty, photoHref],
   );
 
   const currentPosition = orderedIds.indexOf(photo.id);
@@ -263,8 +270,17 @@ export function Lightbox({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose, step, curation, photo.id]);
 
-  // The page behind the lightbox must not scroll while it is open.
-  useEffect(() => {
+  /*
+   * The page behind the lightbox must not scroll while it is open.
+   *
+   * A layout effect, not a passive one, for the *cleanup* rather than the
+   * setup: closing asks the listing underneath to scroll to the tile just
+   * left, and that runs in a layout effect too. A passive cleanup runs after
+   * every layout effect in the commit, so the scroll would happen while the
+   * body was still locked — which WebKit answers by scrolling to the bottom of
+   * the page instead of to the tile.
+   */
+  useLayoutEffect(() => {
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {

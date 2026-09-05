@@ -69,6 +69,29 @@ export function compareUndatedPhotos(a: PhotoRecord, b: PhotoRecord): number {
 }
 
 /**
+ * Capture order *across* dates: newest capture first, undated photos last.
+ *
+ * The hierarchy never needed this, because there a day was the container and
+ * the days themselves were ordered by their own numbers. The Recently
+ * Uploaded view has no such container — one upload sitting can hold a
+ * fortnight of holiday and a box of 1978 prints — so the rule the rest of the
+ * site follows has to be stated once, in full: dated photographs in
+ * descending capture-date order, `comparePhotosWithinDay` inside a single
+ * date, and undated photographs after all of them in upload order.
+ *
+ * Capture dates are `YYYY-MM-DD` strings and are compared as strings; parsing
+ * them into a `Date` is what datetime.ts exists to forbid.
+ */
+export function comparePhotosByCapture(a: PhotoRecord, b: PhotoRecord): number {
+  if (a.captureDate === null || b.captureDate === null) {
+    if (a.captureDate === b.captureDate) return compareUploadOrder(a, b);
+    return a.captureDate === null ? 1 : -1;
+  }
+  if (a.captureDate !== b.captureDate) return a.captureDate < b.captureDate ? 1 : -1;
+  return comparePhotosWithinDay(a, b);
+}
+
+/**
  * Build the full newest-first hierarchy from a flat list of live photos.
  *
  * Group index pages show counts only; photos appear solely in their day grid

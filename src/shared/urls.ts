@@ -28,6 +28,16 @@ export function appRoutes(base: string) {
       `${root}/${year}/${pad2(month)}/${pad2(day)}`,
     undated: () => `${root}/undated`,
     photo: (id: string) => `${root}/photo/${id}`,
+    /**
+     * The Recently Uploaded view, and a photograph opened from it.
+     *
+     * There is deliberately no address for one upload sitting: a link to it
+     * would stop meaning anything as soon as that sitting aged out of the set,
+     * and a URL that silently becomes a 404 is worse than no URL. `/recent`
+     * itself is stable, which is the link that matters.
+     */
+    recent: () => `${root}/recent`,
+    recentPhoto: (id: string) => `${root}/recent/photo/${id}`,
     trash: () => `${root}/trash`,
     api: (path: string) => `${root}/api${path.startsWith('/') ? path : `/${path}`}`,
   };

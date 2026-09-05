@@ -12,7 +12,9 @@ import { fixtureCatalog, FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
  */
 
 const catalog = fixtureCatalog();
-const timeline = timelineResponse(catalog, 'Family Photos');
+/** A fixed clock: every fixture photo was created on 2026-08-03. */
+const NOW_MS = Date.parse('2026-09-04T12:00:00.000Z');
+const timeline = timelineResponse(catalog, 'Family Photos', NOW_MS);
 
 /** Every photo, in the order the page renders them. */
 function flatten() {
@@ -104,7 +106,7 @@ describe('timelineResponse', () => {
   });
 
   it('handles a library with nothing in it', () => {
-    const empty = timelineResponse({ ...catalog, photos: {} }, 'Family Photos');
+    const empty = timelineResponse({ ...catalog, photos: {} }, 'Family Photos', NOW_MS);
     expect(empty.years).toEqual([]);
     expect(empty.undated).toEqual({ count: 0, photos: [] });
     expect(empty.total).toBe(0);

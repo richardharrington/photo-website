@@ -29,11 +29,36 @@ function groupHref(group: GroupRef): string {
 
 interface PhotoPageProps {
   id: string;
-  /** Shared with the timeline rendered beneath, so this costs no extra request. */
+  /** Shared with the listing rendered beneath, so this costs no extra request. */
   timeline: Resource<TimelineResponse>;
+  /**
+   * The order the arrows traverse, and where closing goes.
+   *
+   * Both default to the library's own: the whole timeline in display order,
+   * and the photograph's own day. The Recently Uploaded view passes its own
+   * order and `/recent`, because it is the listing on screen and the arrows
+   * have to follow what the reader can see.
+   *
+   * A live photograph absent from the list given — a month-old link to
+   * `/recent/photo/<id>` whose sitting has aged out — still opens. Both arrows
+   * are simply disabled, and closing lands at the top of the listing rather
+   * than on a tile that is not there. Nothing redirects and nothing 404s: the
+   * photograph exists, and a URL that stops working because time passed is
+   * exactly what these routes are shaped to avoid.
+   */
+  orderedIds?: readonly string[];
+  backHref?: string;
+  /** The route a stepped-to photograph lives at; defaults to the library's. */
+  photoHref?: (id: string) => string;
 }
 
-export function PhotoPage({ id, timeline }: PhotoPageProps) {
+export function PhotoPage({
+  id,
+  timeline,
+  orderedIds: givenOrderedIds,
+  backHref: givenBackHref,
+  photoHref,
+}: PhotoPageProps) {
   const detail = useResource<PhotoResponse>(
     (signal) => readApi.photo(id, signal),
     [id],
@@ -59,17 +84,18 @@ export function PhotoPage({ id, timeline }: PhotoPageProps) {
    * request is in flight.
    */
   const orderedIds = useMemo(() => {
+    if (givenOrderedIds) return givenOrderedIds;
     if (index) return index.orderedIds;
     if (!detailData) return [id];
     return [detailData.previousId, id, detailData.nextId].filter(
       (value): value is string => value !== null,
     );
-  }, [index, detailData, id]);
+  }, [givenOrderedIds, index, detailData, id]);
 
   const shown = index?.photos.get(id) ?? detailData?.photo ?? null;
   const group = index?.groups.get(id) ?? detailData?.group ?? null;
 
-  const backHref = group ? groupHref(group) : routes.home();
+  const backHref = givenBackHref ?? (group ? groupHref(group) : routes.home());
 
   /**
    * Closing returns to the photo's own day *and* to the photo's own tile.
@@ -111,6 +137,7 @@ export function PhotoPage({ id, timeline }: PhotoPageProps) {
       // Derived from the photo currently shown, so it follows the arrows
       // across a day boundary.
       backHref={backHref}
+      photoHref={photoHref}
       onClose={close}
     />
   );

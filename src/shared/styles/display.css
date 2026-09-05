@@ -9,9 +9,76 @@
   flex-direction: column;
 }
 
+/*
+ * The header, and the two-view toggle it now carries.
+ *
+ * Below 40rem it stays in normal flow and scrolls away, as it always has —
+ * the site title does too, and a phone has no height to spend on chrome. At
+ * 40rem and above it pins, because the toggle has to be reachable from
+ * anywhere in a page that is years long. See the media query below for the
+ * height constant that whole arrangement depends on.
+ */
 .layout__header {
   padding: var(--space) calc(var(--space) * 1.5);
   border-bottom: 1px solid var(--border);
+}
+
+/* The nav slot is the viewer's now as well as the admin's, so it lives here
+   rather than in admin.css. A header with nothing in the slot keeps its plain
+   block layout. */
+.layout__header:has(.layout__nav) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space);
+}
+
+.layout__nav {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space);
+  font-size: 0.9375rem;
+}
+
+.layout__nav a {
+  color: var(--fg-muted);
+  text-decoration: none;
+}
+
+.layout__nav a:hover {
+  color: var(--fg);
+  text-decoration: underline;
+}
+
+/* The view you are already in: plain text, not a link that goes nowhere. */
+.view-toggle__current {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* Something has arrived that this browser has not been shown. Emphasis only:
+   it never changes which photographs are in the set, and it is absent
+   entirely where storage is unavailable. */
+.view-toggle__marker {
+  display: inline-block;
+  width: 0.4375rem;
+  height: 0.4375rem;
+  margin-left: 0.3125rem;
+  vertical-align: 0.0625rem;
+  border-radius: 50%;
+  background: var(--focus);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .layout__site-title {
@@ -56,6 +123,17 @@
   --timeline-stack-height: calc(
     var(--timeline-year-height) + var(--timeline-month-height)
   );
+
+  /* The Recently Uploaded view pins its own two lines rather than the
+     library's year and month. A group with no subtitle simply publishes a
+     shorter pinned block; see .recent__group--titled. */
+  --recent-heading-height: 3rem;
+  --recent-subtitle-height: 1.75rem;
+
+  /* Zero below 40rem, where the header is in normal flow, so every
+     calculation that adds it collapses to what it was before. Redefined in
+     the media query at the end of this section. */
+  --layout-header-height: 0px;
 }
 
 .timeline__year {
@@ -147,6 +225,109 @@
   margin-top: calc(var(--space) * 1.5);
 }
 
+/* Recently uploaded ------------------------------------------------------ */
+
+/*
+ * One section per upload sitting: a heading saying when it arrived, a subtitle
+ * saying what it holds, and the library's own grid.
+ *
+ * Below 40rem both lines are in normal flow and free to wrap. The subtitle is
+ * prose of no fixed length — "photographs from March 1977 – August 1978, and 4
+ * undated" — unlike a year or a month name, so a fixed-height band would clip
+ * it exactly where the screen is narrowest. From 40rem it pins, and there is
+ * room for one line.
+ */
+.recent__group + .recent__group {
+  margin-top: calc(var(--space) * 1.5);
+}
+
+.recent__heading {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.625rem;
+  padding-bottom: 0.25rem;
+  font-size: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  border-bottom: 2px solid var(--border);
+}
+
+.recent__subtitle {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+
+/*
+ * A tile here lands under this view's own pinned block, never the library's:
+ * `--timeline-stack-height` would leave a closed photograph's tile about 5rem
+ * too low. In flow there is nothing pinned above it at all, so the margin is
+ * nothing; the media query below adds each term as it starts pinning.
+ */
+.recent .photo-grid__item {
+  scroll-margin-top: 0;
+}
+
+@media (min-width: 40rem) {
+  /*
+   * The two lines pin *together* rather than the subtitle sliding away under
+   * the heading — one sitting can be an 800-photo import, and the capture span
+   * is worth as much as the arrival date through the whole of it. They are
+   * stacked stickies inside the group's own section, exactly as the year and
+   * month headings are, so the next sitting's heading pushes both off when it
+   * arrives.
+   *
+   * Their heights are constants for the same reason the year's and month's
+   * are: the sticky offsets and the tiles' scroll-margin have to agree without
+   * measuring, and a measured fourth term would put a ResizeObserver in the
+   * shared layout whose result has to land before the anchor scroll runs. So
+   * neither line may wrap here, and the subtitle is clipped rather than
+   * allowed to break that agreement.
+   */
+  .recent__heading,
+  .recent__subtitle {
+    /* Opaque, and above the photographs, or the images scroll through them. */
+    position: sticky;
+    z-index: 1;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .recent__heading {
+    top: var(--layout-header-height);
+    /* Above the subtitle, which slides up behind it as the sitting runs out. */
+    z-index: 2;
+    height: var(--recent-heading-height);
+    flex-wrap: nowrap;
+    padding-bottom: 0;
+  }
+
+  .recent__subtitle {
+    top: calc(var(--layout-header-height) + var(--recent-heading-height));
+    height: var(--recent-subtitle-height);
+    margin-bottom: 0;
+  }
+
+  /* A group with no subtitle simply pins a shorter block than one with. */
+  .recent .photo-grid__item {
+    scroll-margin-top: calc(var(--layout-header-height) + var(--recent-heading-height));
+  }
+
+  .recent__group--titled .photo-grid__item {
+    scroll-margin-top: calc(
+      var(--layout-header-height) + var(--recent-heading-height) +
+        var(--recent-subtitle-height)
+    );
+  }
+}
+
 /* Day grid --------------------------------------------------------------- */
 
 /* Masonry, via multi-column layout.
@@ -190,6 +371,60 @@
 @media (min-width: 40rem) {
   .photo-grid {
     column-width: 11rem;
+  }
+}
+
+/*
+ * From 40rem the header pins.
+ *
+ * The toggle between the two views has to be reachable from anywhere in a
+ * page that is years long, and scrolling back to the top of a decade to
+ * change view is not reachable. Below this width the header stays in flow and
+ * scrolls away as it always has — a phone has no height to spend on chrome,
+ * the site title already scrolls, and `--layout-header-height` is 0px there,
+ * which collapses every calculation below to what it was.
+ *
+ * Its height is a constant rather than a measurement, like the year's and the
+ * month's, so the nav must not wrap at this width.
+ */
+@media (min-width: 40rem) {
+  :root {
+    --layout-header-height: 3.5rem;
+  }
+
+  .layout__header {
+    position: sticky;
+    top: 0;
+    /* Above both pinned headings, and above the admin's drop target and
+       selection bar, which move down to meet it. */
+    z-index: 5;
+    height: var(--layout-header-height);
+    background: var(--bg);
+  }
+
+  .layout__header:has(.layout__nav) {
+    flex-wrap: nowrap;
+  }
+
+  .timeline__year-heading {
+    top: var(--layout-header-height);
+  }
+
+  .timeline__month-heading {
+    top: calc(var(--layout-header-height) + var(--timeline-year-height));
+  }
+
+  .timeline__year {
+    scroll-margin-top: var(--layout-header-height);
+  }
+
+  .timeline__month {
+    scroll-margin-top: calc(var(--layout-header-height) + var(--timeline-year-height));
+  }
+
+  .timeline__day,
+  .photo-grid__item {
+    scroll-margin-top: calc(var(--layout-header-height) + var(--timeline-stack-height));
   }
 }
 

@@ -24,10 +24,22 @@ const PHOTO_ROUTE = /^\/photo\/([0-9a-f]{32})$/;
  * another handler", while a 404 response means "this is a read route and
  * there is no such photo".
  */
-export function readRoute(catalog: Catalog, path: string): Response | null {
+export function readRoute(
+  catalog: Catalog,
+  path: string,
+  nowMs: number,
+): Response | null {
   // The whole library, in one request. Both apps lay themselves out from it.
   if (path === '/timeline') {
-    return json(timelineResponse(catalog, process.env.SITE_TITLE ?? 'Family Photos'));
+    return json(
+      timelineResponse(
+        catalog,
+        process.env.SITE_TITLE ?? 'Family Photos',
+        // Threaded in rather than read inside the projection, which must stay
+        // a pure function of the catalog and the moment it is asked about.
+        nowMs,
+      ),
+    );
   }
 
   const photo = PHOTO_ROUTE.exec(path);

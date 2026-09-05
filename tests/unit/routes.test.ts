@@ -36,6 +36,36 @@ describe('parseRoute', () => {
     expect(parseRoute(`${BASE}/photo/${id}`, BASE)).toEqual({ kind: 'photo', id });
   });
 
+  /**
+   * Unlike `/trash`, both apps have the Recently Uploaded view, so it is
+   * parsed unconditionally rather than declared. The nested photo form is why
+   * it is a branch of the parser at all: `extra` matches single segments only.
+   */
+  it('parses the recent view and a photo opened from it, for both apps', () => {
+    const id = 'a1b2c3d4'.repeat(4);
+    for (const extra of [[], ADMIN]) {
+      expect(parseRoute(`${BASE}/recent`, BASE, extra)).toEqual({ kind: 'recent' });
+      expect(parseRoute(`${BASE}/recent/`, BASE, extra)).toEqual({ kind: 'recent' });
+      expect(parseRoute(`${BASE}/recent/photo/${id}`, BASE, extra)).toEqual({
+        kind: 'recent-photo',
+        id,
+      });
+    }
+  });
+
+  it('refuses anything else under /recent', () => {
+    const id = 'a1b2c3d4'.repeat(4);
+    for (const path of [
+      `${BASE}/recent/2026`,
+      `${BASE}/recent/photo`,
+      `${BASE}/recent/photo/not-an-id`,
+      `${BASE}/recent/photo/${id}/extra`,
+      `${BASE}/recent/undated`,
+    ]) {
+      expect(parseRoute(path, BASE), path).toEqual({ kind: 'not-found' });
+    }
+  });
+
   it('refuses anything outside the app base', () => {
     expect(parseRoute('/somewhere-else/2026', BASE)).toEqual({ kind: 'not-found' });
   });

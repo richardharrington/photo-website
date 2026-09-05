@@ -85,3 +85,39 @@ test('closing the photo view returns to its tile at phone width', async ({ page 
   });
   expect(inView).toBe(true);
 });
+
+/**
+ * The recent view at phone width, where its heading and subtitle are in normal
+ * flow rather than pinned — the subtitle is prose of no fixed length, so a
+ * fixed-height band would clip it exactly where the screen is narrowest.
+ * Nothing is above a tile, so nothing may be subtracted when scrolling to one.
+ */
+test('the recent view fits the viewport and closes to its tile', async ({ page }) => {
+  await page.goto(`${BASE}/recent`);
+  await expect(page.locator('.recent__group')).toHaveCount(1);
+  expect(await overflows(page)).toBe(false);
+
+  // The subtitle wraps rather than being cut off.
+  const subtitle = page.locator('.recent__subtitle');
+  await expect(subtitle).toContainText('and 2 undated');
+  const clipped = await subtitle.evaluate(
+    (node) => node.scrollHeight > node.clientHeight + 1,
+  );
+  expect(clipped).toBe(false);
+
+  const tiles = page.locator('.photo-grid__item .photo-grid__link');
+  const href = (await tiles.nth(4).getAttribute('href'))!;
+  const id = href.split('/').pop()!;
+
+  await page.goto(href);
+  await expect(page.getByRole('dialog')).toBeVisible();
+  expect(await overflows(page)).toBe(false);
+
+  await page.getByRole('link', { name: /Lightbox/ }).click();
+  await expect(page).toHaveURL(`${BASE}/recent`);
+  const inView = await page.locator(`#photo-${id}`).evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    return box.top >= 0 && box.top < window.innerHeight;
+  });
+  expect(inView).toBe(true);
+});

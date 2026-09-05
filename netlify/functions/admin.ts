@@ -59,6 +59,7 @@ import {
   json,
   notFound,
   nowIso,
+  nowMs,
   nowSeconds,
   readJson,
   requiredEnv,
@@ -101,7 +102,7 @@ export default async function handler(request: Request): Promise<Response> {
     // lib/read-routes.ts for why both functions must answer these.
     if (method === 'GET') {
       const { catalog } = await loadCatalog(store(), nowIso);
-      const read = readRoute(catalog, path);
+      const read = readRoute(catalog, path, nowMs());
       if (read) return read;
     }
 

@@ -64,31 +64,9 @@ button:disabled {
 
 /* Header ----------------------------------------------------------------- */
 
-/* Only the admin fills the header's nav slot. The viewer's header holds the
-   site's name alone and keeps its plain block layout, untouched. */
-.layout__header:has(.layout__nav) {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space);
-}
-
-.layout__nav {
-  display: flex;
-  gap: var(--space);
-  font-size: 0.9375rem;
-}
-
-.layout__nav a {
-  color: var(--fg-muted);
-  text-decoration: none;
-}
-
-.layout__nav a:hover {
-  color: var(--fg);
-  text-decoration: underline;
-}
+/* The nav slot itself is styled in display.css: the viewer fills it too now,
+   with the toggle between the two views. What the admin adds is Trash and
+   Export catalog beside it, which need no rules of their own. */
 
 /* Upload ---------------------------------------------------------------- */
 
@@ -108,8 +86,10 @@ button:disabled {
  */
 .drop-target {
   position: sticky;
-  /* Beneath the selection bar, which pins above everything. */
-  top: var(--selection-bar-height, 0px);
+  /* Beneath the header and the selection bar, in that order: covering the
+     view toggle exactly while a selection exists is the one arrangement
+     worth ruling out. */
+  top: calc(var(--layout-header-height, 0px) + var(--selection-bar-height, 0px));
   /* Above the year heading, which slides under it. */
   z-index: 3;
   margin-bottom: calc(var(--space) * 1.5);
@@ -276,7 +256,10 @@ button.photo-grid__link {
 
 .selection-bar {
   position: fixed;
-  top: 0;
+  /* Under the header rather than over it: the toggle must stay reachable
+     while a selection exists. Below 40rem the header is in normal flow, the
+     variable is 0px, and this is what it always was. */
+  top: var(--layout-header-height, 0px);
   left: 0;
   right: 0;
   /* Over the pinned year and month headings, which move down to meet it. */
@@ -300,16 +283,18 @@ button.photo-grid__link {
 /*
  * The pinned headings sit below the bar while it is shown.
  *
- * Two things can be pinned above them: the selection bar, and the drop
- * target. Each measures itself and publishes its own height to the root,
- * because both wrap on a narrow window and a number written twice is a number
- * that disagrees with itself; when one is not on the page its variable is
- * absent and the offset falls back to the viewer's own. These override
- * display.css, which is imported first.
+ * Three things can be pinned above them: the header, the selection bar, and
+ * the drop target. The two admin bands measure themselves and publish their
+ * own heights to the root, because both wrap on a narrow window and a number
+ * written twice is a number that disagrees with itself; when one is not on
+ * the page its variable is absent and the offset falls back to what is left.
+ * The header's height is a declared constant, and 0px below 40rem where it is
+ * in normal flow. These override display.css, which is imported first.
  */
 :root {
   --admin-pinned: calc(
-    var(--selection-bar-height, 0px) + var(--drop-target-height, 0px)
+    var(--layout-header-height, 0px) + var(--selection-bar-height, 0px) +
+      var(--drop-target-height, 0px)
   );
 }
 
@@ -332,6 +317,36 @@ button.photo-grid__link {
 .timeline__day,
 .photo-grid__item {
   scroll-margin-top: calc(var(--timeline-stack-height) + var(--admin-pinned));
+}
+
+/*
+ * The Recently Uploaded view pins its own two lines, not the library's year
+ * and month, so its offsets are built from those instead. Below 40rem those
+ * two are in normal flow — the subtitle is prose and has to be free to wrap —
+ * and only the admin's own bands sit above a tile.
+ */
+.recent .photo-grid__item {
+  scroll-margin-top: var(--admin-pinned);
+}
+
+@media (min-width: 40rem) {
+  .recent__heading {
+    top: var(--admin-pinned);
+  }
+
+  .recent__subtitle {
+    top: calc(var(--admin-pinned) + var(--recent-heading-height));
+  }
+
+  .recent .photo-grid__item {
+    scroll-margin-top: calc(var(--admin-pinned) + var(--recent-heading-height));
+  }
+
+  .recent__group--titled .photo-grid__item {
+    scroll-margin-top: calc(
+      var(--admin-pinned) + var(--recent-heading-height) + var(--recent-subtitle-height)
+    );
+  }
 }
 
 /* The edit form, in the photo view ---------------------------------------- */

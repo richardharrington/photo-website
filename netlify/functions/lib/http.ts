@@ -114,3 +114,8 @@ export function nowIso(): string {
 export function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
 }
+
+/** The moment the recency window is judged against; see read-routes.ts. */
+export function nowMs(): number {
+  return Date.now();
+}

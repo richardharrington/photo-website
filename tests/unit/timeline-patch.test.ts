@@ -15,7 +15,8 @@ import { fixtureCatalog, FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
  * beneath it — until the background refetch happened to land.
  */
 
-const base = timelineResponse(fixtureCatalog(), 'Family Photos');
+const NOW_MS = Date.parse('2026-09-04T12:00:00.000Z');
+const base = timelineResponse(fixtureCatalog(), 'Family Photos', NOW_MS);
 
 /** Every photo, in the order the page renders them. */
 function flatten(timeline: TimelineResponse): PublicPhoto[] {
@@ -236,5 +237,71 @@ describe('upsertPhoto', () => {
     upsertPhoto(base, { ...photo('market'), captureDate: '2026-03-01' });
     expect(daysOf(base, 2026, 8)).toEqual([15, 2]);
     expect(base.total).toBe(18);
+  });
+});
+
+/**
+ * The Recently Uploaded groups, patched.
+ *
+ * The two mutations differ here on purpose. A delete has to take the photo out
+ * of the sittings as well, or the page would hold an id it can no longer
+ * render. An edit must leave them completely alone: a photograph does not stop
+ * having arrived when its date is corrected, and `upsertPhoto` was built on
+ * `removePhotos`, so without the split it would vanish from `/recent` until
+ * the refetch landed.
+ */
+describe('the recent groups', () => {
+  const marketId = FIXTURE_PHOTO_IDS['market']!;
+  const undatedId = FIXTURE_PHOTO_IDS['undated-a']!;
+
+  function groupHolding(timeline: TimelineResponse, id: string) {
+    return timeline.recent.find((group) => group.photoIds.includes(id));
+  }
+
+  it('is carried in the projection at all', () => {
+    expect(base.recent.length).toBeGreaterThan(0);
+    expect(groupHolding(base, marketId)).toBeDefined();
+  });
+
+  it('drops deleted ids and recounts the group', () => {
+    const before = groupHolding(base, marketId)!;
+    const patched = removePhotos(base, [marketId]);
+    const after = patched.recent.find(
+      (group) => group.uploadedAt === before.uploadedAt,
+    )!;
+
+    expect(after.photoIds).not.toContain(marketId);
+    expect(after.count).toBe(before.count - 1);
+    expect(after.photoIds).toHaveLength(after.count);
+  });
+
+  it('lowers the undated count only for an undated photograph', () => {
+    const before = groupHolding(base, undatedId)!;
+
+    const datedGone = removePhotos(base, [marketId]).recent.find(
+      (group) => group.uploadedAt === before.uploadedAt,
+    )!;
+    expect(datedGone.undatedCount).toBe(before.undatedCount);
+
+    const undatedGone = removePhotos(base, [undatedId]).recent.find(
+      (group) => group.uploadedAt === before.uploadedAt,
+    )!;
+    expect(undatedGone.undatedCount).toBe(before.undatedCount - 1);
+  });
+
+  it('drops a sitting that empties', () => {
+    const everything = flatten(base).map((entry) => entry.id);
+    expect(removePhotos(base, everything).recent).toEqual([]);
+  });
+
+  it('is left untouched by an edit', () => {
+    const moved = upsertPhoto(base, {
+      ...photo('market'),
+      captureDate: '1999-01-01',
+      captureTime: null,
+    });
+
+    expect(moved.recent).toEqual(base.recent);
+    expect(groupHolding(moved, marketId)!.photoIds).toContain(marketId);
   });
 });

@@ -183,7 +183,7 @@ async function handleDisplay(route: string, res: ServerResponse): Promise<boolea
     sendJson(
       res,
       200,
-      timelineResponse(catalog, process.env.SITE_TITLE ?? 'Family Photos'),
+      timelineResponse(catalog, process.env.SITE_TITLE ?? 'Family Photos', Date.now()),
     );
     return true;
   }

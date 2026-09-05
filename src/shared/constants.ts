@@ -89,6 +89,19 @@ export const RENDITION_SPECS: Record<Rendition, RenditionSpec> = {
 /** Days a trashed photo is retained before the daily cron purges it. */
 export const TRASH_RETENTION_DAYS = 30;
 
+/**
+ * The Recently Uploaded view's three numbers (design.md, "Display site").
+ *
+ * The floor keeps the view from being thin in a quiet month; the window keeps
+ * a heavy fortnight from being truncated; the gap decides where one upload
+ * sitting ends and the next begins. There is deliberately no ceiling: a photo
+ * inside the floor or the window pulls its whole batch in with it, so an
+ * upload is never shown cut in half.
+ */
+export const RECENT_FLOOR = 50;
+export const RECENT_WINDOW_DAYS = 14;
+export const RECENT_GAP_HOURS = 6;
+
 /** Objects with no catalog record are swept only after this grace period. */
 export const ORPHAN_GRACE_HOURS = 24;
 

@@ -96,7 +96,15 @@ The display and admin apps are **two fully independent Vite builds**, so no
 shared chunk can place admin code under the display path. The viewer UI lives
 in `src/shared/ui/` and is imported by both builds; nothing under `src/shared/`
 imports from either app, and the admin is that UI with a curation context
-provided. Add standard project
+provided.
+
+Both apps render two listings of the same response and never both at once:
+`TimelinePage` for the library and `RecentPage` for `/recent`, whose routes
+(`recent`, `recent-photo`) the shared parser knows unconditionally, unlike
+`trash`. `ViewToggle` fills the header's nav slot in both. The wording of an
+upload sitting is `src/shared/ui/recent-labels.ts` rather than
+`src/shared/datetime.ts`, because it needs `Intl` and the reader's own
+timezone and everything outside `ui/` compiles into the Worker as well. Add standard project
 files: `package.json`, TypeScript/Vite configuration, `netlify.toml`, Wrangler
 configuration, ESLint, Prettier, tests, and `.env.example`. The public
 repository contains variable *names* only.
@@ -292,6 +300,15 @@ Functions return generic 404 for an unavailable/unauthorized resource.
 `/timeline` and `/photo` are the only projections. Both apps are one scrolling
 page, so the level-by-level hierarchy, day, and Undated queries have nothing
 left to answer.
+
+`/timeline` also carries `recent`: the Recently Uploaded view, as a list of
+upload sittings holding photo **ids** rather than repeated photographs. The
+membership rule (`RECENT_FLOOR`, `RECENT_WINDOW_DAYS`), the sitting boundary
+(`RECENT_GAP_HOURS`), the ordering, and each group's capture span are all
+decided in `src/shared/display-api.ts`. `timelineResponse` therefore takes a
+`nowMs` argument and never reads the clock; `readRoute`, which both Functions
+share, and the fixture server pass it (decisions.md #57). The Worker is
+untouched: it serves image bytes and runs the cron, and calls neither.
 
 Derivative URLs are not issued by the API: the client composes them from
 `WORKER_BASE_URL` and the photo ID. They are stable, so browsers cache

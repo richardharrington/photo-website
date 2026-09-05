@@ -629,3 +629,135 @@ administrator was waiting on the machine. Numbering continues from above.
     form now takes the caption back from what was stored as well as the date
     and time — a caption is stored trimmed, and without that the fields still
     read as unsaved after a successful save.
+
+## Noticing a photograph, not finding one — 2026-09-04
+
+The site's whole navigation structure is capture date, which is right for
+finding a photograph and useless for noticing one. A family member who visits
+monthly currently has no way to learn that anything is new unless it was also
+shot recently — a box of scanned 1978 prints arrives and lands at the bottom
+of the page under a 1978 heading. `/recent` is a second view of the same one
+response, and everything about it is additive: the library page, its anchors,
+its ordering, and its URLs are unchanged.
+
+57. **Recency is a property of the photographs, not of the viewer.** The set
+    is decided on the server from `createdAt`: the 50 newest, everything
+    inside 14 days, and every photograph sharing an upload batch with either.
+    Computing it in the browser would judge the window by the reader's own
+    clock, so a machine with a wrong date would see a different library, and
+    unreproducibly. The floor keeps a quiet month from looking empty; the
+    window keeps a heavy fortnight from being truncated; the batch closure
+    keeps one upload from being shown cut in half.
+
+    There is deliberately **no ceiling**. If the fiftieth newest photograph
+    lands inside an 800-photograph import, all 800 are in, and on the day the
+    library is first filled `/recent` is the whole library until the window
+    rolls past the import. Both are accepted: a rule with an exception has an
+    edge, and the edge is where it will be wrong.
+
+    `PublicPhoto` gains neither `createdAt` nor `batchSeq`. The projection was
+    written to withhold upload bookkeeping, and under this design the client
+    needs none of it — membership, grouping, ordering and the capture span are
+    all decided in `src/shared/display-api.ts`, which is a pure function of a
+    catalog and a moment. `timelineResponse` therefore takes `nowMs` rather
+    than reading the clock, threaded from `readRoute` exactly as `now` is
+    threaded through the mutation path.
+
+58. **The server groups without a calendar; the browser labels with one.**
+    `createdAt` is a genuine instant, and an instant has no calendar day until
+    you choose a place to stand. The viewers of this site are scattered across
+    zones and none of them is the uploader, so there is no such place. The
+    server therefore splits arrivals wherever more than six hours passes
+    between two of them and names each group by its newest instant; the
+    browser turns that instant into "Added yesterday" in the reader's own
+    zone.
+
+    Rejected: grouping by UTC calendar day, which files an 8pm Pacific upload
+    under tomorrow; by a configured site timezone, which names the uploader's
+    day to readers who are not in it and adds an environment variable of
+    exactly the shape that trips Netlify's secrets scanner; and by the
+    viewer's own zone in the browser, which moves the recency rule client-side
+    and makes the same upload one group for one cousin and two for another,
+    with nothing on screen explaining why.
+
+    `batchSeq` is deliberately not the grouping key. A batch is one admin page
+    session, so it spans days when the tab is left open and splits when the
+    page is reloaded mid-sitting. Neither boundary is visible or meaningful to
+    the family; it keeps its job in the batch-closure rule and nowhere else.
+
+59. **The subtitle is suppressed only for an exact same-day match, and that
+    one judgement is made in the browser.** It compares a capture date against
+    a calendar day, and the server has no calendar — so it lives beside the
+    labelling code and uses the same reader-zone day the heading is derived
+    from, which is what keeps the two from ever disagreeing.
+
+    A consequence worth understanding rather than fixing: an evening upload
+    can be same-day for the uploader and the day before for a cousin further
+    east, so she sees the subtitle and he does not. That is correct in both
+    frames — to her, these *are* photographs from the day before they
+    appeared. The server always sends the capture range and the undated count;
+    only the rendering varies.
+
+    Nothing weaker than strict equality suppresses. A weekend uploaded on
+    Monday still prints "photographs from September 1–3, 2026", which is
+    redundant-ish but true; the alternative was a second, unrelated use of the
+    14-day window and a cliff at its edge. For the same reason a span inside
+    one month always prints its days, however many.
+
+60. **Upload sittings have no addresses.** Group headings are plain text and
+    there is no `/recent/<date>`. A link to one sitting stops meaning anything
+    as soon as that sitting ages out of the set, and a URL that silently
+    becomes a 404 is worse than no URL. `/recent` itself is stable, which is
+    the link that matters — "come look at what I just put up".
+
+    `/recent/photo/<id>` is stable for the same reason a photo's own URL is:
+    it names the photograph, not its place. A live photograph that has since
+    aged out of the set still opens from such a link. It is simply absent from
+    the ordered list the arrows step through, so both are disabled and closing
+    lands at the top of `/recent`. Nothing redirects and nothing 404s.
+
+61. **`orderedIds` is view-dependent.** The admin's shift-range, its advance
+    after a delete, and the pruning that keeps a bulk action honest all take
+    one ordered list, and it has to be the order actually on screen. In
+    `/recent` that is the concatenation of the groups' own ids, not the
+    library's display order. Getting this wrong fails *silently* — a
+    shift-range would quietly pick up photographs scattered across years and
+    look as though it had worked — which is why it has a test of its own built
+    on a catalog where the two orders disagree.
+
+    For the same reason the two listings are never in the DOM together: a
+    tile's element id is document-unique, and both the anchor scroll and the
+    close-the-photo-view scroll depend on it resolving to exactly one element.
+    That is what ruled out a "recently uploaded" band above the timeline.
+
+62. **An edit does not touch `recent`; a delete does.** `upsertPhoto` was
+    built on `removePhotos` — remove, then reinsert into the year tree — so
+    once `removePhotos` learned to drop ids from the upload sittings, an edit
+    would have made the photograph vanish from `/recent` until the refetch.
+    The year-tree removal is now its own function, and only the delete path
+    patches the sittings. A group's capture range and the photograph's
+    position within it may be briefly stale after an edit; none of the three
+    is navigation, and the refetch is immediate.
+
+63. **Two scrolling defects the recent view surfaced, both fixed underneath
+    it.** Neither is about recency; both were latent in code the library has
+    used since the one-page timeline, and both would have made "close the
+    photograph and land back on its tile" wrong.
+
+    The lightbox locks the page behind it by setting `overflow: hidden` on the
+    body, and it did so in a passive effect. A passive cleanup runs *after*
+    every layout effect in the same commit, and the listing underneath asks
+    for its scroll in a layout effect — so closing scrolled while the body was
+    still locked, which WebKit answers by going to the bottom of the page. It
+    is a layout effect now, so the lock is released in the mutation phase,
+    before anything tries to scroll.
+
+    `scrollToElementId` handed the work to `scrollIntoView`. WebKit gets that
+    wrong for an element inside a multi-column container taller than the
+    viewport, scrolling to the bottom of the document as though it were
+    measuring in the flow rather than in the painted fragment. Every day's
+    grid in the library is short enough to stay clear of it; one upload
+    sitting can be an 800-photo import, so `/recent` meets it on its first
+    tile. The position is computed from `getBoundingClientRect` and the
+    element's own `scroll-margin-top` instead, which keeps the CSS the only
+    place that offset is written down and is correct in every engine.

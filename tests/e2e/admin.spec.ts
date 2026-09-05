@@ -769,3 +769,83 @@ test.describe('the trash', () => {
     await expect(page.getByRole('status')).toContainText('1 photo deleted.');
   });
 });
+
+/**
+ * The Recently Uploaded view in the admin: the family's page plus full
+ * curation.
+ *
+ * Every fixture photograph shares one `createdAt`, so the whole live library
+ * is one upload sitting here. What is worth a browser is that curation
+ * genuinely works on this page and that nothing about it leaves the view —
+ * the ordering rule behind the selection is unit-tested against a catalog
+ * built to make the two orders disagree.
+ */
+test.describe('the recent view in the admin', () => {
+  test('carries the toggle beside Trash, and the upload target above it', async ({
+    page,
+  }) => {
+    await page.goto(`${BASE}/recent`);
+
+    await expect(page.locator('.layout__nav [aria-current="page"]')).toHaveText(
+      'Recently added',
+    );
+    await expect(page.getByRole('link', { name: 'All photos' })).toBeVisible();
+    await expect(page.getByRole('link', { name: /^Trash/ })).toBeVisible();
+
+    // The drop target is chrome, not part of a listing, so it stays.
+    await expect(page.locator('.drop-target')).toBeVisible();
+    await expect(page.locator('.recent__group')).toHaveCount(1);
+  });
+
+  test('offers both views as links from the trash, where neither is current', async ({
+    page,
+  }) => {
+    await page.goto(`${BASE}/trash`);
+    await expect(page.locator('.layout__nav [aria-current="page"]')).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'All photos' })).toBeVisible();
+    await expect(page.getByRole('link', { name: /Recently added/ })).toBeVisible();
+  });
+
+  test('selects with a shift-range and shows the filenames it always does', async ({
+    page,
+  }) => {
+    await page.goto(`${BASE}/recent`);
+    const grid = page.locator('.recent__group .photo-grid__link');
+    await expect(page.locator('.photo-grid__filename').first()).toBeVisible();
+
+    await grid.nth(0).click();
+    // A plain click opens the photo view; close it and the anchor remains.
+    await page.getByRole('link', { name: /Lightbox/ }).click();
+    await expect(page).toHaveURL(new RegExp(`${BASE}/recent$`));
+
+    await grid.nth(2).click({ modifiers: ['Shift'] });
+    await expect(selected(page)).toHaveCount(3);
+    await expect(page.locator('.selection-bar')).toContainText('3');
+
+    await page.getByRole('button', { name: 'Deselect all' }).click();
+    await expect(selected(page)).toHaveCount(0);
+  });
+
+  test('edits a photograph without dropping it out of the view', async ({ page }) => {
+    const { ids } = scratch();
+    await page.goto(`${BASE}/recent/photo/${ids[0]}`);
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    const caption = page.getByLabel('Caption');
+    const original = await caption.inputValue();
+    await caption.fill('Edited from the recent view.');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByText('Saved')).toBeVisible();
+
+    // An edit must not take the photograph out of its upload sitting: it
+    // did not arrive at a different time because its caption changed.
+    await page.getByRole('link', { name: /Lightbox/ }).click();
+    await expect(page).toHaveURL(new RegExp(`${BASE}/recent$`));
+    await expect(page.locator(`#photo-${ids[0]}`)).toHaveCount(1);
+
+    await page.goto(`${BASE}/recent/photo/${ids[0]}`);
+    await page.getByLabel('Caption').fill(original);
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByText('Saved')).toBeVisible();
+  });
+});

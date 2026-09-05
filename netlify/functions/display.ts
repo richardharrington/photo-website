@@ -18,6 +18,7 @@ import {
   json,
   notFound,
   nowIso,
+  nowMs,
   nowSeconds,
   requiredEnv,
   serverError,
@@ -46,7 +47,7 @@ export default async function handler(request: Request): Promise<Response> {
   try {
     const { catalog } = await loadCatalog(store(), nowIso);
 
-    const read = readRoute(catalog, path);
+    const read = readRoute(catalog, path, nowMs());
     if (read) return read;
 
     const download = DOWNLOAD_ROUTE.exec(path);
