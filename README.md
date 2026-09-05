@@ -7,10 +7,17 @@ All image processing happens in the administrator's browser. The original file
 never leaves the laptop, and because every stored artifact is re-encoded from
 decoded pixels, no EXIF or GPS data survives into anything published.
 
+The viewer is one scrolling page: the whole library newest first, under year,
+month, and day headings, with a Recently Uploaded view alongside it that
+groups the last few upload sittings by arrival rather than by capture date.
+A single request carries the entire structure, every rendition's pixel
+dimensions included, so the layout is final at first paint and a deep link
+like `/2026/03/01` scrolls straight to its section without reflowing.
+
 ## Documents
 
 Note: These (like everything in this README except this paragraph) are AI-generated
-and should be considered a historical record of design decisions made during 
+and should be considered a historical record of design decisions made during
 implementation. They might be out of date. The code is the source of truth, and I
 will try to keep this README as up to date as possible.
 
@@ -20,6 +27,10 @@ will try to keep this README as up to date as possible.
 | [docs/implementation-plan.md](docs/implementation-plan.md) | How it is built                           |
 | [docs/decisions.md](docs/decisions.md)                     | Why, including the defects that shaped it |
 | [docs/operations.md](docs/operations.md)                   | Setup, backup, recovery, launch checklist |
+
+`docs/specs/` and `docs/infinite-scroll-design-overhaul.md` are per-change
+implementation specs, each written before the work it describes and not
+revised afterwards.
 
 ## Getting started
 
@@ -44,11 +55,22 @@ absent.
 ## Layout
 
 ```text
-src/display/    viewer app          src/admin/      admin app
-src/shared/     model, validation   src/pipeline/   browser image pipeline
+src/shared/ui/  the whole viewer UI, which both apps render
+src/shared/     catalog model, projections, signing, validation
+src/display/    viewer entry        src/admin/      viewer plus curation
+src/pipeline/   browser pipeline    config/         build env + local fake
 netlify/        edge gate + APIs    worker/         R2 gateway + cron
 fixtures/       test catalog        scripts/        backup
 ```
+
+The admin is not a second interface: it is the viewer plus curation. Both
+apps render the same pages out of `src/shared/ui/` and read the same two
+routes, `/timeline` and `/photo/<id>`. The admin adds selecting, editing,
+trashing, and uploading by providing a `CurationContext`; the viewer provides
+`null`, so its bundle carries the branches that test for it and never the
+admin modules. Nothing under `src/shared/` imports from either app, and the
+two Vite builds are fully independent, so no shared chunk can put admin code
+under the display path.
 
 ## Deploying
 
