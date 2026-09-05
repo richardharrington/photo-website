@@ -9,6 +9,11 @@ decoded pixels, no EXIF or GPS data survives into anything published.
 
 ## Documents
 
+Note: These (like everything in this README except this paragraph) are AI-generated
+and should be considered a historical record of design decisions made during 
+implementation. They might be out of date. The code is the source of truth, and I
+will try to keep this README as up to date as possible.
+
 |                                                            |                                           |
 | ---------------------------------------------------------- | ----------------------------------------- |
 | [docs/design.md](docs/design.md)                           | What the site is and the rules it follows |
