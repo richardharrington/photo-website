@@ -37,6 +37,13 @@
 .layout__nav {
   display: flex;
   align-items: baseline;
+  /* Wraps below 40rem, where the header is in normal flow and free to grow.
+     The recency notice is the longest thing in the row and the first to drop
+     to a line of its own, which is what keeps a phone from scrolling sideways
+     — and a page that scrolls sideways moves the photographs. Forbidden at
+     40rem and up; see the media query at the end of this file. */
+  flex-wrap: wrap;
+  row-gap: 0.25rem;
   gap: var(--space);
   font-size: 0.9375rem;
 }
@@ -118,11 +125,15 @@
   /* The Recently Uploaded view pins its own two lines rather than the
      library's year and month. A group with no subtitle simply publishes a
      shorter pinned block; see .recent__group--titled. */
-  --recent-heading-height: 3rem;
-  /* 1.75rem of line plus 0.5rem of air beneath it, inside the band rather
-     than after it: a margin is not part of the sticky block, so a tile
-     scrolled to under a pinned subtitle would still touch it. */
-  --recent-subtitle-height: 2.25rem;
+  --recent-heading-height: 2.75rem;
+  /* 1.75rem of line plus 1rem of air beneath it, inside the band rather than
+     after it: a margin is not part of the sticky block, so a tile scrolled to
+     under a pinned subtitle would still touch it.
+
+     The 1rem matches the timeline's month-to-day gap. This page's subtitle
+     stands in the same relation to its photographs as a day heading does to
+     its own, and the two views are read one after the other. */
+  --recent-subtitle-height: 2.75rem;
 
   /* Zero below 40rem, where the header is in normal flow, so every
      calculation that adds it collapses to what it was before. Redefined in
@@ -241,15 +252,20 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 0.625rem;
-  padding-bottom: 0.25rem;
+  padding-bottom: 0.125rem;
   font-size: 2rem;
   font-weight: 600;
   letter-spacing: -0.01em;
-  border-bottom: 2px solid var(--border);
+  /* No rule under it, unlike the timeline's year heading. A sitting's arrival
+     date and its capture span are one block of two lines, and a rule between
+     them read as a divider inside a thing rather than around it. The size of
+     the heading is separation enough; the space above it does the rest. */
+  line-height: 1.15;
 }
 
 .recent__subtitle {
-  margin: 0 0 0.75rem;
+  /* In flow, below 40rem, the air is an ordinary margin. Same 1rem. */
+  margin: 0 0 1rem;
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--fg-muted);
@@ -307,9 +323,9 @@
     top: calc(var(--layout-header-height) + var(--recent-heading-height));
     height: var(--recent-subtitle-height);
     /* Everything is border-box, so the flex centring happens in the 1.75rem
-       content box and the text stays where it was; the extra half-rem is
-       opaque background between the band and the first row of tiles. */
-    padding-bottom: 0.5rem;
+       content box and the text stays where it was; the extra rem is opaque
+       background between the band and the first row of tiles. */
+    padding-bottom: 1rem;
     margin-bottom: 0;
   }
 
@@ -417,6 +433,9 @@
 
   .layout__nav {
     flex: none;
+    /* The header's height is a declared constant from here up, and every
+       sticky offset is built from it, so nothing in this row may wrap. */
+    flex-wrap: nowrap;
   }
 
   .timeline__year-heading {

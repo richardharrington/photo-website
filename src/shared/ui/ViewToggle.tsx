@@ -24,11 +24,13 @@ interface ViewToggleProps {
  * a notice. It reads as words rather than the dot it once was, because a dot
  * says *that* something is new and nothing about *what* (decisions.md #65).
  *
- * It sits before the Recently added element, so the row reads All photos ·
- * notice · Recently added and a screen reader meets the notice in order,
- * immediately before the link it describes. It is not itself a link: it is
- * beside the one that acts on it, and a control that duplicates its neighbour
- * is one more thing to understand.
+ * It sits after the Recently added element and reads as a parenthetical on it
+ * — All photos · Recently added · (including new ones you haven't seen) — so
+ * a screen reader meets the link first and then what qualifies it, which is
+ * the order the sentence is written in. It is not itself a link: it is beside
+ * the one that acts on it, and a control that duplicates its neighbour is one
+ * more thing to understand. It never appears while the reader is standing in
+ * the recent view, so it only ever qualifies a link, never plain text.
  */
 export function ViewToggle({ current, unseen }: ViewToggleProps) {
   return (
@@ -41,13 +43,6 @@ export function ViewToggle({ current, unseen }: ViewToggleProps) {
         <Link to={routes.home()}>All photos</Link>
       )}
 
-      {/* Sentence case here, uppercase in CSS: some screen readers spell an
-          all-caps string out letter by letter, and this exists to be
-          understood. */}
-      {unseen ? (
-        <span className="view-toggle__notice">New photos you haven’t seen</span>
-      ) : null}
-
       {current === 'recent' ? (
         <span className="view-toggle__current" aria-current="page">
           Recently added
@@ -55,6 +50,15 @@ export function ViewToggle({ current, unseen }: ViewToggleProps) {
       ) : (
         <Link to={routes.recent()}>Recently added</Link>
       )}
+
+      {/* Sentence case here, uppercase in CSS: some screen readers spell an
+          all-caps string out letter by letter, and this exists to be
+          understood. */}
+      {unseen ? (
+        <span className="view-toggle__notice">
+          (including new ones you haven’t seen)
+        </span>
+      ) : null}
     </>
   );
 }

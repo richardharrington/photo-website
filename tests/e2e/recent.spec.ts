@@ -98,7 +98,7 @@ test.describe('the recent view', () => {
     await page.goto(`${BASE}/`);
     const notice = page.locator('.view-toggle__notice');
     await expect(notice).toBeVisible();
-    await expect(notice).toHaveText('New photos you haven’t seen');
+    await expect(notice).toHaveText('(including new ones you haven’t seen)');
 
     await page.getByRole('link', { name: /Recently added/ }).click();
     await expect(page.locator('.recent__group')).toHaveCount(1);
