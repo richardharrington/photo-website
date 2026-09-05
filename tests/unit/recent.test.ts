@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { recentGroups, timelineResponse } from '../../src/shared/display-api.ts';
-import {
-  RECENT_FLOOR,
-  RECENT_GAP_HOURS,
-  RECENT_WINDOW_DAYS,
-} from '../../src/shared/constants.ts';
+import { RECENT_GAP_HOURS, RECENT_WINDOW_DAYS } from '../../src/shared/constants.ts';
 import { makeCatalog, makePhoto } from '../../fixtures/photos.ts';
 import type { PhotoRecord } from '../../src/shared/catalog.ts';
 
@@ -42,61 +38,42 @@ function idsIn(photos: readonly PhotoRecord[], nowMs = NOW): Set<string> {
 }
 
 describe('the recent set', () => {
-  it('takes the newest fifty when nothing is inside the window', () => {
-    // Every one of them a batch of its own, so closure adds nothing.
-    const photos = Array.from({ length: 60 }, (_, index) =>
-      arrived((90 + index) * DAY),
-    );
-    const included = idsIn(photos);
-
-    expect(included.size).toBe(RECENT_FLOOR);
-    // The floor is the *newest* fifty, so the ten oldest are out.
-    for (const photo of photos.slice(0, RECENT_FLOOR)) {
-      expect(included.has(photo.id), photo.createdAt).toBe(true);
-    }
-    for (const photo of photos.slice(RECENT_FLOOR)) {
-      expect(included.has(photo.id), photo.createdAt).toBe(false);
-    }
-  });
-
-  it('takes everything inside the window even when that is fewer than fifty', () => {
+  it('takes everything inside the window', () => {
     const photos = Array.from({ length: 5 }, (_, index) => arrived(index * HOUR));
     expect(idsIn(photos).size).toBe(5);
   });
 
-  it('takes everything inside the window when that exceeds the floor', () => {
-    // Eighty photographs in one heavy fortnight, each its own batch: the
-    // window has no ceiling, so all of them are in.
-    const photos = Array.from({ length: 80 }, (_, index) => arrived(index * 4 * HOUR));
+  it('has no ceiling: a heavy month arrives whole', () => {
+    // Eighty photographs inside the window, each its own batch.
+    const photos = Array.from({ length: 80 }, (_, index) => arrived(index * 8 * HOUR));
     expect(idsIn(photos).size).toBe(80);
   });
 
-  it('includes the exact fourteen-day boundary and excludes what falls outside it', () => {
+  it('is empty when every photograph is older than the window', () => {
+    // The case that could not happen while there was a floor, and is now the
+    // ordinary one: a library nobody has added to in months.
+    const photos = Array.from({ length: 6 }, (_, index) => arrived((90 + index) * DAY));
+    expect(idsIn(photos).size).toBe(0);
+    expect(recentGroups(makeCatalog(photos), NOW)).toEqual([]);
+  });
+
+  it('includes the exact thirty-day boundary and excludes what falls outside it', () => {
     const inside = arrived(RECENT_WINDOW_DAYS * DAY - 1, { batchSeq: 1 });
     const outside = arrived(RECENT_WINDOW_DAYS * DAY, { batchSeq: 2 });
-    // Enough newer photographs to use the floor up, so only the window can
-    // let either of these in.
-    const filler = Array.from({ length: RECENT_FLOOR }, (_, index) =>
-      arrived(index * 60_000, { batchSeq: 100 + index }),
-    );
 
-    const included = idsIn([inside, outside, ...filler]);
+    const included = idsIn([inside, outside]);
     expect(included.has(inside.id)).toBe(true);
     expect(included.has(outside.id)).toBe(false);
   });
 
-  it('pulls in a batch member older than both the floor and the window', () => {
+  it('pulls in a batch member far older than the window', () => {
     // One old photograph committed in the same batch as a new one: an upload
-    // is never shown cut in half, however far apart the two ends are. The
-    // fillers use the floor up, so nothing but closure can reach back this far.
-    const fillers = Array.from({ length: RECENT_FLOOR - 1 }, (_, index) =>
-      arrived(30 * DAY + index * 60_000, { batchSeq: 100 + index }),
-    );
-    const recent = arrived(30 * DAY + RECENT_FLOOR * 60_000, { batchSeq: 42 });
-    const straggler = arrived(400 * DAY, { batchSeq: 42 });
-    const unrelated = arrived(400 * DAY, { batchSeq: 43 });
+    // is never shown cut in half, however far apart the two ends are.
+    const recent = arrived(DAY, { batchSeq: 42 });
+    const straggler = arrived(60 * DAY, { batchSeq: 42 });
+    const unrelated = arrived(60 * DAY, { batchSeq: 43 });
 
-    const included = idsIn([...fillers, recent, straggler, unrelated]);
+    const included = idsIn([recent, straggler, unrelated]);
     expect(included.has(recent.id)).toBe(true);
     expect(included.has(straggler.id)).toBe(true);
     expect(included.has(unrelated.id)).toBe(false);
@@ -258,7 +235,7 @@ describe('the recent field of the timeline response', () => {
     for (const id of inRecent) expect(inLibrary.has(id)).toBe(true);
   });
 
-  it('is empty only when the library is', () => {
+  it('is empty when the library is', () => {
     expect(timelineResponse(makeCatalog([]), 'Family Photos', NOW).recent).toEqual([]);
   });
 });

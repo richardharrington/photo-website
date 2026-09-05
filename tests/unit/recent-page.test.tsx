@@ -95,12 +95,14 @@ describe('the recent page', () => {
 
   /**
    * A fixed part of the site, like the Undated section — not a section that
-   * exists only if populated. With a floor of 50 this happens only when the
-   * library itself is empty.
+   * exists only if populated. An ordinary state now that the floor is gone:
+   * a quiet month empties the view, and it says so.
    */
   it('renders the empty state rather than a 404 when there is nothing', () => {
     page(timelineResponse(makeCatalog([]), 'Family Photos', NOW));
-    expect(screen.getByText('No photos here yet.')).toBeInTheDocument();
+    expect(
+      screen.getByText('No photos uploaded in the last month.'),
+    ).toBeInTheDocument();
     expect(screen.queryByText('Not found')).toBeNull();
   });
 });

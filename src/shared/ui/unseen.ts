@@ -1,15 +1,15 @@
 /**
- * The dot on the Recently added toggle.
+ * The notice on the Recently added toggle.
  *
  * One key in `localStorage` holding the newest `uploadedAt` this browser has
  * rendered on `/recent`. A response whose newest sitting is newer than that —
  * or a browser with no stored value at all, as on a first visit or a new
- * device — raises the marker, and opening `/recent` clears it.
+ * device — raises the notice, and opening `/recent` clears it.
  *
  * This is emphasis only. It never affects which photographs are in the recent
  * set, so it is safe for it to be absent or wrong, which is what lets every
  * read and write be wrapped in `try`/`catch`: a private window throws on the
- * accessor itself, and the honest answer there is no marker rather than a
+ * accessor itself, and the honest answer there is no notice rather than a
  * broken page. Nothing about the recency rule becomes per-device.
  *
  * Storage is an external system, so it is read through `useSyncExternalStore`
@@ -31,7 +31,7 @@ function currentSeen(): string | null {
     try {
       cached = window.localStorage.getItem(KEY);
     } catch {
-      // A private window can throw on the accessor itself. No marker, then.
+      // A private window can throw on the accessor itself. No notice, then.
       cached = null;
     }
   }
@@ -56,18 +56,18 @@ function markSeen(uploadedAt: string): void {
   try {
     window.localStorage.setItem(KEY, uploadedAt);
   } catch {
-    // Storage is unavailable; the marker simply does not persist.
+    // Storage is unavailable; the notice simply does not persist.
   }
   cached = uploadedAt;
   for (const listener of listeners) listener();
 }
 
 /**
- * Whether to mark the toggle, given the newest sitting the response carries.
+ * Whether to raise the notice, given the newest sitting the response carries.
  *
  * Opening `/recent` is what clears it, so the caller says whether that is
  * where the reader now is. On the admin's trash page neither view is current
- * and the marker still shows, which is right: it says the library has
+ * and the notice still shows, which is right: it says the library has
  * something new, wherever you happen to be standing.
  */
 export function useUnseenRecent(

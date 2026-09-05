@@ -180,6 +180,16 @@ const SPECS: Spec[] = [
   },
 ];
 
+/**
+ * When the fixture library arrived: one sitting, comfortably inside the
+ * recency window, and relative because that window is relative. A literal
+ * here is a test suite with an expiry date (decisions.md #67).
+ *
+ * `makePhoto`'s own default deliberately stays a literal — it is the unit
+ * tests' factory, and several of them pin a fixed `NOW_MS`.
+ */
+const FIXTURE_UPLOADED_AT = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
+
 function toRecord(spec: Spec): PhotoRecord {
   const id = testPhotoId(spec.seed);
   const width = spec.landscape ? 4032 : 3024;
@@ -202,6 +212,8 @@ function toRecord(spec: Spec): PhotoRecord {
     batchSeq: spec.batch,
     selectionIndex: spec.index,
     trashedAt: spec.trashed ?? null,
+    createdAt: FIXTURE_UPLOADED_AT,
+    updatedAt: FIXTURE_UPLOADED_AT,
     width,
     height,
   });

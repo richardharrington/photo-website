@@ -761,3 +761,51 @@ its ordering, and its URLs are unchanged.
     tile. The position is computed from `getBoundingClientRect` and the
     element's own `scroll-margin-top` instead, which keeps the CSS the only
     place that offset is written down and is correct in every engine.
+
+## Saying what "recently added" means — 2026-09-05
+
+64. **The floor removed, the window widened to 30 days.** The set was the 50
+    newest by arrival union'd with everything from the last fortnight, and a
+    rule a reader cannot state is a rule they cannot trust: "the 50 newest, or
+    the last month, whichever is more" is two sentences pretending to be one.
+    The floor also meant the view routinely showed photographs that were not
+    recent by any definition — in a quiet season, the whole of it. The window
+    widened to 30 days so that losing the floor does not empty the view in a
+    quiet fortnight, and an empty view became a normal state with a sentence of
+    its own rather than a case the floor made impossible.
+
+65. **Words in place of the dot.** The dot said *that* something was new and
+    nothing about *what*; the notice is the first thing in the row that
+    explains itself. It is green rather than the dot's blue, which reads as a
+    link, and rather than red, which the admin reserves for what destroys — the
+    third colour the interface has ever had, and it earns its place by being
+    the one thing on the page that is about the reader. It carries sentence
+    case in the DOM and uppercase in CSS, because some screen readers spell an
+    all-caps string out letter by letter.
+
+    It is ~28 characters added to a header row whose height is a declared
+    constant and which therefore may not wrap at 40rem and above. The site
+    title yields — `min-width: 0` and an ellipsis — because it is the one thing
+    in that row the reader already knows. That is not quite enough in the admin
+    at exactly 40rem, where the nav also holds Trash and Export catalog: the
+    notice is set a step smaller than the links it sits between, and the
+    admin's own stylesheet tightens its nav gap. At 640px the admin's title is
+    gone entirely and the nav still fits; the header is 3.5rem tall at every
+    width, which is the invariant that matters.
+
+66. **Escape unwinds one layer.** The Photo info panel closes on Escape and
+    leaves the photograph open; a second press closes the photograph. This
+    matches the edit form, which has behaved this way since the admin became
+    the viewer — the panel was the odd one out. Clicking outside the panel
+    closes it too, on `pointerdown` rather than `click` so it covers touch and
+    does not fire at the end of a drag that started inside. The toggle button
+    counts as *inside*: closing on its `pointerdown` would leave the button's
+    own `onClick` reopening the panel on the very click meant to close it.
+
+67. **The fixture's arrival made relative.** A window rule cannot be exercised
+    by a fixture with a literal date in it — the suite passes until the
+    calendar moves past the window, and then every Recently added end-to-end
+    test finds an empty page. `fixtures/catalog.ts` now stamps one arrival at
+    `Date.now() - 26 hours`. `makePhoto`'s own literal deliberately stayed: it
+    is the unit tests' factory, and several of them pin a fixed `NOW_MS`
+    against it.

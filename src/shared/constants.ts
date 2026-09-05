@@ -90,16 +90,14 @@ export const RENDITION_SPECS: Record<Rendition, RenditionSpec> = {
 export const TRASH_RETENTION_DAYS = 30;
 
 /**
- * The Recently Uploaded view's three numbers (design.md, "Display site").
+ * The Recently Uploaded view's two numbers (design.md, "Display site").
  *
- * The floor keeps the view from being thin in a quiet month; the window keeps
- * a heavy fortnight from being truncated; the gap decides where one upload
- * sitting ends and the next begins. There is deliberately no ceiling: a photo
- * inside the floor or the window pulls its whole batch in with it, so an
- * upload is never shown cut in half.
+ * The window is how far back "recently" reaches; the gap decides where one
+ * upload sitting ends and the next begins. There is deliberately no ceiling:
+ * a photo inside the window pulls its whole batch in with it, so an upload is
+ * never shown cut in half (decisions.md #64).
  */
-export const RECENT_FLOOR = 50;
-export const RECENT_WINDOW_DAYS = 14;
+export const RECENT_WINDOW_DAYS = 30;
 export const RECENT_GAP_HOURS = 6;
 
 /** Objects with no catalog record are swept only after this grace period. */

@@ -255,21 +255,24 @@ queue with overall and per-file status rather than an arbitrary batch limit.
   Capture date is right for finding a photograph and useless for noticing one —
   a box of scanned 1978 prints is new, and on the timeline it sits at the
   bottom of the page under a 1978 heading. The Recently added view is the only
-  place on the site ordered by anything but the camera. A dot on the toggle
-  says something has arrived that this browser has not been shown; it is
-  remembered per device, is emphasis only, and clears on one visit.
+  place on the site ordered by anything but the camera. When something has
+  arrived that this browser has not been shown, a short notice in words —
+  "New photos you haven't seen" — sits to the left of the Recently added
+  label; it is remembered per device, is emphasis only, and clears on one
+  visit.
 - Below 40rem the header stays in normal flow and scrolls away, as the site
   title always has. At 40rem and above it pins, because the toggle has to be
   reachable from anywhere in a page that is years long. Everything else that
   pins — the year and month headings, and the admin's selection bar and upload
   target — sits below it.
 - **What counts as recently added** is a property of the photographs, not of
-  the viewer: the 50 newest by arrival, everything that arrived in the last 14
-  days, and every photograph sharing an upload batch with either. The floor
-  keeps the view from being thin in a quiet month, the window keeps a heavy
-  fortnight from being truncated, and the batch rule keeps one upload from
-  being shown cut in half. There is no ceiling, so an import of 800 photographs
-  appears whole. Trashed photographs are excluded throughout.
+  the viewer, and it is one sentence: everything uploaded in the last 30 days,
+  plus every photograph sharing an upload batch with any of it. The batch rule
+  keeps one upload from being shown cut in half; there is no ceiling, so an
+  import of 800 photographs appears whole. Trashed photographs are excluded
+  throughout. The view can therefore be empty, which is an ordinary state
+  rather than an error: it stays reachable and says "No photos uploaded in the
+  last month."
 - Those photographs are grouped by **upload sitting**, not by calendar day: a
   new group starts wherever more than six hours passes between two arrivals.
   The server names no day — an arrival is a genuine instant, and the family is
@@ -312,7 +315,10 @@ queue with overall and per-file status rather than an arbitrary batch limit.
   the way back at the top left, and at the bottom left one right-aligned stack
   of caption (when there is one), capture date (when the photo has one),
   **Download**, and **Photo info**. Clock time, original filename, and
-  full-size dimensions live in the Photo info panel. Previous and
+  full-size dimensions live in the Photo info panel, which is a layer of its
+  own: Escape closes it and leaves the photograph open, closing the photograph
+  only on a second press, and clicking anywhere outside it closes it. Previous
+  and
   next traverse the whole library in display order, stopping only at its two
   ends, and prefetch their own neighbours. Labels use unambiguous text dates;
   viewer time presentation uses local-style hours/minutes, while admin

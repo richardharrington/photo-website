@@ -13,7 +13,7 @@
  * "The admin becomes the viewer").
  */
 
-import { RECENT_FLOOR, RECENT_GAP_HOURS, RECENT_WINDOW_DAYS } from './constants.ts';
+import { RECENT_GAP_HOURS, RECENT_WINDOW_DAYS } from './constants.ts';
 import type { Rendition } from './constants.ts';
 import { getLivePhoto, livePhotos } from './catalog.ts';
 import type { Catalog, DerivativeDescriptor, PhotoRecord } from './catalog.ts';
@@ -82,8 +82,9 @@ export interface TimelineResponse {
   undated: { count: number; photos: PublicPhoto[] };
   total: number;
   /**
-   * The Recently Uploaded view, newest group first. Empty only when the
-   * library is empty.
+   * The Recently Uploaded view, newest group first. Empty whenever nothing
+   * has arrived within the recency window, which is an ordinary state rather
+   * than an edge case.
    *
    * The photographs are not repeated here — the groups carry ids, which the
    * client resolves against the map it already builds from `years` and
@@ -158,21 +159,29 @@ function compareByArrival(a: PhotoRecord, b: PhotoRecord): number {
 /**
  * Which live photographs count as recently uploaded, at `nowMs`.
  *
- * The union of a floor, a window, and batch closure (design.md, "Display
- * site"). The floor keeps the view from being thin, the window keeps a heavy
- * fortnight from being truncated, and the closure keeps an upload from being
- * shown cut in half. Trashed photographs are excluded at every stage,
- * including from the closure: a batch's trashed members do not come back.
+ * A window and batch closure, and nothing else (design.md, "Display site"):
+ * everything uploaded in the last `RECENT_WINDOW_DAYS`, plus the rest of any
+ * upload one of those lands in, so an upload is never shown cut in half.
+ * Trashed photographs are excluded at every stage, including from the
+ * closure: a batch's trashed members do not come back.
+ *
+ * There was once a floor as well — the 50 newest, whatever their age, union'd
+ * with the window. It went because a view whose contents cannot be described
+ * in one sentence is a view nobody trusts, and "the 50 newest, or the last
+ * month, whichever is more" is two sentences pretending to be one. It also
+ * meant the view routinely showed photographs that were not recent by any
+ * reading (decisions.md #64). Losing it makes the empty view an ordinary
+ * state rather than an impossible one.
  *
  * One closure pass is enough, because sharing a `batchSeq` is an equivalence
- * relation and the result is therefore already closed.
+ * relation and the result is therefore already closed. There is no ceiling:
+ * an 800-photograph import inside the window appears whole.
  */
 function recentSet(live: readonly PhotoRecord[], nowMs: number): PhotoRecord[] {
   const byArrival = [...live].sort(compareByArrival);
   const windowMs = RECENT_WINDOW_DAYS * DAY_MS;
 
   const batches = new Set<number>();
-  byArrival.slice(0, RECENT_FLOOR).forEach((photo) => batches.add(photo.batchSeq));
   for (const photo of byArrival) {
     if (nowMs - Date.parse(photo.createdAt) < windowMs) batches.add(photo.batchSeq);
   }

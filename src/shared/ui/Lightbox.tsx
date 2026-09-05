@@ -108,6 +108,9 @@ export function Lightbox({
   const stageRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  /** The info panel and its toggle, so a pointer outside both can dismiss it. */
+  const infoRef = useRef<HTMLDListElement>(null);
+  const infoButtonRef = useRef<HTMLButtonElement>(null);
   /**
    * Which photo the info panel is open for, rather than whether it is open.
    *
@@ -242,7 +245,10 @@ export function Lightbox({
       switch (event.key) {
         case 'Escape':
           event.preventDefault();
-          onClose();
+          // Escape dismisses the innermost thing that is open, as it already
+          // does for the edit form above: the panel first, the view second.
+          if (showInfo) setInfoFor(null);
+          else onClose();
           break;
         case 'ArrowLeft':
           event.preventDefault();
@@ -268,7 +274,36 @@ export function Lightbox({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, step, curation, photo.id]);
+  }, [onClose, step, curation, photo.id, showInfo]);
+
+  /*
+   * The info panel is a layer, so a pointer outside it dismisses it.
+   *
+   * A passive effect is right here: nothing about it races the paint, unlike
+   * the key handler and the scroll lock beside it.
+   */
+  useEffect(() => {
+    if (!showInfo) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      // Containment on the panel itself, so dragging its scrollbar — it is
+      // `overflow-y: auto` under a `max-height` — does not dismiss it.
+      if (infoRef.current?.contains(target)) return;
+      // The toggle counts as inside, though geometrically it is not. Closing
+      // here on pointerdown would leave the button's own onClick running
+      // against a `showInfo` of false, reopening the panel on the very click
+      // meant to close it. Excluding it leaves the toggle as the only thing
+      // acting on that click.
+      if (infoButtonRef.current?.contains(target)) return;
+      setInfoFor(null);
+    }
+    // `pointerdown`, not `click`: it covers touch, and it fires at the start
+    // of a drag, so selecting text in the panel and releasing over the
+    // photograph is not a click outside.
+    window.addEventListener('pointerdown', onPointerDown);
+    return () => window.removeEventListener('pointerdown', onPointerDown);
+  }, [showInfo]);
 
   /*
    * The page behind the lightbox must not scroll while it is open.
@@ -422,7 +457,11 @@ export function Lightbox({
 
       <div className="lightbox__foot">
         {showInfo ? (
-          <dl className="photo-info lightbox__info" id="photo-information">
+          <dl
+            className="photo-info lightbox__info"
+            id="photo-information"
+            ref={infoRef}
+          >
             <dt>Original filename</dt>
             <dd>{photo.originalFilename}</dd>
             <dt>Capture date</dt>
@@ -492,6 +531,7 @@ export function Lightbox({
             ) : null}
             <button
               type="button"
+              ref={infoButtonRef}
               onClick={() => setInfoFor(showInfo ? null : photo.id)}
               aria-expanded={showInfo}
               aria-controls="photo-information"

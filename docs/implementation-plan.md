@@ -303,7 +303,7 @@ left to answer.
 
 `/timeline` also carries `recent`: the Recently Uploaded view, as a list of
 upload sittings holding photo **ids** rather than repeated photographs. The
-membership rule (`RECENT_FLOOR`, `RECENT_WINDOW_DAYS`), the sitting boundary
+membership rule (`RECENT_WINDOW_DAYS`), the sitting boundary
 (`RECENT_GAP_HOURS`), the ordering, and each group's capture span are all
 decided in `src/shared/display-api.ts`. `timelineResponse` therefore takes a
 `nowMs` argument and never reads the clock; `readRoute`, which both Functions

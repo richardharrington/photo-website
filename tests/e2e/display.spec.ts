@@ -214,6 +214,32 @@ test.describe('the photo view', () => {
     await expect(info).toHaveCount(0);
   });
 
+  test('dismisses the info panel by itself, then the photograph', async ({ page }) => {
+    // The panel is a layer: Escape unwinds it before the view, and a pointer
+    // outside it closes it. Only a browser can show both, because both are
+    // about a real event reaching a real window listener.
+    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['market']}`);
+    const info = page.locator('.lightbox__info');
+
+    await page.getByRole('button', { name: 'Photo info' }).click();
+    await expect(info).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(info).toHaveCount(0);
+    await expect(page.locator('.lightbox__image')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Photo info' }).click();
+    await expect(info).toBeVisible();
+    await page.locator('.lightbox__image').click();
+    await expect(info).toHaveCount(0);
+    await expect(page.locator('.lightbox__image')).toBeVisible();
+
+    // Nothing open over it now, so Escape leaves for the listing.
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.locator('.timeline__year-heading').first()).toBeVisible();
+  });
+
   test('disables the arrows only at the two ends of the library', async ({ page }) => {
     const previous = page.getByRole('button', { name: 'Previous photo' });
     const next = page.getByRole('button', { name: 'Next photo' });

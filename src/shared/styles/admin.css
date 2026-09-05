@@ -27,6 +27,19 @@ button:disabled {
   cursor: default;
 }
 
+/*
+ * The admin's nav row is the crowded one: All photos, the recency notice,
+ * Recently added, Trash, and Export catalog, in a header whose height is a
+ * declared constant and which therefore may not wrap at 40rem and up. A
+ * tighter gap here is the admin paying for its own two extra links; the
+ * viewer's three-item row keeps the shared spacing.
+ */
+@media (min-width: 40rem) {
+  .layout__nav {
+    gap: 0.75rem;
+  }
+}
+
 /* The one colour in the interface that is not a photograph: everything that
    destroys something wears it, and nothing else does. */
 .admin-danger {

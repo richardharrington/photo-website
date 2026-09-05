@@ -94,21 +94,23 @@ test.describe('the recent view', () => {
   });
 
   test('marks the toggle until the recent view has been opened', async ({ page }) => {
-    // A browser with nothing stored has seen nothing, so the marker is up.
+    // A browser with nothing stored has seen nothing, so the notice is up.
     await page.goto(`${BASE}/`);
-    await expect(page.locator('.view-toggle__marker')).toBeVisible();
+    const notice = page.locator('.view-toggle__notice');
+    await expect(notice).toBeVisible();
+    await expect(notice).toHaveText('New photos you haven’t seen');
 
     await page.getByRole('link', { name: /Recently added/ }).click();
     await expect(page.locator('.recent__group')).toHaveCount(1);
 
     // Cleared by the visit, and it stays cleared back on the library.
     await page.getByRole('link', { name: 'All photos' }).click();
-    await expect(page.locator('.view-toggle__marker')).toHaveCount(0);
+    await expect(page.locator('.view-toggle__notice')).toHaveCount(0);
 
     // And across a reload, because it is remembered in this browser.
     await page.reload();
     await expect(page.locator('.timeline__year-heading').first()).toBeVisible();
-    await expect(page.locator('.view-toggle__marker')).toHaveCount(0);
+    await expect(page.locator('.view-toggle__notice')).toHaveCount(0);
   });
 
   test('refuses anything else under /recent with the site 404', async ({ page }) => {

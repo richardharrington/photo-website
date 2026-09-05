@@ -60,24 +60,15 @@
 /* Something has arrived that this browser has not been shown. Emphasis only:
    it never changes which photographs are in the set, and it is absent
    entirely where storage is unavailable. */
-.view-toggle__marker {
-  display: inline-block;
-  width: 0.4375rem;
-  height: 0.4375rem;
-  margin-left: 0.3125rem;
-  vertical-align: 0.0625rem;
-  border-radius: 50%;
-  background: var(--focus);
-}
-
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip-path: inset(50%);
+.view-toggle__notice {
+  color: var(--notice);
+  font-weight: 700;
+  /* Smaller than the links it sits between, so it reads as a notice rather
+     than a third way into the library — and so the row still fits at 40rem,
+     where the admin's nav also holds Trash and Export catalog. */
+  font-size: 0.6875rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
@@ -128,7 +119,10 @@
      library's year and month. A group with no subtitle simply publishes a
      shorter pinned block; see .recent__group--titled. */
   --recent-heading-height: 3rem;
-  --recent-subtitle-height: 1.75rem;
+  /* 1.75rem of line plus 0.5rem of air beneath it, inside the band rather
+     than after it: a margin is not part of the sticky block, so a tile
+     scrolled to under a pinned subtitle would still touch it. */
+  --recent-subtitle-height: 2.25rem;
 
   /* Zero below 40rem, where the header is in normal flow, so every
      calculation that adds it collapses to what it was before. Redefined in
@@ -255,7 +249,7 @@
 }
 
 .recent__subtitle {
-  margin: 0 0 0.5rem;
+  margin: 0 0 0.75rem;
   font-size: 0.875rem;
   font-weight: 600;
   color: var(--fg-muted);
@@ -312,6 +306,10 @@
   .recent__subtitle {
     top: calc(var(--layout-header-height) + var(--recent-heading-height));
     height: var(--recent-subtitle-height);
+    /* Everything is border-box, so the flex centring happens in the 1.75rem
+       content box and the text stays where it was; the extra half-rem is
+       opaque background between the band and the first row of tiles. */
+    padding-bottom: 0.5rem;
     margin-bottom: 0;
   }
 
@@ -404,6 +402,21 @@
 
   .layout__header:has(.layout__nav) {
     flex-wrap: nowrap;
+  }
+
+  /* Nothing in this row may wrap, because the header's height is a declared
+     constant every sticky offset is built from. So the site title yields: it
+     is the one thing here the reader already knows, and the notice and the
+     toggle are what they came to act on. */
+  .layout__header:has(.layout__nav) .layout__site-title {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .layout__nav {
+    flex: none;
   }
 
   .timeline__year-heading {

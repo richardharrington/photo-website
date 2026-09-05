@@ -126,10 +126,13 @@ export function RecentPage({
     <Layout isHome nav={nav}>
       {above}
       {/* Never a 404: this is a fixed part of the site, like the Undated
-          section, and with a floor of 50 it is empty only when the library
-          itself is. */}
+          section, so an empty one says so rather than disappearing. A family
+          member who followed the toggle deserves an answer, and "nothing
+          lately" is an answer. The copy says "the last month" where the
+          constant says 30 days, deliberately: the rule has to be exact, and
+          this is how the sentence is heard. */}
       {groups.length === 0 ? (
-        <Empty />
+        <Empty>No photos uploaded in the last month.</Empty>
       ) : (
         <div className="recent">
           {groups.map((group) => {
