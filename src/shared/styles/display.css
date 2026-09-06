@@ -125,7 +125,7 @@
   /* The Recently Uploaded view pins its own two lines rather than the
      library's year and month. A group with no subtitle simply publishes a
      shorter pinned block; see .recent__group--titled. */
-  --recent-heading-height: calc(2.75rem - 1px);
+  --recent-heading-height: calc(2.75rem - 3px);
   /* 1.75rem of line plus 1rem of air beneath it, inside the band rather than
      after it: a margin is not part of the sticky block, so a tile scrolled to
      under a pinned subtitle would still touch it.
@@ -133,7 +133,7 @@
      The 1rem matches the timeline's month-to-day gap. This page's subtitle
      stands in the same relation to its photographs as a day heading does to
      its own, and the two views are read one after the other. */
-  --recent-subtitle-height: calc(2.75rem - 1px);
+  --recent-subtitle-height: calc(2.75rem - 2px);
 
   /* Zero below 40rem, where the header is in normal flow, so every
      calculation that adds it collapses to what it was before. Redefined in
@@ -273,7 +273,7 @@
 .recent__subtitle {
   /* In flow, below 40rem, the air is an ordinary margin. One pixel under a
      rem; see the note on --recent-subtitle-height. */
-  margin: 0 0 calc(1rem - 1px);
+  margin: 0 0 calc(1rem - 2px);
   font-size: 0.8125rem;
   font-weight: 400;
   color: var(--fg-muted);
@@ -334,7 +334,7 @@
     /* Everything is border-box, so the flex centring happens in the 1.75rem
        content box and the text stays where it was; the extra rem is opaque
        background between the band and the first row of tiles. */
-    padding-bottom: calc(1rem - 1px);
+    padding-bottom: calc(1rem - 2px);
     margin-bottom: 0;
   }
 
