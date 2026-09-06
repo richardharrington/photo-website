@@ -86,6 +86,18 @@ import {
 /** How long a preview's confirmation token stays valid. */
 const CONFIRMATION_TTL_SECONDS = 10 * 60;
 
+/**
+ * How long to wait on the Worker for a test send.
+ *
+ * Netlify gives a synchronous function ten seconds, so this cannot simply be
+ * unbounded — but it has to cover the Worker's whole round trip: Cloudflare's
+ * address list, two R2 reads, and then handing the message to the recipient's
+ * mail servers, which is the slow and variable part. Five seconds was not
+ * enough for every destination, and the failure was the worst shape available:
+ * the mail arrived and the page said it had not.
+ */
+const TEST_SEND_TIMEOUT_MS = 8_000;
+
 function s3Config() {
   return {
     endpoint: requiredEnv('R2_S3_ENDPOINT'),
@@ -866,10 +878,22 @@ async function handleSendTest(request: Request): Promise<Response> {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ email, exp: expiresAt, sig }),
-      signal: AbortSignal.timeout(5_000),
+      signal: AbortSignal.timeout(TEST_SEND_TIMEOUT_MS),
     });
   } catch (error) {
     console.error('Test send could not reach the Worker', error);
+
+    // A timeout and a refused connection are different facts and the
+    // difference matters here: on a timeout the Worker may well have sent the
+    // message, so telling the administrator it failed invites a second one.
+    const name = error instanceof Error ? error.name : '';
+    if (name === 'TimeoutError' || name === 'AbortError') {
+      return serverError(
+        `The mail Worker did not answer within ${TEST_SEND_TIMEOUT_MS / 1000} ` +
+          'seconds. It may still have sent — check the inbox before trying again.',
+      );
+    }
+
     return serverError('The test could not be sent. The mail Worker did not answer.');
   }
 

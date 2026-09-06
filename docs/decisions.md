@@ -937,6 +937,15 @@ its ordering, and its URLs are unchanged.
     tonight's digest for one address, marks it `[Test]`, sends it even when the
     count is zero, and writes nothing back.
 
+    The admin function waits eight seconds on it, not the five first written.
+    Netlify allows a synchronous function ten, and the Worker's round trip is
+    Cloudflare's address list, two R2 reads, and then the send — which is slow,
+    variable, and depends on the recipient's mail servers. Five was enough for
+    one destination and not another, and the failure took the worst shape
+    available: the message arrived and the page said it had not, which invites
+    a second one. A timeout is now reported as its own thing, saying the mail
+    may have gone anyway.
+
     The Worker refuses everything else about it with the same plain 404 it uses
     for an unknown photo: a bad grant, an expired one, an address nobody has
     verified, a malformed body, an unconfigured deployment. It does check

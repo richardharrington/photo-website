@@ -776,6 +776,13 @@ npx wrangler secret put CLOUDFLARE_ADDRESSES_READ_TOKEN
   the token, and the link are all right without waiting for 04:17 UTC — and
   without the family receiving the experiment (decisions.md #73).
 
+  If the row says the mail Worker did not answer in time, **check the inbox
+  before pressing it again**. The admin function has to give up before
+  Netlify's ten-second limit does, and the send is the slow part of the round
+  trip, so a slow destination can time the page out on a message that was
+  delivered. The email arriving is the authoritative result; the row is a
+  convenience.
+
 - [ ] Optionally watch the next cron run with `npx wrangler tail` and look for
       the `Digest complete` line beside `Maintenance complete`.
 
