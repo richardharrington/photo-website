@@ -145,16 +145,30 @@ function isSameDayAsUpload(group: RecentGroup, timeZone?: string): boolean {
   return range.latest === readerDayIso(day);
 }
 
+function photos(count: number): string {
+  return `${count} photo${count === 1 ? '' : 's'}`;
+}
+
 /**
  * The line under the heading naming what the sitting holds, or `null` when it
  * would only restate the heading.
+ *
+ * It opens with the count, which is why the heading no longer carries one: a
+ * sitting can be an 800-photo import and its size is worth stating, but once
+ * is enough.
+ *
+ * The count is of the *dated* photographs, because it is the subject of "from
+ * <span>" and the undated ones are not from that span. They are named
+ * separately, on the same line, rather than folded into a total that would be
+ * true of the sitting and false of the range beside it.
  */
 export function recentSubtitle(group: RecentGroup, timeZone?: string): string | null {
   if (isSameDayAsUpload(group, timeZone)) return null;
 
   const range = group.captureRange;
-  if (!range) return 'undated photographs';
+  if (!range) return `${photos(group.undatedCount)}, undated`;
 
-  const span = `photographs from ${formatCaptureSpan(range.earliest, range.latest)}`;
+  const dated = group.count - group.undatedCount;
+  const span = `${photos(dated)} from ${formatCaptureSpan(range.earliest, range.latest)}`;
   return group.undatedCount > 0 ? `${span}, and ${group.undatedCount} undated` : span;
 }

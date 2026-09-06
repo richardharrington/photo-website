@@ -41,7 +41,8 @@ test.describe('the recent view', () => {
 
     // Every live photograph, in one sitting: the fixture shares one createdAt.
     await expect(page.locator('.recent__group')).toHaveCount(1);
-    await expect(page.locator('.recent__heading')).toContainText('18 photos');
+    // The size is on the subtitle, not the heading; see recent-labels.ts.
+    await expect(page.locator('.recent__heading')).not.toContainText('photos');
     await expect(page.locator('.photo-grid__item')).toHaveCount(18);
   });
 
@@ -49,7 +50,8 @@ test.describe('the recent view', () => {
     await page.goto(`${BASE}/recent`);
     // The fixture spans December 2025 to August 2026 and holds two undated.
     await expect(page.locator('.recent__subtitle')).toHaveText(
-      'photographs from December 2025 – August 2026, and 2 undated',
+      // 18 in the sitting, 2 of them undated, so 16 are from the range.
+      '16 photos from December 2025 – August 2026, and 2 undated',
     );
   });
 

@@ -26,10 +26,6 @@ import { indexTimeline } from './timeline-index.ts';
 import { formatAddedAt, recentSubtitle } from './recent-labels.ts';
 import type { PublicPhoto, TimelineResponse } from '../display-api.ts';
 
-function photoCount(count: number): string {
-  return `${count} ${count === 1 ? 'photo' : 'photos'}`;
-}
-
 interface RecentPageProps {
   resource: Resource<TimelineResponse>;
   /**
@@ -148,12 +144,11 @@ export function RecentPage({
                   subtitle ? 'recent__group recent__group--titled' : 'recent__group'
                 }
               >
-                {/* A count here, unlike a day heading in the library: a day's
-                    photographs are all on screen beneath it, and one sitting
-                    can be an 800-photo import. */}
+                {/* No count beside the date: the subtitle beneath already
+                    opens with one, and a sitting's size stated twice in two
+                    lines is one of them saying nothing. */}
                 <h2 className="recent__heading">
                   <span>{formatAddedAt(group.uploadedAt, now, timeZone)}</span>
-                  <span className="timeline__count">{photoCount(group.count)}</span>
                   {/* Nothing at all in the viewer. */}
                   <SelectAll ids={group.photoIds} />
                 </h2>

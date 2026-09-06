@@ -125,7 +125,7 @@
   /* The Recently Uploaded view pins its own two lines rather than the
      library's year and month. A group with no subtitle simply publishes a
      shorter pinned block; see .recent__group--titled. */
-  --recent-heading-height: 2.75rem;
+  --recent-heading-height: calc(2.75rem - 1px);
   /* 1.75rem of line plus 1rem of air beneath it, inside the band rather than
      after it: a margin is not part of the sticky block, so a tile scrolled to
      under a pinned subtitle would still touch it.
@@ -133,7 +133,7 @@
      The 1rem matches the timeline's month-to-day gap. This page's subtitle
      stands in the same relation to its photographs as a day heading does to
      its own, and the two views are read one after the other. */
-  --recent-subtitle-height: 2.75rem;
+  --recent-subtitle-height: calc(2.75rem - 1px);
 
   /* Zero below 40rem, where the header is in normal flow, so every
      calculation that adds it collapses to what it was before. Redefined in
@@ -242,8 +242,12 @@
  * it exactly where the screen is narrowest. From 40rem it pins, and there is
  * room for one line.
  */
+/* The three lengths below are eye-tuned by a pixel each against the rhythm of
+   the block: a little more air before a new sitting than inside one. Written
+   as the round value plus or minus the pixel, so what was chosen and what was
+   adjusted both stay legible. */
 .recent__group + .recent__group {
-  margin-top: calc(var(--space) * 1.5);
+  margin-top: calc(var(--space) * 1.5 + 1px);
 }
 
 .recent__heading {
@@ -263,12 +267,17 @@
   line-height: 1.15;
 }
 
+/* The same character style as the library's "N photos", which is the other
+   place on the site where a count sits quietly beside a heading. It leads
+   with a number now, so it takes that rule's tabular figures too. */
 .recent__subtitle {
-  /* In flow, below 40rem, the air is an ordinary margin. Same 1rem. */
-  margin: 0 0 1rem;
-  font-size: 0.875rem;
-  font-weight: 600;
+  /* In flow, below 40rem, the air is an ordinary margin. One pixel under a
+     rem; see the note on --recent-subtitle-height. */
+  margin: 0 0 calc(1rem - 1px);
+  font-size: 0.8125rem;
+  font-weight: 400;
   color: var(--fg-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /*
@@ -325,7 +334,7 @@
     /* Everything is border-box, so the flex centring happens in the 1.75rem
        content box and the text stays where it was; the extra rem is opaque
        background between the band and the first row of tiles. */
-    padding-bottom: 1rem;
+    padding-bottom: calc(1rem - 1px);
     margin-bottom: 0;
   }
 

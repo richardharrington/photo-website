@@ -72,7 +72,7 @@ describe('the subtitle', () => {
         }),
         UTC,
       ),
-    ).toBe('photographs from August 2, 2026');
+    ).toBe('3 photos from August 2, 2026');
   });
 
   it('prints the days of a span inside one month', () => {
@@ -81,7 +81,7 @@ describe('the subtitle', () => {
         group({ captureRange: { earliest: '2026-09-01', latest: '2026-09-03' } }),
         UTC,
       ),
-    ).toBe('photographs from September 1–3, 2026');
+    ).toBe('3 photos from September 1–3, 2026');
   });
 
   /**
@@ -95,7 +95,7 @@ describe('the subtitle', () => {
         group({ captureRange: { earliest: '2026-09-01', latest: '2026-09-23' } }),
         UTC,
       ),
-    ).toBe('photographs from September 1–23, 2026');
+    ).toBe('3 photos from September 1–23, 2026');
   });
 
   it('drops to months across one year', () => {
@@ -104,7 +104,7 @@ describe('the subtitle', () => {
         group({ captureRange: { earliest: '1978-03-14', latest: '1978-08-02' } }),
         UTC,
       ),
-    ).toBe('photographs from March–August 1978');
+    ).toBe('3 photos from March–August 1978');
   });
 
   it('names both months and both years across several', () => {
@@ -113,25 +113,43 @@ describe('the subtitle', () => {
         group({ captureRange: { earliest: '1977-03-14', latest: '1978-08-02' } }),
         UTC,
       ),
-    ).toBe('photographs from March 1977 – August 1978');
+    ).toBe('3 photos from March 1977 – August 1978');
   });
 
-  it('appends the undated count when some are undated', () => {
+  /**
+   * The leading count is of the *dated* photographs, not of the sitting: they
+   * are the subject of "from <span>", and the undated ones are not from it.
+   * Ten in the sitting, four of them undated, so six are from the range.
+   */
+  it('counts the dated ones and names the undated separately', () => {
     expect(
       recentSubtitle(
         group({
+          count: 10,
           captureRange: { earliest: '1977-03-14', latest: '1978-08-02' },
           undatedCount: 4,
         }),
         UTC,
       ),
-    ).toBe('photographs from March 1977 – August 1978, and 4 undated');
+    ).toBe('6 photos from March 1977 – August 1978, and 4 undated');
+  });
+
+  it('says one photo, not one photos', () => {
+    expect(
+      recentSubtitle(
+        group({
+          count: 1,
+          captureRange: { earliest: '2026-08-02', latest: '2026-08-02' },
+        }),
+        UTC,
+      ),
+    ).toBe('1 photo from August 2, 2026');
   });
 
   it('says so when everything in the sitting is undated', () => {
-    expect(recentSubtitle(group({ captureRange: null, undatedCount: 3 }), UTC)).toBe(
-      'undated photographs',
-    );
+    expect(
+      recentSubtitle(group({ count: 3, captureRange: null, undatedCount: 3 }), UTC),
+    ).toBe('3 photos, undated');
   });
 });
 
@@ -164,7 +182,7 @@ describe('same-day suppression', () => {
         }),
         'Europe/Berlin',
       ),
-    ).toBe('photographs from September 4, 2026');
+    ).toBe('3 photos from September 4, 2026');
   });
 
   it('keeps the subtitle when one undated photograph is in the sitting', () => {
@@ -177,7 +195,7 @@ describe('same-day suppression', () => {
         }),
         UTC,
       ),
-    ).toBe('photographs from September 4, 2026, and 1 undated');
+    ).toBe('2 photos from September 4, 2026, and 1 undated');
   });
 
   /**
@@ -193,6 +211,6 @@ describe('same-day suppression', () => {
         }),
         UTC,
       ),
-    ).toBe('photographs from September 5–7, 2026');
+    ).toBe('3 photos from September 5–7, 2026');
   });
 });

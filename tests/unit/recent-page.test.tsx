@@ -48,17 +48,18 @@ describe('the recent page', () => {
 
   const timeline = timelineResponse(makeCatalog([holiday, scan]), 'Family Photos', NOW);
 
-  it('heads each sitting with when it arrived and how much it holds', () => {
+  it('heads each sitting with when it arrived, and nothing else', () => {
     page(timeline);
     const heading = screen.getByRole('heading', { level: 2 });
     expect(heading).toHaveTextContent('Added yesterday');
-    expect(heading).toHaveTextContent('2 photos');
+    // The size is stated once, on the line beneath; see recent-labels.ts.
+    expect(heading).not.toHaveTextContent('2 photos');
   });
 
-  it('names the capture span beneath it', () => {
+  it('counts the sitting and names its capture span beneath it', () => {
     page(timeline);
     expect(
-      screen.getByText('photographs from March 1978 – August 2026'),
+      screen.getByText('2 photos from March 1978 – August 2026'),
     ).toBeInTheDocument();
   });
 
