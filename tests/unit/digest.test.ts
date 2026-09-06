@@ -631,23 +631,38 @@ describe('scheduled()', () => {
     expect(errors.mock.calls.map((call) => String(call[0]))).toContain('Digest failed');
   });
 
-  it('sends nothing, and does not throw, on a deployment with no mail configured', async () => {
-    const store = seedStore(CATALOG, stateWith({}));
-    const { binding, sent } = fakeEmail();
-    const { fetchImpl } = fakeFetch([]);
-    vi.spyOn(console, 'log').mockImplementation(() => undefined);
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  /**
+   * Every one of the five is required, none is defaulted. SITE_TITLE is the
+   * one worth pinning: a fallback there would send perfectly good mail under
+   * the wrong name and nothing would report it.
+   */
+  it.each([
+    'EMAIL',
+    'SITE_TITLE',
+    'NOTIFY_FROM',
+    'DISPLAY_SITE_URL',
+    'CLOUDFLARE_ACCOUNT_ID',
+    'CLOUDFLARE_ADDRESSES_READ_TOKEN',
+  ] as const)(
+    'sends nothing, and does not throw, when %s is unset',
+    async (missing) => {
+      const store = seedStore(CATALOG, stateWith({}));
+      const { binding, sent } = fakeEmail();
+      const { fetchImpl } = fakeFetch([]);
+      vi.spyOn(console, 'log').mockImplementation(() => undefined);
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    await worker.scheduled(
-      null,
-      envFor(store, binding, fetchImpl, { DISPLAY_SITE_URL: undefined }),
-    );
+      await worker.scheduled(
+        null,
+        envFor(store, binding, fetchImpl, { [missing]: undefined }),
+      );
 
-    expect(sent).toEqual([]);
-    expect(warn.mock.calls.map((call) => String(call[0]))).toContain(
-      'Notifications are not configured; sending nothing.',
-    );
-  });
+      expect(sent).toEqual([]);
+      expect(warn.mock.calls.map((call) => String(call[0]))).toContain(
+        'Notifications are not configured; sending nothing.',
+      );
+    },
+  );
 });
 
 // A guard on the one thing the whole feature turns on: `verified` arrives as a

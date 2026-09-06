@@ -892,6 +892,19 @@ its ordering, and its URLs are unchanged.
     Someone who had learned that rule and then noticed these two differing
     would have had good reason to "fix" it.
 
+    `SITE_TITLE` moved the same way, from a committed `[vars]` entry in
+    `wrangler.toml` to a fifth Worker secret. The spec put it in the file on
+    the grounds that the value is already public, which answers *is it a
+    secret?* — the wrong question. This repository is public and meant to be
+    forkable, so the test is whether a value is *this installation's*, not
+    whether it is sensitive; a site's own name fails that test however
+    unsecret it is. It is required rather than defaulted, because a Worker
+    falling back to some placeholder would send perfectly good mail under the
+    wrong name and nothing would report it. The three remaining
+    instance-specific values in `wrangler.toml` — the Worker's name and the
+    two bucket names — stay: wrangler needs them literally, there is no
+    interpolation for them, and that file is where a fork edits anyway.
+
 71. **A watermark per recipient, and no global one.** Each address records the
     newest `createdAt` it has been told about. A digest counts what is strictly
     newer, and on success advances to *the newest photograph it counted* —

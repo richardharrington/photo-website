@@ -683,7 +683,7 @@ write-capable one and nothing breaks at all: the digest sends, the test button
 works, no error is logged, and the nightly cron quietly holds the power to
 delete every recipient. Nothing in this system would ever tell you.
 
-### 3. The Worker's four secrets
+### 3. The Worker's five secrets
 
 Take `$DISPLAY_PATH` from `.env` rather than typing it — it is the whole
 access model, and a shell history is not the place for it.
@@ -695,13 +695,36 @@ SITE="https://<your-site>.netlify.app"
 printf '%s' "photos@<your-domain>" | npx wrangler secret put NOTIFY_FROM
 printf '%s' "$SITE/$DISPLAY_PATH"  | npx wrangler secret put DISPLAY_SITE_URL
 printf '%s' "$R2_ACCOUNT_ID"       | npx wrangler secret put CLOUDFLARE_ACCOUNT_ID
+printf '%s' "$SITE_TITLE"          | npx wrangler secret put SITE_TITLE
 
 # Prompted for rather than piped, so it stays out of shell history.
 # Paste the *read-only* token.
 npx wrangler secret put CLOUDFLARE_ADDRESSES_READ_TOKEN
 ```
 
-- [ ] All four set. `DISPLAY_SITE_URL` is the display site's base URL
+- [ ] `SITE_TITLE` must be **the same value you set on Netlify**, or the mail
+      and the website will call the site two different things. It is a secret
+      rather than a committed `[vars]` entry in `wrangler.toml` only so that
+      one installation's name stays out of a repository anyone can fork; there
+      is nothing sensitive about it.
+
+  **Upgrading from a Worker that already has `SITE_TITLE` as a `[vars]`
+  entry?** Then this one command fails, and only this one:
+
+  ```text
+  ✘ [ERROR] Binding name 'SITE_TITLE' already in use. [code: 10053]
+  ```
+
+  A secret cannot take a name a plaintext var already holds. Run step 4's
+  `npx wrangler deploy` **first** — `wrangler.toml` is the source of truth for
+  `[vars]`, so deploying the current file drops `SITE_TITLE` from the var set
+  and frees the name — then come back and set the secret. Nothing else in this
+  section is order-sensitive, and a fresh installation never meets this at all.
+
+  Between those two commands the Worker has no `SITE_TITLE`, so the digest
+  logs `Notifications are not configured; sending nothing.` and skips. Harmless
+  unless you leave it half-done past 04:17 UTC.
+- [ ] All five set. `DISPLAY_SITE_URL` is the display site's base URL
       *including its secret path segment*; the digest links to
       `$DISPLAY_SITE_URL/recent`. Write it without a trailing slash — the
       Worker strips one, so it is harmless, but this value is what every
@@ -716,6 +739,10 @@ npx wrangler secret put CLOUDFLARE_ADDRESSES_READ_TOKEN
 - [ ] `npx wrangler deploy`. This is what registers the `[[send_email]]`
       binding declared in `wrangler.toml`; the secrets above are inert without
       it.
+
+  No second deploy afterwards: `wrangler secret put` creates a new version of
+  the Worker and deploys it itself, so a secret set at any point — before this
+  step or long after it — is live the moment the command returns.
 
 ### 5. Netlify: one variable, then a deploy
 
@@ -745,7 +772,7 @@ npx wrangler secret put CLOUDFLARE_ADDRESSES_READ_TOKEN
       is not new to it (decisions.md #71). Check the link in it opens the
       Recently added view.
 
-  This is the only way to confirm the domain, the binding, the four secrets,
+  This is the only way to confirm the domain, the binding, the five secrets,
   the token, and the link are all right without waiting for 04:17 UTC — and
   without the family receiving the experiment (decisions.md #73).
 
@@ -1160,7 +1187,7 @@ the photo ID the rest of that group uses.
 - [ ] **The same run logs the digest pass.** Beside `Maintenance complete`
       there is a `Digest complete` line with `considered`, `sent`,
       `skippedUnverified`, `skippedDisabled`, `skippedEmpty`, and `failed` —
-      or, on a deployment without the four secrets,
+      or, on a deployment without the five secrets,
       `Notifications are not configured; sending nothing.` Both are
       acceptable; silence is not. Watch it with `npx wrangler tail`.
 

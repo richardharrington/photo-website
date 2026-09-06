@@ -45,6 +45,11 @@ export interface Env {
    * existed.
    */
   EMAIL?: SendEmailLike;
+  /**
+   * The site's name, in the digest's From line and subject. A secret rather
+   * than a committed `[vars]` entry only so that one installation's name stays
+   * out of a repository anyone can fork; it is not sensitive.
+   */
   SITE_TITLE?: string;
   NOTIFY_FROM?: string;
   DISPLAY_SITE_URL?: string;
@@ -265,6 +270,7 @@ function sanitizeForHeader(filename: string): string {
 function digestDeps(env: Env, now: () => Date): DigestDeps | null {
   const missing = [
     ['EMAIL binding', env.EMAIL],
+    ['SITE_TITLE', env.SITE_TITLE],
     ['NOTIFY_FROM', env.NOTIFY_FROM],
     ['DISPLAY_SITE_URL', env.DISPLAY_SITE_URL],
     ['CLOUDFLARE_ACCOUNT_ID', env.CLOUDFLARE_ACCOUNT_ID],
@@ -288,7 +294,9 @@ function digestDeps(env: Env, now: () => Date): DigestDeps | null {
     accountId: env.CLOUDFLARE_ACCOUNT_ID!,
     apiToken: env.CLOUDFLARE_ADDRESSES_READ_TOKEN!,
     from: env.NOTIFY_FROM!,
-    siteTitle: env.SITE_TITLE ?? 'Family Photos',
+    // Required above rather than defaulted: a Worker missing it would send
+    // perfectly good mail under the wrong name, which nothing would report.
+    siteTitle: env.SITE_TITLE!,
     displaySiteUrl: env.DISPLAY_SITE_URL!,
     now,
   };

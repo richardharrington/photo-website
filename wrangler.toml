@@ -39,8 +39,12 @@ preview_bucket_name = "family-photos-dev"
 #                                read-only "Email Routing Addresses Read".
 #                                Netlify holds a separate write-capable token
 #                                under a separate name; never cross them.
+#   SITE_TITLE                   the site's own name, as the digest's From
+#                                display name and in its subject line. Not a
+#                                secret — a secret only so that one
+#                                installation's name stays out of a repository
+#                                anyone can fork. Must match the SITE_TITLE set
+#                                on Netlify, or the mail and the website will
+#                                disagree.
 [vars]
 CATALOG_CACHE_SECONDS = "60"
-# The site's own name, already public in src/display/index.html. It is the
-# digest's From display name and appears in its subject line.
-SITE_TITLE = "Family Photos"
