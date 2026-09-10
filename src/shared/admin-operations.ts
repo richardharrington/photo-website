@@ -57,8 +57,13 @@ export interface CommitInput {
 
 export type CommitOutcome =
   | { status: 'created'; photo: PhotoRecord }
-  /** The same source bytes are already in the catalog, trashed or not. */
-  | { status: 'duplicate'; existingId: string };
+  /**
+   * The same source bytes are already in the catalog, trashed or not — and
+   * which of the two it is decides what the administrator can be shown.
+   * `/photo/<id>` is a 404 for a trashed photo by design, so the upload panel
+   * has to point at the trash instead of offering a link that cannot work.
+   */
+  | { status: 'duplicate'; existingId: string; existingTrashed: boolean };
 
 /**
  * Create the record for a fully uploaded photo.
@@ -77,13 +82,22 @@ export function commitPhoto(
 ): Mutation<CommitOutcome> {
   const duplicate = findByContentHash(catalog, input.contentHash);
   if (duplicate) {
-    return abortMutation({ status: 'duplicate', existingId: duplicate.id });
+    return abortMutation({
+      status: 'duplicate',
+      existingId: duplicate.id,
+      existingTrashed: duplicate.trashedAt !== null,
+    });
   }
 
-  if (catalog.photos[input.id]) {
+  const written = catalog.photos[input.id];
+  if (written) {
     // A retried commit of a photo already written. Report it as the duplicate
     // it is rather than overwriting a record that may since have been edited.
-    return abortMutation({ status: 'duplicate', existingId: input.id });
+    return abortMutation({
+      status: 'duplicate',
+      existingId: input.id,
+      existingTrashed: written.trashedAt !== null,
+    });
   }
 
   const photo: PhotoRecord = {

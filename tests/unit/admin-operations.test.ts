@@ -91,7 +91,11 @@ describe('commitPhoto', () => {
 
     const result = apply(commitPhoto(catalog, commitInput(), NOW, AUDIT));
 
-    expect(result.value).toEqual({ status: 'duplicate', existingId: existing.id });
+    expect(result.value).toEqual({
+      status: 'duplicate',
+      existingId: existing.id,
+      existingTrashed: false,
+    });
     expect(result.catalog).toBeNull();
   });
 
@@ -108,7 +112,13 @@ describe('commitPhoto', () => {
       commitPhoto(makeCatalog([trashed]), commitInput(), NOW, AUDIT),
     );
 
-    expect(result.value).toEqual({ status: 'duplicate', existingId: trashed.id });
+    // The flag is what lets the upload panel point at the trash rather than
+    // at `/photo/<id>`, which is a 404 for a trashed photo.
+    expect(result.value).toEqual({
+      status: 'duplicate',
+      existingId: trashed.id,
+      existingTrashed: true,
+    });
   });
 
   it('does not overwrite a record when the same commit is retried', () => {
@@ -121,7 +131,11 @@ describe('commitPhoto', () => {
 
     const result = apply(commitPhoto(makeCatalog([edited]), input, NOW, AUDIT));
 
-    expect(result.value).toEqual({ status: 'duplicate', existingId: input.id });
+    expect(result.value).toEqual({
+      status: 'duplicate',
+      existingId: input.id,
+      existingTrashed: false,
+    });
     expect(result.catalog).toBeNull();
   });
 
@@ -153,7 +167,11 @@ describe('commitPhoto', () => {
       commitPhoto(catalog, second, NOW, AUDIT),
     );
 
-    expect(outcome).toEqual({ status: 'duplicate', existingId: first.id });
+    expect(outcome).toEqual({
+      status: 'duplicate',
+      existingId: first.id,
+      existingTrashed: false,
+    });
     const stored = store.readJson<Catalog>(R2_KEYS.catalog)!;
     expect(Object.keys(stored.photos)).toEqual([first.id]);
   });

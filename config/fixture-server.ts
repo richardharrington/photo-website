@@ -497,7 +497,11 @@ async function handleAdmin(
         (photo) => photo.contentHash === hash,
       );
       if (existing) {
-        sendJson(res, 200, { status: 'duplicate', existingId: existing.id });
+        sendJson(res, 200, {
+          status: 'duplicate',
+          existingId: existing.id,
+          existingTrashed: existing.trashedAt !== null,
+        });
         return true;
       }
       const photoId = generatePhotoId();
@@ -548,7 +552,11 @@ async function handleAdmin(
         res,
         200,
         outcome.status === 'duplicate'
-          ? { status: 'duplicate', existingId: outcome.existingId }
+          ? {
+              status: 'duplicate',
+              existingId: outcome.existingId,
+              existingTrashed: outcome.existingTrashed,
+            }
           : { status: 'created', photo: toPublicPhoto(outcome.photo) },
       );
       return true;

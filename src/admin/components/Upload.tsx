@@ -69,6 +69,20 @@ const STATE_LABELS: Record<QueueItem['state'], string> = {
   failed: 'Failed',
 };
 
+/**
+ * What a tile says about itself.
+ *
+ * A skipped file whose twin is in the trash is the one state the label alone
+ * gets wrong: "already uploaded" sends the administrator looking for a
+ * photograph the library does not show.
+ */
+function stateLabel(item: QueueItem): string {
+  if (item.state === 'skipped' && item.existingPhotoTrashed) {
+    return 'Already uploaded, now in the trash – skipped';
+  }
+  return STATE_LABELS[item.state];
+}
+
 /** Nothing is selectable here; see the curation below. */
 const NOTHING_SELECTED: ReadonlySet<string> = new Set();
 
@@ -324,7 +338,7 @@ export function UploadPanel({
                         item.state === 'failed' ? 'admin-error' : 'upload__state'
                       }
                     >
-                      {STATE_LABELS[item.state]}
+                      {stateLabel(item)}
                     </span>
                     {isInFlight(item.state) ? (
                       <progress
@@ -334,9 +348,16 @@ export function UploadPanel({
                       />
                     ) : null}
                     {item.state === 'skipped' && item.existingPhotoId ? (
-                      <Link to={routes.photo(item.existingPhotoId)}>
-                        View the existing photo
-                      </Link>
+                      // A trashed photo has no `/photo/<id>` address — that
+                      // route is a 404 by design — so the only honest link is
+                      // to the trash, where it can be found and restored.
+                      item.existingPhotoTrashed ? (
+                        <Link to={routes.trash()}>Find it in the trash</Link>
+                      ) : (
+                        <Link to={routes.photo(item.existingPhotoId)}>
+                          View the existing photo
+                        </Link>
+                      )
                     ) : null}
                     {item.state === 'failed' ? (
                       <>

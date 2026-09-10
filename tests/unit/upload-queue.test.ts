@@ -278,8 +278,27 @@ describe('duplicates', () => {
 
     expect(snapshot.items[0]!.state).toBe('skipped');
     expect(snapshot.items[0]!.existingPhotoId).toBe('existing-photo');
+    expect(snapshot.items[0]!.existingPhotoTrashed).toBe(false);
     expect(snapshot.items[0]!.error).toBeUndefined();
     expect(snapshot.counts.failed).toBe(0);
+  });
+
+  it('records that the file it matched is in the trash', async () => {
+    // `/photo/<id>` is a 404 for a trashed photo, so the panel needs to know
+    // it must offer the trash instead of a link that cannot resolve.
+    const { deps } = makeDeps({
+      prepare: vi.fn(async () => ({
+        status: 'duplicate' as const,
+        existingId: 'trashed-photo',
+        existingTrashed: true,
+      })),
+    });
+
+    const queue = new UploadQueue(deps);
+    const snapshot = await drain(queue, [fakeFile('a')]);
+
+    expect(snapshot.items[0]!.state).toBe('skipped');
+    expect(snapshot.items[0]!.existingPhotoTrashed).toBe(true);
   });
 
   it('uploads nothing for a duplicate', async () => {

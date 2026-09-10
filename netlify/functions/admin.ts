@@ -213,7 +213,11 @@ async function handlePrepare(request: Request): Promise<Response> {
   const { catalog } = await loadCatalog(store(), nowIso);
   const existing = findByContentHash(catalog, body.contentHash);
   if (existing) {
-    return json({ status: 'duplicate', existingId: existing.id });
+    return json({
+      status: 'duplicate',
+      existingId: existing.id,
+      existingTrashed: existing.trashedAt !== null,
+    });
   }
 
   const photoId = generatePhotoId();
@@ -309,7 +313,11 @@ async function handleCommit(request: Request): Promise<Response> {
   );
 
   if (outcome.status === 'duplicate') {
-    return json({ status: 'duplicate', existingId: outcome.existingId });
+    return json({
+      status: 'duplicate',
+      existingId: outcome.existingId,
+      existingTrashed: outcome.existingTrashed,
+    });
   }
 
   await writeAuditEvent(

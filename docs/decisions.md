@@ -987,3 +987,19 @@ its ordering, and its URLs are unchanged.
     trash from emptying, and vice versa. A deployment with no domain, no send
     binding, or missing secrets logs one line and sends nothing rather than
     throwing into the pass beside it.
+
+77. **A duplicate already in the trash offered a link that 404ed.** Re-dropping
+    a file is the documented way to resume a batch (#7), and a photograph
+    already in the catalog is skipped with a link to it. But hash matching
+    deliberately sees trashed photos too — otherwise the same bytes would land
+    twice — and `/photo/<id>` for a trashed photo is a 404 by design, so the
+    one case where the administrator most needs to be told something is the
+    case where the tile said "Already uploaded" and the link led nowhere.
+
+    Both duplicate answers, the advisory one from `prepare` and the
+    authoritative one from inside the commit's conditional write, now carry
+    `existingTrashed`. A trashed twin says so on the tile and links to the
+    trash, where the photograph can be found and restored. There is no deep
+    link to a trashed photograph and there should not be one — the trash's
+    photo view is local state for the reason recorded on `TrashPage` — so the
+    listing is the honest destination.

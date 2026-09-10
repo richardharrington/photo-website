@@ -55,6 +55,8 @@ function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> 
 export interface PrepareResult {
   status: 'duplicate' | 'ready';
   existingId?: string;
+  /** Set with `existingId`: the duplicate is in the trash, not the library. */
+  existingTrashed?: boolean;
   photoId?: string;
   downloadFilename?: string;
   uploads?: Record<Rendition, string>;
@@ -63,6 +65,8 @@ export interface PrepareResult {
 export interface CommitResult {
   status: 'created' | 'duplicate';
   existingId?: string;
+  /** Set with `existingId`: the duplicate is in the trash, not the library. */
+  existingTrashed?: boolean;
   photo?: PublicPhoto;
 }
 

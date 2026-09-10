@@ -82,6 +82,11 @@ export interface QueueItem {
   preview: PendingPreview | null;
   /** Set for `skipped`: the photo already in the catalog. */
   existingPhotoId?: string;
+  /**
+   * Set for `skipped`: that photo is in the trash rather than the library, so
+   * it has no `/photo/<id>` address and the panel points at the trash.
+   */
+  existingPhotoTrashed?: boolean;
   /** Set for `done`. */
   photoId?: string;
   /** Set for `failed`, and shown to the administrator. */
@@ -398,6 +403,7 @@ export class UploadQueue {
           state: 'skipped',
           progress: 1,
           existingPhotoId: prepared.existingId!,
+          existingPhotoTrashed: prepared.existingTrashed === true,
         });
         return;
       }
@@ -452,6 +458,7 @@ export class UploadQueue {
           state: 'skipped',
           progress: 1,
           existingPhotoId: result.existingId!,
+          existingPhotoTrashed: result.existingTrashed === true,
         });
         return;
       }
