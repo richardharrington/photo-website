@@ -5,10 +5,10 @@
  * and caption stay per-photo (design.md), so the selection never has to
  * survive a form or describe anything but a set of IDs.
  *
- * Selecting in the grid is by modifier-click only: a plain click opens the
- * photo view, which is what a click has always done there. Marquee dragging
- * is deliberately absent — it was tried, it never worked, and it is not needed
- * to reach any action.
+ * Selecting in the grid is what a plain click does: click selects, double-click
+ * opens, and the two modifiers below reach the same ranges every file manager
+ * teaches. Marquee dragging is deliberately absent — it was tried, it never
+ * worked, and it is not needed to reach any action.
  *
  * One selection covers the whole library, not one day: a shift-range runs
  * across day, month, and year boundaries in timeline order, and the selection
@@ -63,15 +63,21 @@ export function extendTo(
 }
 
 /**
- * Nothing selected, but this photo is where the next shift-click starts.
+ * A plain click: the selection becomes this photograph alone — unless it is
+ * already selected, in which case the selection is left exactly as it is.
  *
- * A plain click opens the photo view and clears the selection, and it is
- * still the "you are here" every file manager measures a range from. Without
- * this the commonest gesture of all — click one photo, shift-click another —
- * found no anchor and selected a single tile.
+ * That idempotency is load-bearing, not tidiness. A double-click fires click,
+ * click, dblclick; the second click lands on a photo the first one selected,
+ * so it does nothing, and opening on a double-click therefore needs no timer
+ * and no snapshot of the selection to restore. Do not "simplify" it into a
+ * toggle, which would deselect the photo on every double-click.
+ *
+ * The anchor moves either way. The click still says "you are here", which is
+ * what a following shift-click measures from (decisions.md #35).
  */
-export function anchorOn(id: string): SelectionState {
-  return { ids: new Set(), anchorId: id };
+export function selectOnly(state: SelectionState, id: string): SelectionState {
+  if (state.ids.has(id)) return { ids: state.ids, anchorId: id };
+  return { ids: new Set([id]), anchorId: id };
 }
 
 export function selectAll(orderedIds: readonly string[]): SelectionState {

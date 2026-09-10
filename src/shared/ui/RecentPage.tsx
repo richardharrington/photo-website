@@ -20,6 +20,7 @@ import { routes } from './api.ts';
 import { Layout } from './Layout.tsx';
 import { Empty, ErrorState, Loading } from './States.tsx';
 import { PhotoGrid } from './PhotoGrid.tsx';
+import { SelectionHelp } from './SelectionHelp.tsx';
 import { SelectAll } from './SelectAll.tsx';
 import { scrollToElementId, takeScrollRequest } from './scroll.ts';
 import { indexTimeline } from './timeline-index.ts';
@@ -121,6 +122,11 @@ export function RecentPage({
   return (
     <Layout isHome nav={nav}>
       {above}
+      {/* Nothing at all in the viewer; see SelectionHelp. */}
+      <SelectionHelp>
+        Click a photo to select it. Double-click — or, on a touchscreen, press and hold
+        — to open it.
+      </SelectionHelp>
       {/* Never a 404: this is a fixed part of the site, like the Undated
           section, so an empty one says so rather than disappearing. A family
           member who followed the toggle deserves an answer, and "nothing

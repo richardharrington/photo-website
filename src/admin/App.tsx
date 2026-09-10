@@ -18,6 +18,7 @@ import { CurationContext } from '../shared/ui/curation.ts';
 import type { Curation, PhotoEdit } from '../shared/ui/curation.ts';
 import { removePhotos, upsertPhoto } from '../shared/timeline-patch.ts';
 import { nextAfterDeleting } from './advance.ts';
+import { useDeselectGestures } from './deselect.ts';
 import { adminApi, routes } from './api.ts';
 import type { PreviewResult } from './api.ts';
 import { Confirm, UndoBanner } from './components/Confirm.tsx';
@@ -27,11 +28,11 @@ import { NotificationsPage } from './components/NotificationsPage.tsx';
 import { UploadPanel } from './components/Upload.tsx';
 import {
   addAll,
-  anchorOn,
   EMPTY_SELECTION,
   extendTo,
   pruneToVisible,
   selectedIds,
+  selectOnly,
   toggle,
 } from './selection.ts';
 import type { SelectionState } from './selection.ts';
@@ -142,6 +143,10 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const dismissUndo = useCallback(() => setUndo(null), []);
 
+  // Escape, and a click on the page margins, are the two ways out of a
+  // selection now that a plain click makes one rather than clearing it.
+  useDeselectGestures(useCallback(() => setSelection(EMPTY_SELECTION), []));
+
   /**
    * Which listing the reader is standing in. The Recently Uploaded view is
    * the family's page plus full curation, so everything below works there
@@ -244,17 +249,17 @@ export function App() {
   const curation = useMemo<Curation>(
     () => ({
       selectedIds: visible.ids,
-      // A plain click clears the selection and stays the anchor, the way it
-      // does in a file manager: it is the one gesture that always gets out of
-      // a selection gone wrong, and a shift-click after it reaches back to the
-      // photo now open.
-      anchorOn: (id) => setSelection(anchorOn(id)),
+      // A plain click narrows the selection to this photograph and stays the
+      // anchor, the way it does in a file manager: it is the one gesture that
+      // always gets out of a selection gone wrong, and a shift-click after it
+      // reaches back to the photo just clicked.
+      selectOnly: (id) => setSelection((state) => selectOnly(state, id)),
       toggle: (id) => setSelection(toggle(visible, id)),
       extendTo: (id) => setSelection(extendTo(visible, orderedIds, id)),
       selectAll: (ids) => setSelection((state) => addAll(state, ids)),
       trash: (id) => void startTrash({ kind: 'ids', photoIds: [id] }, id),
       edit: saveEdit,
-      can: { edit: true, download: true, trash: true },
+      can: { edit: true, download: true, trash: true, select: true },
     }),
     // startTrash and saveEdit read the current render's `data` and
     // `orderedIds`, which is what these dependencies stand for.

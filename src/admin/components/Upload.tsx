@@ -222,11 +222,16 @@ export function UploadPanel({
    * same reason. What is left is the one thing these tiles exist for, which
    * the queue applies to the commit or to the stored photo depending on where
    * the file has got to.
+   *
+   * `select: false` is therefore what keeps these tiles opening on a single
+   * click while the library's tiles below them select — the one place on the
+   * page where the two rules differ, accepted because a selection here could
+   * do nothing at all (decisions.md #36).
    */
   const curation = useMemo<Curation>(
     () => ({
       selectedIds: NOTHING_SELECTED,
-      anchorOn: () => {},
+      selectOnly: () => {},
       toggle: () => {},
       extendTo: () => {},
       selectAll: () => {},
@@ -238,7 +243,7 @@ export function UploadPanel({
         if (item.photoId) void onLibraryChanged();
         return pendingPhoto(item);
       },
-      can: { edit: true, download: false, trash: false },
+      can: { edit: true, download: false, trash: false, select: false },
     }),
     [queue, onLibraryChanged],
   );

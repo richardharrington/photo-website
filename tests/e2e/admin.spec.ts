@@ -156,7 +156,7 @@ test.describe('the admin timeline', () => {
 
     // One photograph fills the screen; a drop target pinned over it would be
     // inviting a drop onto a view that is not the library.
-    await page.locator('.photo-grid__link').first().click();
+    await page.locator('.photo-grid__link').first().dblclick();
     await expect(page.locator('.lightbox')).toBeVisible();
     await expect(target).toBeHidden();
 
@@ -242,18 +242,63 @@ test.describe('selecting', () => {
     await expect(selected(page)).toHaveCount(0);
   });
 
-  test('a plain click clears the selection and opens the photo', async ({ page }) => {
+  test('a plain click selects the photo and opens nothing', async ({ page }) => {
     await page.goto(`${BASE}/2026/08/02`);
     const grid = tiles(page, '#d-2026-08-02');
     await grid.nth(3).click({ modifiers: ['ControlOrMeta'] });
     await expect(selected(page)).toHaveCount(1);
 
-    // The way out of a selection that caught the wrong photos.
+    // Still the way out of a selection that caught the wrong photos — it
+    // collapses onto the one photo clicked — but the photo view stays shut.
     await grid.nth(0).click();
+    await expect(selected(page)).toHaveCount(1);
+    await expect(grid.nth(0)).toHaveAttribute('data-selected', 'true');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page).toHaveURL(`${BASE}/2026/08/02`);
 
-    await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page).toHaveURL(`${BASE}/photo/${FIXTURE_PHOTO_IDS['beach-early']}`);
+    // Escape is the keyboard's way out, now that a click no longer clears.
     await page.keyboard.press('Escape');
+    await expect(selected(page)).toHaveCount(0);
+  });
+
+  test('a double-click opens the photo and leaves the selection alone', async ({
+    page,
+  }) => {
+    await page.goto(`${BASE}/2026/08/02`);
+    const grid = tiles(page, '#d-2026-08-02');
+    const bar = page.getByRole('toolbar', { name: 'Selection' });
+
+    await grid.nth(0).click();
+    await grid.nth(2).click({ modifiers: ['Shift'] });
+    await expect(bar).toContainText('3 selected');
+
+    // Into the middle of a range built on purpose. Both clicks of the
+    // double-click land on a photo the first one had already selected, which is
+    // why no timer and no snapshot of the selection is needed.
+    await grid.nth(1).dblclick();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page).toHaveURL(`${BASE}/photo/${FIXTURE_PHOTO_IDS['beach-burst-a']}`);
+    await expect(bar).toContainText('3 selected');
+
+    // Arrowing to another photograph and closing leave it exactly as it was:
+    // the highlight answers what a bulk action would hit, which is a different
+    // question from what is on screen.
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(bar).toContainText('3 selected');
+    await expect(selected(page)).toHaveCount(3);
+  });
+
+  test('a click on the page background clears the selection', async ({ page }) => {
+    await page.goto(`${BASE}/2026/08/02`);
+    await tiles(page, '#d-2026-08-02').nth(1).click();
+    await expect(selected(page)).toHaveCount(1);
+
+    // The margins either side of the grid, not the empty space inside the
+    // masonry columns, which belongs to no tile and is not dependable. Sent to
+    // the element itself, because where those margins are depends on the window.
+    await page.locator('.layout__main').evaluate((main: HTMLElement) => main.click());
     await expect(selected(page)).toHaveCount(0);
   });
 });
@@ -361,11 +406,11 @@ test.describe('deleting a selection', () => {
 });
 
 test.describe('the admin photo view', () => {
-  /** Open the first photo of the scratch day. */
+  /** Open the first photo of the scratch day. A double-click, as in the app. */
   async function openFirst(page: Page) {
     const { anchor, path } = scratch();
     await page.goto(path);
-    await tiles(page, anchor).first().click();
+    await tiles(page, anchor).first().dblclick();
     await expect(page.getByRole('dialog')).toBeVisible();
   }
 
@@ -483,7 +528,7 @@ test.describe('the admin photo view', () => {
     await expect(page.locator(`#d-${moved}`)).toContainText(files[0]!);
 
     // Put the fixture back.
-    await tiles(page, `#d-${moved}`).first().click();
+    await tiles(page, `#d-${moved}`).first().dblclick();
     await page.getByLabel('Capture date').fill(day);
     await page.getByLabel('Capture time').fill('21:03:11');
     await page.getByLabel('Caption').fill('First rocket up.');
@@ -664,7 +709,7 @@ test.describe('adding photographs', () => {
       .filter({ hasText: uploadFile });
     await expect(landed).toHaveCount(1);
 
-    await landed.locator('.photo-grid__link').click();
+    await landed.locator('.photo-grid__link').dblclick();
     await expect(page.getByLabel('Caption')).toHaveValue('Typed on the way up.');
 
     // Put the fixture back the way it was found: out of the library, and out
@@ -709,7 +754,7 @@ test.describe('the trash', () => {
       .locator('.photo-grid__item')
       .filter({ hasText: trashedFile })
       .locator('.photo-grid__link')
-      .click();
+      .dblclick();
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
@@ -763,7 +808,7 @@ test.describe('the trash', () => {
       .locator(`${anchor} .photo-grid__item`)
       .filter({ hasText: trashedFile })
       .locator('.photo-grid__link')
-      .click();
+      .dblclick();
     await page.getByRole('button', { name: 'Delete', exact: true }).click();
     await confirmDelete(page);
     await expect(page.getByRole('status')).toContainText('1 photo deleted.');
@@ -813,8 +858,10 @@ test.describe('the recent view in the admin', () => {
     const grid = page.locator('.recent__group .photo-grid__link');
     await expect(page.locator('.photo-grid__filename').first()).toBeVisible();
 
-    await grid.nth(0).click();
-    // A plain click opens the photo view; close it and the anchor remains.
+    // A double-click opens the photo view, and it collapses the selection onto
+    // the photo it opened on the way; close it and that tile is still the
+    // anchor a shift-click measures from.
+    await grid.nth(0).dblclick();
     await page.getByRole('link', { name: /Lightbox/ }).click();
     await expect(page).toHaveURL(new RegExp(`${BASE}/recent$`));
 

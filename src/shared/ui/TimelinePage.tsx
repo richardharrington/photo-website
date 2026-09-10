@@ -24,6 +24,7 @@ import { Layout } from './Layout.tsx';
 import { Empty, ErrorState, Loading, NotFound } from './States.tsx';
 import { PhotoGrid } from './PhotoGrid.tsx';
 import { SelectAll } from './SelectAll.tsx';
+import { SelectionHelp } from './SelectionHelp.tsx';
 import { scrollToElementId, takeScrollRequest } from './scroll.ts';
 import type { TimelineMonth, TimelineResponse, TimelineYear } from '../display-api.ts';
 
@@ -205,6 +206,11 @@ export function TimelinePage({ resource, target, nav, above }: TimelinePageProps
   return (
     <Layout isHome nav={nav}>
       {above}
+      {/* Nothing at all in the viewer; see SelectionHelp. */}
+      <SelectionHelp>
+        Click a photo to select it. Double-click — or, on a touchscreen, press and hold
+        — to open it.
+      </SelectionHelp>
       <div className="timeline">
         {timeline.years.map((year) => (
           <section

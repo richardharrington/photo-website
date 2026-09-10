@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useResource } from '../../shared/ui/useResource.ts';
 import { Layout } from '../../shared/ui/Layout.tsx';
@@ -12,15 +12,16 @@ import { formatCaptureDate } from '../../shared/datetime.ts';
 import { TRASH_RETENTION_DAYS } from '../../shared/constants.ts';
 import { adminApi, routes } from '../api.ts';
 import type { PreviewResult, TrashItem, TrashListing } from '../api.ts';
+import { useDeselectGestures } from '../deselect.ts';
 import { Confirm } from './Confirm.tsx';
 import { SelectionBar } from './SelectionBar.tsx';
 import {
   addAll,
-  anchorOn,
   EMPTY_SELECTION,
   extendTo,
   pruneToVisible,
   selectedIds,
+  selectOnly,
   toggle,
 } from '../selection.ts';
 import type { SelectionState } from '../selection.ts';
@@ -71,6 +72,9 @@ export function TrashPage({
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // The same two ways out of a selection the library has; see `deselect.ts`.
+  useDeselectGestures(useCallback(() => setSelection(EMPTY_SELECTION), []));
 
   const resource = useResource<TrashListing>(
     (signal) => adminApi.trash(signal),
@@ -136,14 +140,16 @@ export function TrashPage({
 
   /**
    * Read-only curation: the same selection gestures as the library, and
-   * nothing that edits or trashes. The three capabilities are what tell the
+   * nothing that edits or trashes. The four capabilities are what tell the
    * shared photo view to show no form, no Download, and no Delete, so the two
-   * callbacks below are unreachable rather than merely unused.
+   * callbacks below are unreachable rather than merely unused. Selecting is
+   * the one thing left, because Restore and Delete permanently both act on a
+   * selection.
    */
   const curation = useMemo<Curation>(
     () => ({
       selectedIds: visible.ids,
-      anchorOn: (id) => setSelection(anchorOn(id)),
+      selectOnly: (id) => setSelection((state) => selectOnly(state, id)),
       toggle: (id) => setSelection(toggle(visible, id)),
       extendTo: (id) => setSelection(extendTo(visible, ids, id)),
       selectAll: (all) => setSelection((state) => addAll(state, all)),
@@ -151,7 +157,7 @@ export function TrashPage({
         // Unreachable: `can.trash` is false, so no Delete button and no key.
       },
       edit: () => Promise.reject(new Error('A trashed photo cannot be edited.')),
-      can: { edit: false, download: false, trash: false },
+      can: { edit: false, download: false, trash: false, select: true },
     }),
     // Both are recomputed only when the listing itself changes.
     [visible, ids],
@@ -186,7 +192,8 @@ export function TrashPage({
       <Layout nav={nav}>
         <p className="trash__intro">
           Deleted photos are kept for {TRASH_RETENTION_DAYS} days, then removed
-          automatically.
+          automatically. Click a photo to select it for Restore or Delete permanently;
+          double-click — or, on a touchscreen, press and hold — to look at it.
         </p>
 
         {error ? (

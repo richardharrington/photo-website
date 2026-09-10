@@ -10,12 +10,12 @@ import { useCuration } from './curation.ts';
  *
  * Absent, never disabled, once the whole group is already selected: a control
  * that can do nothing is not shown at all (decisions.md #36). It renders
- * nothing at all without a curation context, which is how the viewer's
- * headings stay exactly as they were.
+ * nothing at all without a curation context that selects, which is how the
+ * viewer's headings stay exactly as they were.
  */
 export function SelectAll({ ids }: { ids: readonly string[] }) {
   const curation = useCuration();
-  if (!curation || ids.length === 0) return null;
+  if (!curation?.can.select || ids.length === 0) return null;
   if (ids.every((id) => curation.selectedIds.has(id))) return null;
 
   return (

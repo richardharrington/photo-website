@@ -394,17 +394,32 @@ path, and everything below applies on top of the display site's rules.
   next photo (or the previous at the end, or closes if none remain). A
   brief Undo appears and lasts five seconds regardless of what the admin
   does in the meantime.
-- Selection is by modifier-click (Command, or Control away from a Mac) and
-  shift-click, which extends from the last photo modifier-clicked across
-  any day, month, or year boundary. A plain click opens the photo view and
-  clears the selection. There is no marquee dragging. Each day heading
-  carries a **Select all** for that day, shown only while one of its photos
-  is unselected; it adds to the selection rather than replacing it, and
-  there is no library-wide Select all. While anything is selected a bar
-  pinned to the top of the page shows the count, **Delete selected**, and
-  **Deselect all**; it is absent otherwise. No selection control is ever
-  shown disabled. Bulk delete is the only bulk action; date, time, and
-  caption are per-photo.
+- In the admin's listings — the library, Recently added, and the trash — a
+  plain click on a photograph **selects** it and nothing else; a
+  **double-click** opens the photo view. On the keyboard, Enter opens and
+  Space selects; on a touchscreen, a tap selects and a press-and-hold opens.
+  A click on an already-selected photograph leaves the selection exactly as
+  it is, which is why a double-click can open a photograph out of a
+  selection of five and leave all five marked. Each listing says the gesture
+  in a line of its own, and each tile carries it as a tooltip.
+- Modifier-click (Command, or Control away from a Mac) toggles one
+  photograph, and shift-click extends from the last photo clicked across any
+  day, month, or year boundary, adding to the selection rather than
+  replacing it. Every click moves the point a shift-click measures from,
+  including a plain one. There is no marquee dragging. Escape clears the
+  selection, and so does a click on the page margins either side of the
+  grid. Each day heading carries a **Select all** for that day, shown only
+  while one of its photos is unselected; it adds to the selection rather than
+  replacing it, and there is no library-wide Select all. While anything is
+  selected a bar pinned to the top of the page shows the count, **Delete
+  selected**, and **Deselect all**; it is absent otherwise. No selection
+  control is ever shown disabled. Bulk delete is the only bulk action; date,
+  time, and caption are per-photo.
+- The photo view never touches the selection: open a photograph, arrow to
+  another, close, and the selection and its anchor are what they were. The
+  files still on their way up are the one exception to the click rule — they
+  have nothing to select, so their tiles open on a single click, on the same
+  screen as the library's below them.
 - After an edit or a delete the page updates in place from the server's
   reply and quietly refetches the library afterwards, so the page never
   waits on a reload and never stays out of step for long.

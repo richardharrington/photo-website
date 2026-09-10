@@ -26,8 +26,12 @@ export interface PhotoEdit {
 export interface Curation {
   /** Photos a bulk action would cover, pruned to what is on the page. */
   selectedIds: ReadonlySet<string>;
-  /** Plain click: clear the selection and make this tile the anchor. */
-  anchorOn(id: string): void;
+  /**
+   * Plain click: this photograph alone, unless it is already selected, in
+   * which case the selection is left as it is. The anchor moves either way.
+   * See `selectOnly` in the admin's `selection.ts` for why that matters.
+   */
+  selectOnly(id: string): void;
   /** Modifier-click. */
   toggle(id: string): void;
   /** Shift-click. */
@@ -43,24 +47,31 @@ export interface Curation {
 }
 
 /**
- * What the photo view may do with the photographs a context covers.
+ * What a context may do with the photographs it covers.
  *
- * Three of them rather than one `readOnly` flag, because the three listings
+ * Four of them rather than one `readOnly` flag, because the three listings
  * that provide a context do not agree along a single axis. The library allows
- * all three. The trash allows none: a trashed photo has no download of any
- * kind, and its own bar owns Restore and Delete permanently. A photograph
- * still being uploaded allows editing and nothing else — it is exactly the
- * point of showing it early that its date and caption can be typed before it
- * lands — but it has no stored bytes to download and no catalog record to
- * trash.
+ * all four. The trash allows only `select`: a trashed photo has no download of
+ * any kind and no edit, and its own bar owns Restore and Delete permanently,
+ * both of which act on a selection. A photograph still being uploaded allows
+ * editing and nothing else — it is exactly the point of showing it early that
+ * its date and caption can be typed before it lands — but it has no stored
+ * bytes to download, no catalog record to trash, and no bulk action to be
+ * selected for.
+ *
+ * `select` is what decides a tile's gestures: where it is true a plain click
+ * selects and a double-click opens, and where it is false a plain click opens,
+ * as it always did. None of the four is optional, so adding one visits every
+ * call site and no listing inherits a default.
  *
  * The viewer provides no context at all, and gets the download it has always
- * had; only `edit` and `trash` are admin-only by nature.
+ * had; only `edit`, `trash` and `select` are admin-only by nature.
  */
 export interface Capabilities {
   edit: boolean;
   download: boolean;
   trash: boolean;
+  select: boolean;
 }
 
 export const CurationContext = createContext<Curation | null>(null);

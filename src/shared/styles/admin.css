@@ -248,10 +248,19 @@ button.photo-grid__link {
 
 /* Selected for a bulk delete: a wash over the thumbnail as well as a border,
    because a selection has to be readable at a glance across many tiles. The
-   border is transparent until then, so nothing shifts when a tile is marked. */
+   border is transparent until then, so nothing shifts when a tile is marked.
+
+   `user-select` because a double-click opens a photograph here, and without it
+   every open would also highlight the filename caption under the thumbnail.
+   `-webkit-touch-callout` because a long-press opens one, and iOS would raise
+   its own link-and-image sheet over the gesture. Neither is in the viewer's
+   stylesheet: neither gesture exists there. Panning is deliberately left
+   alone — no `touch-action` — because the grid has to keep scrolling. */
 .photo-grid__link {
   position: relative;
   border: 2px solid transparent;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .photo-grid__link--selected {
@@ -263,6 +272,14 @@ button.photo-grid__link {
   position: absolute;
   inset: 0;
   background: color-mix(in srgb, var(--focus) 25%, transparent);
+}
+
+/* The line that teaches the gesture. Only the admin renders it — the viewer's
+   tiles have nothing to select — so it lives here and not in display.css. */
+.selection-help {
+  margin: 0 0 var(--space);
+  color: var(--fg-muted);
+  font-size: 0.9375rem;
 }
 
 /* Select all, and the sticky bar ------------------------------------------ */

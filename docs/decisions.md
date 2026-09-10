@@ -1003,3 +1003,90 @@ its ordering, and its URLs are unchanged.
     link to a trashed photograph and there should not be one — the trash's
     photo view is local state for the reason recorded on `TrashPage` — so the
     listing is the honest destination.
+
+78. **Click selects, double-click opens.** This supersedes the click rule in
+    #35 and #48 — the way #48 amends #35 — and leaves the rest of both
+    standing. In the admin's three selecting listings a plain click on a tile
+    now *selects* the photograph and never opens it; a double-click opens the
+    photo view. Modifier-click and shift-click are exactly as #35 left them.
+
+    The old rule was the odd one out. Every file manager and photo manager on
+    both platforms teaches click-to-select and double-click-to-open, and this
+    app made a plain click the *destructive* gesture — it cleared the selection
+    — while selection itself was reachable only through a modifier most people
+    never try.
+
+    **No timer, and that is the interesting part.** A double-click fires click,
+    click, dblclick, so the selection is applied on the first click and the
+    second lands on a photograph the first one just selected. `selectOnly` is
+    therefore idempotent: on a photo already in the selection it returns the
+    same set and only moves the anchor. That one property is what makes the
+    whole design free — nothing waits to find out whether a second click is
+    coming, and no selection has to be snapshotted and put back. It is
+    load-bearing, not tidiness, and turning it into a toggle would deselect the
+    photograph on the second click of every double-click. Rejected: delaying the
+    selection until the double-click window closes, which puts 300ms or more of
+    lag on the commonest gesture on the page against a 100ms bar for reading as
+    instantaneous. Rejected: applying the selection and undoing it on `dblclick`,
+    which flashes a selection about to be taken back. Accepted knowingly:
+    double-clicking a photograph that is *not* already selected collapses the
+    selection onto it before opening, which is what Finder, Explorer, Photos and
+    Lightroom all do. The case that matters — double-clicking *into* a
+    multi-selection built on purpose — is fully protected.
+
+    The anchor moves on every plain click, the idempotent one included: the
+    click still says "you are here", and that is what a following shift-click
+    measures from. Where a plain click lands inside a whole selected range,
+    #35's additive shift-click means the range is unchanged and only the anchor
+    moved — the one case where "the anchor moves" narrows nothing visible.
+
+    **`select` became a fourth capability** beside `edit`, `download` and
+    `trash`, for the reason `Capabilities` already had three rather than one
+    `readOnly` flag: the listings do not differ along a single axis. The library
+    and Recently added have all four, the trash has only `select` — Restore and
+    Delete permanently both act on a selection — and the upload panel has
+    `edit` alone. Required rather than optional, so adding it visited all three
+    call sites at compile time and no listing inherited a default. Rejected: a
+    prop on `PhotoGrid`, which would give two mechanisms for saying what a
+    listing can do; rejected: inferring it from a stubbed curation, which makes
+    a stub indistinguishable from a listing with nothing selected right now.
+
+    **The upload panel keeps the old rule on the same screen as the new one.** A
+    pending tile opens on one click; a library tile below it selects. Accepted:
+    they sit under their own headings, every pending tile carries a progress bar
+    and a state label, and the alternative is a selection that can do nothing,
+    which #36 exists to prevent.
+
+    Enter opens and Space selects, so the tiles stay real anchors with real
+    `href`s and a photograph's URL stays copyable and middle-clickable —
+    `<button>`s would have discarded that. Both keys reach `onClick` as a click
+    with `detail === 0`, which is how that handler tells a keyboard from a
+    mouse and stands aside; without that test Enter on a trash tile would select
+    instead of opening. On touch a tap selects and a press of about 500ms opens
+    (double-tap is not available — it fights the browser's zoom gesture), and
+    the press is abandoned on drift past a slop radius, on `pointerup`, on
+    `pointercancel`, and on any scroll: the grid is one page years long, and a
+    press that becomes a scroll and opens a photograph is the failure that makes
+    long-press feel broken.
+
+    Escape clears the selection, and so does a click on the page margins either
+    side of the grid — not the empty space inside the masonry columns, which #35
+    notes is not dependable. Both stand down while any dialog is up, because
+    Escape dismisses the innermost thing open (#43) and clearing the selection
+    behind a delete confirmation would empty the very thing the dialog is asking
+    about. The photo view itself never touches the selection: open, arrow away,
+    close, and the selection and anchor are what they were. Accepted
+    consequence: `close()` scrolls to the photograph *currently shown*, so after
+    arrowing from one photo to another you land scrolled to the second with the
+    first still highlighted — the highlight answers what a bulk action would
+    hit, which is a different question from what is on screen.
+
+    **The Select-all consequence is accepted as it stands.** A day heading's
+    Select all followed by one stray plain click collapses the whole day to one
+    photograph, with no undo. #35 calls that a feature — "a range that caught
+    too much is always one plain click from being started over" — and it stays
+    true, but that click used to open a photo too, which made it a deliberate
+    act, and now it is the lightest gesture on the page. No confirmation and no
+    undo were added; Escape and the background click clear rather than restore.
+    The selection bar is now up almost all the time, which is itself the
+    confirmation that a click registered — the tile wash alone is easy to miss.
