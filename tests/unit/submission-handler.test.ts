@@ -92,10 +92,19 @@ function rawMessage(options: {
   subject?: string | null;
   text?: string | null;
   parts?: { filename: string; contentType: string; bytes: Uint8Array }[];
+  /** Every Authentication-Results header, in order, as Cloudflare prepends
+   *  its own above whatever the sender attached. */
+  auth?: readonly string[];
+  from?: string;
 }): string {
   const boundary = 'boundary-abc';
   const lines = [
-    `From: Aunt Mary <${SENDER}>`,
+    // Cloudflare prepends its results above everything the sender sent, so
+    // these come first — which is the whole reason only the first counts.
+    ...(options.auth ?? [PASSING_AUTH]).map(
+      (value) => `Authentication-Results: ${value}`,
+    ),
+    options.from ?? `From: Aunt Mary <${SENDER}>`,
     `To: ${SUBMIT}`,
     ...(options.subject === undefined || options.subject === null
       ? []
@@ -149,27 +158,27 @@ interface FakeMessage extends EmailMessageLike {
   rejections: string[];
 }
 
+/**
+ * A message as the runtime hands one over: an envelope, and a stream of raw
+ * bytes.
+ *
+ * Deliberately **no `headers` object**. The real one cannot return repeated
+ * headers — `getAll` throws for every name but `Set-Cookie` — and a fake that
+ * offered a working `getAll` is precisely what let that ship broken. Every
+ * header the handler reads comes out of `raw`, here as in production.
+ */
 function message(options: {
   to?: string;
+  /** The **envelope** sender. The header From lives in the raw message. */
   from?: string;
-  auth?: readonly string[];
   raw?: string;
 }): FakeMessage {
   const raw = options.raw ?? rawMessage({ subject: 'Beach day', parts: [] });
-  const authHeaders = options.auth ?? [PASSING_AUTH];
   const rejections: string[] = [];
 
   return {
     from: options.from ?? SENDER,
     to: options.to ?? SUBMIT,
-    headers: {
-      get: (name) =>
-        name.toLowerCase() === 'authentication-results'
-          ? (authHeaders[0] ?? null)
-          : null,
-      getAll: (name) =>
-        name.toLowerCase() === 'authentication-results' ? [...authHeaders] : [],
-    },
     raw: new Blob([raw]).stream(),
     rawSize: raw.length,
     setReject: (reason) => rejections.push(reason),
@@ -417,26 +426,44 @@ describe('handleSubmission, refused', () => {
     const outcome = await expectSilentDrop(
       seedStore(),
       message({
-        raw: withPhoto,
-        auth: [`${CLOUDFLARE_AUTHSERV_ID}; dkim=fail; dmarc=fail`],
+        raw: rawMessage({
+          subject: 'Beach day',
+          auth: [`${CLOUDFLARE_AUTHSERV_ID}; dkim=fail; dmarc=fail`],
+          parts: [{ filename: 'a.jpg', contentType: 'image/jpeg', bytes: jpeg() }],
+        }),
       }),
     );
     expect(outcome).toEqual({ status: 'dropped', reason: 'not-authenticated' });
   });
 
   it('drops a message with no Authentication-Results at all', async () => {
-    await expectSilentDrop(seedStore(), message({ raw: withPhoto, auth: [] }));
-  });
-
-  it('is not rescued by a forged second Authentication-Results header', async () => {
     await expectSilentDrop(
       seedStore(),
       message({
-        raw: withPhoto,
-        auth: [
-          `${CLOUDFLARE_AUTHSERV_ID}; dmarc=fail`,
-          `${CLOUDFLARE_AUTHSERV_ID}; dmarc=pass`,
-        ],
+        raw: rawMessage({
+          subject: 'Beach day',
+          auth: [],
+          parts: [{ filename: 'a.jpg', contentType: 'image/jpeg', bytes: jpeg() }],
+        }),
+      }),
+    );
+  });
+
+  it('is not rescued by a forged second Authentication-Results header', async () => {
+    // The sender attached the second. Only the first is Cloudflare's, and it
+    // fails — which is the whole reason the raw block is read in order rather
+    // than through a Headers object that would join the two.
+    await expectSilentDrop(
+      seedStore(),
+      message({
+        raw: rawMessage({
+          subject: 'Beach day',
+          auth: [
+            `${CLOUDFLARE_AUTHSERV_ID}; dmarc=fail`,
+            `${CLOUDFLARE_AUTHSERV_ID}; dmarc=pass`,
+          ],
+          parts: [{ filename: 'a.jpg', contentType: 'image/jpeg', bytes: jpeg() }],
+        }),
       }),
     );
   });
@@ -498,6 +525,67 @@ describe('handleSubmission, refused', () => {
       parts: 2,
     });
     expect(msg.rejections).toEqual([]);
+  });
+
+  /**
+   * The regression that shipped. `EmailMessageLike` used to carry a `headers`
+   * object and the handler called `getAll` on it; Cloudflare's Headers defines
+   * `getAll` but throws for every name except `Set-Cookie`, so the handler
+   * threw, the outer catch swallowed it, and every message vanished with
+   * `Inbound mail failed` in the log and no bounce.
+   *
+   * Nothing here can drift back: the message this handler is given has no
+   * `headers` at all, so the only place a header can come from is `raw`.
+   */
+  it('reads its headers from the raw message, never from a Headers object', async () => {
+    const store = seedStore();
+    const { binding } = fakeEmail();
+    const msg = message({ raw: withPhoto });
+
+    expect('headers' in msg).toBe(false);
+    expect((await handleSubmission(deps(store, binding), msg)).status).toBe('accepted');
+  });
+
+  it('authenticates the header From, not the envelope sender', async () => {
+    // A forward or a mailing list makes these differ, and DMARC aligns
+    // against `header.from` — checking the envelope would authenticate the
+    // wrong domain entirely.
+    const store = seedStore();
+    const { binding } = fakeEmail();
+
+    const outcome = await handleSubmission(
+      deps(store, binding),
+      message({
+        from: 'bounces+12345@some-list-server.test',
+        raw: rawMessage({
+          subject: 'Beach day',
+          parts: [{ filename: 'a.jpg', contentType: 'image/jpeg', bytes: jpeg() }],
+        }),
+      }),
+    );
+
+    expect(outcome.status).toBe('accepted');
+    expect((await listSubmissions(store))[0]?.submittedBy).toBe('cf-0');
+  });
+
+  it('falls back to the envelope sender only when there is no From header', async () => {
+    const store = seedStore();
+    const { binding, sent } = fakeEmail();
+
+    const outcome = await handleSubmission(
+      deps(store, binding),
+      message({
+        raw: rawMessage({
+          subject: 'Beach day',
+          // A malformed message: no From at all.
+          from: 'X-No-From: yes',
+          parts: [{ filename: 'a.jpg', contentType: 'image/jpeg', bytes: jpeg() }],
+        }),
+      }),
+    );
+
+    expect(outcome.status).toBe('accepted');
+    expect(sent[0]?.to).toBe(SENDER);
   });
 
   it('never names the sender or the subject in a log line', async () => {

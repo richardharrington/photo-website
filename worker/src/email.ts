@@ -17,6 +17,15 @@
  * `src/shared/` may reach for it: the pure rules — the authentication-header
  * parser, the part sniff, the caption proposal — are compiled by all three
  * tsconfigs and cannot depend on a Worker-only parser.
+ *
+ * Headers are read out of the raw bytes rather than from `message.headers`,
+ * and the reason is worth keeping: the Fetch `Headers` API cannot hand back
+ * repeated headers separately. `get` joins them with a comma, and `getAll`
+ * exists but **throws for every name except `Set-Cookie`** — so a `typeof
+ * headers.getAll === 'function'` guard passes and then the call fails at
+ * runtime, which is exactly how this shipped broken the first time. "Only the
+ * first `Authentication-Results` counts" is the whole anti-forgery rule, so
+ * the raw block is the only honest source.
  */
 
 import PostalMime from 'postal-mime';
@@ -28,7 +37,12 @@ import {
 } from '../../src/shared/constants.ts';
 import { generatePhotoId } from '../../src/shared/ids.ts';
 import { normalizeEmail } from '../../src/shared/notifications.ts';
-import { authenticatesFor } from '../../src/shared/email-auth.ts';
+import {
+  authenticatesFor,
+  fromHeaderAddress,
+  headerBlockOf,
+  headerValues,
+} from '../../src/shared/email-auth.ts';
 import {
   SUBMISSION_SCHEMA_VERSION,
   firstBodyLine,
@@ -52,16 +66,23 @@ import type { SendEmailLike } from './digest.ts';
  * `SendEmailLike` exist. A test satisfies this with an object literal.
  */
 export interface EmailMessageLike {
+  /** The **envelope** sender. The header From is read from `raw`; see below. */
   readonly from: string;
   readonly to: string;
-  readonly headers: { get(name: string): string | null } & {
-    /** Present on the real Headers; used to read *every* Authentication-Results. */
-    getAll?(name: string): string[];
-  };
   readonly raw: ReadableStream;
   readonly rawSize: number;
   setReject(reason: string): void;
 }
+
+/**
+ * How much of the message to decode looking for the end of the header block.
+ *
+ * Generous: a message that has crossed several hops carries a long stack of
+ * `Received` lines, and Gmail adds a substantial `ARC-*` set of its own. Still
+ * a fraction of a 25 MiB message, and nothing below the blank line is read
+ * this way — the body is `postal-mime`'s business.
+ */
+const HEADER_SCAN_BYTES = 256 * 1024;
 
 /**
  * Everything the handler needs, already checked, in the shape `digestDeps`
@@ -110,24 +131,6 @@ const NO_PHOTOS_BOUNCE =
 const INBOX_FULL_BOUNCE =
   'Thank you, but the site is not accepting photos just now. Please try again ' +
   'in a few days.';
-
-/**
- * Every `Authentication-Results` header, in order.
- *
- * Order is the whole of the security here: Cloudflare prepends its own, so the
- * first is the only one Cloudflare wrote, and a sender may attach as many more
- * as they like. `getAll` is the accurate reading; the fallback splits the
- * comma-joined value the Headers API produces when it is absent.
- */
-export function authenticationResultsHeaders(
-  headers: EmailMessageLike['headers'],
-): string[] {
-  if (typeof headers.getAll === 'function') {
-    return headers.getAll('authentication-results');
-  }
-  const joined = headers.get('authentication-results');
-  return joined === null ? [] : [joined];
-}
 
 /** Everything after the `@`, for a log line that names no individual. */
 function domainForLog(address: string): string {
@@ -183,7 +186,32 @@ export async function handleSubmission(
     return { status: 'dropped', reason: 'wrong-recipient' };
   }
 
-  const from = normalizeEmail(message.from);
+  // The raw message, read **once** into memory: `message.raw` is a stream and
+  // cannot be consumed twice, and both the headers below and `postal-mime`
+  // further down need it. Cloudflare refuses anything over 25 MiB before a
+  // Worker runs, so this is bounded without a guard of its own.
+  let raw: Uint8Array;
+  try {
+    raw = new Uint8Array(await new Response(message.raw).arrayBuffer());
+  } catch (error) {
+    console.error(
+      'Submission could not be read',
+      JSON.stringify({ fromDomain }),
+      error,
+    );
+    return { status: 'dropped', reason: 'unreadable' };
+  }
+
+  // Latin-1 rather than UTF-8: header bytes are ASCII, non-ASCII arrives as
+  // RFC 2047 encoded words, and this decode must never throw on a stray byte.
+  const headerBlock = headerBlockOf(
+    new TextDecoder('latin1').decode(raw.subarray(0, HEADER_SCAN_BYTES)),
+  );
+
+  // The **header** From, not the envelope sender: DMARC aligns against
+  // `header.from`, and it is the address a reader sees. The envelope stands in
+  // only for a message with no From header at all, which is malformed.
+  const from = normalizeEmail(fromHeaderAddress(headerBlock) ?? message.from);
 
   // 2. An allowed, verified, switched-on sender. Both reads are the ones the
   //    digest already does; no new permission and no new secret.
@@ -208,7 +236,10 @@ export async function handleSubmission(
 
   // 3. The message authenticates for that address's domain. Only the first
   //    Authentication-Results header, with Cloudflare's own authserv-id.
-  const auth = authenticatesFor(authenticationResultsHeaders(message.headers), from);
+  const auth = authenticatesFor(
+    headerValues(headerBlock, 'authentication-results'),
+    from,
+  );
   if (!auth.ok) {
     log('Submission dropped', {
       reason: 'not-authenticated',
@@ -233,10 +264,10 @@ export async function handleSubmission(
     return { status: 'bounced', reason: 'inbox-full' };
   }
 
-  // 5. Parse the MIME message. `raw` is a stream and is consumed exactly once.
+  // 5. Parse the MIME message, from the bytes already in hand.
   let parsed: Email;
   try {
-    parsed = await PostalMime.parse(message.raw);
+    parsed = await PostalMime.parse(raw);
   } catch (error) {
     console.error(
       'Submission could not be parsed',

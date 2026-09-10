@@ -4,6 +4,9 @@ import {
   authenticatesFor,
   domainOf,
   domainsAlign,
+  fromHeaderAddress,
+  headerBlockOf,
+  headerValues,
   parseAuthenticationResults,
 } from '../../src/shared/email-auth.ts';
 
@@ -157,5 +160,124 @@ describe('authenticatesFor', () => {
       const header = `${CLOUDFLARE_AUTHSERV_ID}; dmarc=${result} header.from=example.com`;
       expect(authenticatesFor([header], 'aunt@example.com').ok).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reading the raw header block
+// ---------------------------------------------------------------------------
+
+/**
+ * These exist because the runtime's `Headers` object cannot do this job, and
+ * finding that out cost a silently broken deploy.
+ *
+ * `get('authentication-results')` joins repeated headers with a comma, which
+ * cannot be reliably undone because a comma inside a value is legal.
+ * `getAll` is present on Cloudflare's Headers — so a `typeof ... ===
+ * 'function'` guard passes — and then throws for every name except
+ * `Set-Cookie`. Since "only the first counts" is the whole anti-forgery rule,
+ * the raw block is the only honest source.
+ */
+describe('headerBlockOf', () => {
+  it('stops at the first blank line, CRLF or LF', () => {
+    expect(headerBlockOf('A: 1\r\nB: 2\r\n\r\nbody\r\nA: not a header')).toBe(
+      'A: 1\r\nB: 2',
+    );
+    expect(headerBlockOf('A: 1\nB: 2\n\nbody')).toBe('A: 1\nB: 2');
+  });
+
+  it('takes a headers-only message whole', () => {
+    expect(headerBlockOf('A: 1\r\nB: 2')).toBe('A: 1\r\nB: 2');
+  });
+
+  /**
+   * A body line that looks like a header must never be read as one — it is
+   * sender-controlled, and this is the anti-forgery boundary.
+   */
+  it('never reads a header out of the body', () => {
+    const raw = [
+      `Authentication-Results: ${CLOUDFLARE_AUTHSERV_ID}; dmarc=fail`,
+      '',
+      `Authentication-Results: ${CLOUDFLARE_AUTHSERV_ID}; dmarc=pass`,
+    ].join('\r\n');
+
+    expect(headerValues(headerBlockOf(raw), 'authentication-results')).toEqual([
+      `${CLOUDFLARE_AUTHSERV_ID}; dmarc=fail`,
+    ]);
+  });
+});
+
+describe('headerValues', () => {
+  it('returns repeated headers separately, in message order', () => {
+    const block = [
+      'Authentication-Results: first',
+      'From: a@example.com',
+      'Authentication-Results: second',
+    ].join('\r\n');
+
+    expect(headerValues(block, 'authentication-results')).toEqual(['first', 'second']);
+  });
+
+  it('unfolds a header wrapped across lines', () => {
+    const block = [
+      `Authentication-Results: ${CLOUDFLARE_AUTHSERV_ID};`,
+      '\tdkim=pass header.d=icloud.com;',
+      ' dmarc=pass header.from=icloud.com',
+      'From: a@icloud.com',
+    ].join('\r\n');
+
+    const [value] = headerValues(block, 'authentication-results');
+    expect(headerValues(block, 'authentication-results')).toHaveLength(1);
+    expect(value).toContain('dkim=pass header.d=icloud.com');
+    expect(authenticatesFor([value!], 'a@icloud.com')).toEqual({
+      ok: true,
+      via: 'dmarc',
+    });
+  });
+
+  it('keeps a comma inside a value intact', () => {
+    // The reason a comma-joined Headers.get() cannot be undone.
+    const block = 'Authentication-Results: x; dmarc=pass (p=NONE, sp=NONE)';
+    expect(headerValues(block, 'authentication-results')).toEqual([
+      'x; dmarc=pass (p=NONE, sp=NONE)',
+    ]);
+  });
+
+  it('matches the name case-insensitively and finds nothing when absent', () => {
+    expect(headerValues('AUTHENTICATION-RESULTS: x', 'authentication-results')).toEqual(
+      ['x'],
+    );
+    expect(headerValues('From: a@example.com', 'authentication-results')).toEqual([]);
+  });
+});
+
+describe('fromHeaderAddress', () => {
+  it('takes the bare address and discards the display name', () => {
+    expect(fromHeaderAddress('From: Aunt Mary <Aunt@Example.COM>')).toBe(
+      'aunt@example.com',
+    );
+    expect(fromHeaderAddress('From: aunt@example.com')).toBe('aunt@example.com');
+  });
+
+  it('survives a display name containing angle brackets', () => {
+    expect(fromHeaderAddress('From: "Mary <the aunt>" <aunt@example.com>')).toBe(
+      'aunt@example.com',
+    );
+  });
+
+  it('reads the header From, not some other address in the block', () => {
+    const block = [
+      'Sender: list@bulk.test',
+      'From: Aunt Mary <aunt@example.com>',
+      'Reply-To: someone-else@elsewhere.test',
+    ].join('\r\n');
+    // Reply-To and Sender are ignored; DMARC aligns against header.from.
+    expect(fromHeaderAddress(block)).toBe('aunt@example.com');
+  });
+
+  it('is null when there is no usable From', () => {
+    expect(fromHeaderAddress('To: someone@example.com')).toBeNull();
+    expect(fromHeaderAddress('From: not-an-address')).toBeNull();
+    expect(fromHeaderAddress('From:')).toBeNull();
   });
 });

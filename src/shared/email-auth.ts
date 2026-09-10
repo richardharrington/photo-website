@@ -60,6 +60,93 @@ export type AuthResult =
       sawAuthservId?: string;
     };
 
+// ---------------------------------------------------------------------------
+// Reading the raw header block
+// ---------------------------------------------------------------------------
+
+/**
+ * The header block of a raw RFC 5322 message: everything before the first
+ * blank line.
+ *
+ * Headers are read from the raw message rather than from the runtime's
+ * `Headers` object, and that is not a preference. The Fetch `Headers` API
+ * cannot return repeated headers separately — `get` joins them with a comma,
+ * and `getAll` exists but throws for every name except `Set-Cookie`. Since
+ * "only the **first** `Authentication-Results` counts" is the whole of the
+ * anti-forgery rule here, a joined string is not good enough: a comma inside a
+ * header value is legal, so the join cannot be reliably undone.
+ */
+export function headerBlockOf(text: string): string {
+  const crlf = text.indexOf('\r\n\r\n');
+  const lf = text.indexOf('\n\n');
+  const end = crlf === -1 ? lf : lf === -1 ? crlf : Math.min(crlf, lf);
+  return end === -1 ? text : text.slice(0, end);
+}
+
+/**
+ * Every value of one header, in the order the message lists them.
+ *
+ * Continuation lines — the folding RFC 5322 allows on any long header — are
+ * joined back onto the line they belong to before anything is read, so a
+ * header wrapped across three lines is one value rather than three fragments.
+ */
+export function headerValues(block: string, name: string): string[] {
+  const wanted = name.toLowerCase();
+  const values: string[] = [];
+
+  // Unfold first: a line beginning with a space or tab continues the one
+  // before it, and the fold itself is not part of the value.
+  const lines: string[] = [];
+  for (const line of block.replace(/\r\n/g, '\n').split('\n')) {
+    if (/^[ \t]/.test(line) && lines.length > 0) {
+      lines[lines.length - 1] += ` ${line.trim()}`;
+    } else {
+      lines.push(line);
+    }
+  }
+
+  for (const line of lines) {
+    const colon = line.indexOf(':');
+    if (colon <= 0) continue;
+    if (line.slice(0, colon).trim().toLowerCase() !== wanted) continue;
+    values.push(line.slice(colon + 1).trim());
+  }
+
+  return values;
+}
+
+/**
+ * The bare address in the message's `From` header, lowercased, or null.
+ *
+ * The **header** From, not the envelope sender the runtime reports: DMARC
+ * aligns a signature against `header.from`, and it is the header a reader
+ * sees. They differ for a forward or a mailing list, and checking the wrong
+ * one would authenticate the wrong domain.
+ *
+ * The display name is discarded here and never used for anything — it is
+ * sender-controlled text, and the Inbox shows the address resolved from
+ * Cloudflare's own list instead. Only the first `From` is read; a second is
+ * not a thing a well-formed message has.
+ */
+export function fromHeaderAddress(block: string): string | null {
+  const value = headerValues(block, 'from')[0];
+  if (value === undefined) return null;
+
+  // `Name <addr@example.com>` — the last angle-bracketed group wins, because a
+  // display name may itself contain brackets.
+  const angled = value.lastIndexOf('<');
+  const bare =
+    angled === -1
+      ? value
+      : value.slice(
+          angled + 1,
+          value.indexOf('>', angled) === -1 ? undefined : value.indexOf('>', angled),
+        );
+
+  const address = bare.trim().toLowerCase();
+  return address.includes('@') && !/\s/.test(address) ? address : null;
+}
+
 /**
  * The domain part of an address, lowercased, or null.
  *
