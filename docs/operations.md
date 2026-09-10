@@ -360,8 +360,7 @@ Back in the Cloudflare console, now that there is a Netlify origin to name.
     {
       "AllowedOrigins": ["https://<your-site>.netlify.app"],
       "AllowedMethods": ["PUT", "GET"],
-      "AllowedHeaders": ["content-type", "Range"],
-      "ExposeHeaders": ["Content-Range", "Content-Length"],
+      "AllowedHeaders": ["content-type", "range"],
       "MaxAgeSeconds": 3600
     }
   ]
@@ -380,15 +379,24 @@ Back in the Cloudflare console, now that there is a Netlify origin to name.
   image content type is never a simple request, so every upload is preceded by
   an `OPTIONS` preflight that R2 answers from this rule.
 
-  The `GET`, the `Range` header, and the two exposed headers are for the
-  **Inbox** alone: the admin browser reads an emailed original back out of
-  `inbox/` through a presigned GET, once as a `Range` request for the EXIF
-  thumbnail and once in full on Add. Nothing else reads from the bucket — every
-  other read goes through the Worker and the bucket stays private. **A
-  signature does not cover `Range`**, so this is a CORS question rather than a
-  signing one, and getting it wrong looks like a network error with no status
-  code (decisions.md #84). There is still no `ExposeHeaders` entry for `ETag`,
-  which guides commonly add and nothing here reads.
+  The `GET` and the `range` header are for the **Inbox** alone: the admin
+  browser reads an emailed original back out of `inbox/` through a presigned
+  GET, once as a `Range` request for the EXIF thumbnail and once in full on
+  Add. Nothing else reads from the bucket — every other read goes through the
+  Worker and the bucket stays private. **A signature does not cover `Range`**,
+  so allowing it is a CORS question rather than a signing one, and getting it
+  wrong looks like a network error with no status code (decisions.md #84).
+
+  There is still **no `ExposeHeaders`** — not for `ETag`, which guides commonly
+  add, and not for `Content-Range` either. Both Inbox reads take
+  `response.ok` and then the body; neither reads a single response header, and
+  a 206 body is readable without `Content-Range` being exposed. Add it if
+  something ever needs to read it, and not before.
+
+  Allowing `GET` here grants no new access to the bucket. CORS decides whether
+  a browser will hand a response to script on a given origin; what may be read
+  at all is still decided by the presigned URL, and the bucket remains private
+  to anyone without one.
 
   If you are not using email submissions, `["PUT"]` and `["content-type"]`
   alone remain correct.
@@ -417,9 +425,10 @@ Back in the Cloudflare console, now that there is a Netlify origin to name.
     -H "Access-Control-Request-Headers: range"
   ```
 
-  Expect `Allow-Headers` to name `range` and `Access-Control-Expose-Headers` to
-  name `Content-Range`. Without the first, every Inbox card shows neutral tiles
-  and the browser console shows a failed fetch with no status.
+  Expect `204`, `Allow-Methods` naming `GET`, and `Allow-Headers` naming
+  `range`. Without the last, every Inbox card shows neutral tiles and the
+  browser console shows a failed fetch with no status code — a preflight
+  rejection, which is not an HTTP error the page can see.
 
 Uploads fail until this is in place, so it must precede the launch checklist's
 end-to-end upload. A custom domain later is a second origin and has to be
@@ -896,11 +905,12 @@ printf '%s' "submit@<your-domain>" | npx wrangler secret put SUBMIT_ADDRESS
   `wrangler secret put` creates a new version of the Worker and deploys it
   itself, so a secret set at any point — before this step or long after it —
   is live the moment the command returns.
-- [ ] Extend the bucket's CORS policy with `GET`, the `Range` request header,
-      and the `Content-Range` and `Content-Length` exposed headers — see
-      [Cloudflare: bucket CORS](#7-cloudflare-bucket-cors), which now shows the
-      full rule and a probe for it. **Do this before the first submission**, or
-      the Inbox loads with every tile blank and no error worth reading.
+- [ ] Extend the bucket's CORS policy: add `"GET"` to `AllowedMethods` and
+      `"range"` to `AllowedHeaders`, in the rule that already names your
+      origins. Two words, nothing else — see
+      [Cloudflare: bucket CORS](#7-cloudflare-bucket-cors) for the full rule
+      and a probe for it. **Do this before the first submission**, or the
+      Inbox loads with every tile blank and no error worth reading.
 
 ### 4. Switch a sender on
 
