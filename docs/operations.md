@@ -12,15 +12,26 @@ deployed. What remains is the [launch checklist](#launch-checklist) and the
 because they are worth re-running after any change to the gate, the Worker, or
 the account configuration — not because they have never been done.
 
-**Email notifications, 2026-09-05.** Shipped but not yet turned on: it needs a
-domain, and until it has one it is inert rather than broken.
-[Adding email notifications](#adding-email-notifications) is the whole
-procedure, self-contained, and can be followed at any time.
+**Email notifications, turned on by 2026-09-10.** All five of the Worker's
+notification secrets are set (`wrangler secret list` shows `NOTIFY_FROM`,
+`DISPLAY_SITE_URL`, `CLOUDFLARE_ACCOUNT_ID`,
+`CLOUDFLARE_ADDRESSES_READ_TOKEN` and `SITE_TITLE`), so the domain exists and
+the digest runs on the nightly cron.
+[Adding email notifications](#adding-email-notifications) stays written as a
+procedure because it is worth re-reading after any change to the domain, the
+tokens, or the recipient list.
 
-**Email submissions, 2026-09-09.** Likewise shipped and inert. It builds on the
-notifications setup and needs one routing rule, one Worker secret, and two
-lines added to the bucket's CORS policy;
+**Email submissions, 2026-09-09. Shipped and deployed, not yet turned on.**
+The Worker carrying the `email()` handler is live, but `SUBMIT_ADDRESS` is not
+among its secrets, so the handler accepts nothing at all — unconfigured means
+inert, exactly as it does for the digest. Three things remain, and none of
+them is a code change: the Email Routing rule for the submission address, the
+secret itself, and widening the bucket's CORS policy.
 [Adding email submissions](#adding-email-submissions) is the whole procedure.
+
+Both of these say what was true when they were written. `npx wrangler secret
+list` names the secrets actually set, and `npx wrangler deployments status`
+says which version of the Worker is serving; neither prints a secret's value.
 
 ## Local development
 
@@ -876,8 +887,15 @@ printf '%s' "submit@<your-domain>" | npx wrangler secret put SUBMIT_ADDRESS
 
 ### 3. Deploy, and widen the bucket's CORS
 
-- [ ] `npx wrangler deploy`. The `email()` handler ships with the Worker; the
-      routing rule has nothing to deliver to until it does.
+- [ ] `npx wrangler deploy`, unless the running Worker already carries the
+      `email()` handler — `npx wrangler deployments status` gives the live
+      version's timestamp to compare against. The handler ships with the
+      Worker, and the routing rule has nothing to deliver to until it does.
+
+  **Setting the secret in step 2 needs no deploy of its own.**
+  `wrangler secret put` creates a new version of the Worker and deploys it
+  itself, so a secret set at any point — before this step or long after it —
+  is live the moment the command returns.
 - [ ] Extend the bucket's CORS policy with `GET`, the `Range` request header,
       and the `Content-Range` and `Content-Length` exposed headers — see
       [Cloudflare: bucket CORS](#7-cloudflare-bucket-cors), which now shows the
