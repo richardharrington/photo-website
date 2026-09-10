@@ -8,56 +8,16 @@ import {
 } from 'react';
 import { ACCEPTED_EXTENSIONS } from '../../shared/constants.ts';
 import { hasAcceptedExtension } from '../../pipeline/validate.ts';
-import { processFile, readSourceMetadata } from '../../pipeline/index.ts';
-import { UploadQueue, isInFlight, summarize } from '../upload/queue.ts';
+import { isInFlight, summarize } from '../upload/queue.ts';
 import type { QueueItem, QueueSnapshot } from '../upload/queue.ts';
+import { createQueue } from '../upload/create.ts';
 import { PENDING_IMAGE, pendingPhoto } from '../upload/pending.ts';
-import { adminApi, routes } from '../api.ts';
+import { routes } from '../api.ts';
 import { Link } from '../../shared/ui/Link.tsx';
 import { PhotoGrid } from '../../shared/ui/PhotoGrid.tsx';
 import { Lightbox } from '../../shared/ui/Lightbox.tsx';
 import { CurationContext } from '../../shared/ui/curation.ts';
 import type { Curation } from '../../shared/ui/curation.ts';
-
-/**
- * PUT one artifact straight to R2 with its presigned URL.
- *
- * This is the only request in the app that leaves the site's origin. It is a
- * cors-mode fetch, so the browser sends a real Origin header even under
- * Referrer-Policy: no-referrer — which is what the bucket's CORS rule keys on.
- */
-async function uploadArtifact(
-  url: string,
-  artifact: { bytes: Uint8Array; contentType: string },
-): Promise<void> {
-  const response = await fetch(url, {
-    method: 'PUT',
-    headers: { 'content-type': artifact.contentType },
-    body: artifact.bytes as BodyInit,
-  });
-  if (!response.ok) {
-    throw new Error(`Upload failed (${response.status}).`);
-  }
-}
-
-function createQueue(): UploadQueue {
-  return new UploadQueue({
-    processFile: (file, options) =>
-      processFile(file, {
-        // Encoding dominates; report progress as each artifact lands.
-        onArtifact: () => options.onProgress(0.5),
-        // Already read, so the date on the tile and the date committed are
-        // the same value rather than two parses expected to agree.
-        metadata: options.metadata,
-      }),
-    readMetadata: (file) => readSourceMetadata(file, file.name),
-    editPhoto: async (photoId, edit) => (await adminApi.edit(photoId, edit)).photo,
-    beginBatch: () => adminApi.beginBatch(),
-    prepare: (hash, filename) => adminApi.prepare(hash, filename),
-    uploadArtifact,
-    commit: (body) => adminApi.commit(body),
-  });
-}
 
 const STATE_LABELS: Record<QueueItem['state'], string> = {
   queued: 'Waiting',
@@ -124,7 +84,7 @@ export function UploadPanel({
 }: UploadPanelProps) {
   // Lazy state, not a ref: the queue is created once, and reading a ref
   // during render is unsafe.
-  const [queue] = useState(createQueue);
+  const [queue] = useState(() => createQueue());
   const [snapshot, setSnapshot] = useState<QueueSnapshot>(() => queue.snapshot());
   const [dragging, setDragging] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -243,6 +203,8 @@ export function UploadPanel({
         if (item.photoId) void onLibraryChanged();
         return pendingPhoto(item);
       },
+      // A file on its way in has no catalog record to have arrived by email.
+      attribution: () => Promise.resolve(null),
       can: { edit: true, download: false, trash: false, select: false },
     }),
     [queue, onLibraryChanged],

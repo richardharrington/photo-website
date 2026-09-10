@@ -28,6 +28,7 @@ function item(overrides: Partial<QueueItem> = {}): QueueItem {
     progress: 0,
     source: null,
     edit: null,
+    caption: null,
     preview: null,
     ...overrides,
   };

@@ -15,7 +15,7 @@
  * asserts exactly that.
  */
 
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import {
   RENDITIONS,
@@ -72,4 +72,29 @@ export async function presignedUploadUrls(
   }
 
   return uploads;
+}
+
+/**
+ * A short-lived presigned **GET** for one arbitrary key.
+ *
+ * The one thing the admin browser reads directly from R2: an emailed original
+ * waiting in the Inbox, fetched twice — once as a `Range` request for its
+ * embedded EXIF thumbnail, and once in full when Add runs it through the
+ * pipeline. Everything else the browser reads comes from the Worker.
+ *
+ * `Range` is a CORS question and not a signing one: the signature does not
+ * cover the header, so the bucket's CORS rule has to allow it (see
+ * operations.md, "Adding email submissions"). A preflight failure looks like a
+ * network error with no status, which is why that step is written down.
+ */
+export async function presignedGetUrl(
+  config: PresignConfig,
+  key: string,
+  expiresIn: number,
+): Promise<string> {
+  return getSignedUrl(
+    uploadClient(config),
+    new GetObjectCommand({ Bucket: config.bucket, Key: key }),
+    { expiresIn },
+  );
 }

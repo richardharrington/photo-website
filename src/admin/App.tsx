@@ -24,7 +24,8 @@ import type { PreviewResult } from './api.ts';
 import { Confirm, UndoBanner } from './components/Confirm.tsx';
 import { SelectionBar } from './components/SelectionBar.tsx';
 import { TrashPage } from './components/TrashPage.tsx';
-import { NotificationsPage } from './components/NotificationsPage.tsx';
+import { EmailsPage } from './components/EmailsPage.tsx';
+import { InboxPage } from './components/InboxPage.tsx';
 import { UploadPanel } from './components/Upload.tsx';
 import {
   addAll,
@@ -45,7 +46,7 @@ import type { SelectionQuery } from '../shared/admin-operations.ts';
  * `recent` is not one of them: both apps have it, so the shared parser knows
  * it unconditionally.
  */
-const ADMIN_PAGES = ['trash', 'notifications'] as const;
+const ADMIN_PAGES = ['trash', 'emails', 'inbox'] as const;
 
 /** Which section of the one page a route is asking for. */
 function targetOf(
@@ -182,6 +183,16 @@ export function App() {
   const trashCount = trash.status === 'ready' ? trash.data.count : null;
   const countTrashAgain = useCallback(() => setTrashKey((key) => key + 1), []);
 
+  // The Inbox count, fetched and refetched exactly as the trash count is: it
+  // is a number in the header, and every action on the Inbox page changes it.
+  const [inboxKey, setInboxKey] = useState(0);
+  const inbox = useResource<{ count: number }>(
+    (signal) => adminApi.inboxCount(signal),
+    [inboxKey],
+  );
+  const inboxCount = inbox.status === 'ready' ? inbox.data.count : null;
+  const countInboxAgain = useCallback(() => setInboxKey((key) => key + 1), []);
+
   async function startTrash(query: SelectionQuery, from: string | null) {
     setError(null);
     try {
@@ -259,6 +270,10 @@ export function App() {
       selectAll: (ids) => setSelection((state) => addAll(state, ids)),
       trash: (id) => void startTrash({ kind: 'ids', photoIds: [id] }, id),
       edit: saveEdit,
+      // Asked only when the info panel is opened, and only in the library:
+      // the answer is a fact about how a photograph arrived, not part of the
+      // page.
+      attribution: (id) => adminApi.attribution(id),
       can: { edit: true, download: true, trash: true, select: true },
     }),
     // startTrash and saveEdit read the current render's `data` and
@@ -276,7 +291,7 @@ export function App() {
 
   const nav = (
     <>
-      {/* On the trash and notifications pages neither view is current, so
+      {/* On the trash, emails, and inbox pages neither view is current, so
           both are links. */}
       <ViewToggle
         current={route.kind === 'page' ? null : onRecent ? 'recent' : 'library'}
@@ -285,7 +300,11 @@ export function App() {
       <Link to={routes.trash()}>
         Trash{trashCount === null ? '' : ` (${trashCount})`}
       </Link>
-      <Link to={routes.notifications()}>Notifications</Link>
+      {/* The digest, and who may send photographs in. */}
+      <Link to={routes.emails()}>Emails</Link>
+      <Link to={routes.inbox()}>
+        Inbox{inboxCount === null ? '' : ` (${inboxCount})`}
+      </Link>
       <a href={adminApi.exportUrl()} download>
         Export catalog
       </a>
@@ -313,11 +332,13 @@ export function App() {
    */
   const main =
     route.kind === 'page' ? (
-      // The two admin-only pages. `parseRoute` has already refused any name
-      // that is not in ADMIN_PAGES, so there is no third case to fall through
-      // to — and the viewer's parser is never given either name at all.
-      route.name === 'notifications' ? (
-        <NotificationsPage nav={nav} />
+      // The three admin-only pages. `parseRoute` has already refused any name
+      // that is not in ADMIN_PAGES, so there is no fourth case to fall through
+      // to — and the viewer's parser is never given any of the names at all.
+      route.name === 'emails' ? (
+        <EmailsPage nav={nav} />
+      ) : route.name === 'inbox' ? (
+        <InboxPage nav={nav} onChanged={countInboxAgain} />
       ) : (
         <TrashPage nav={nav} onChanged={countTrashAgain} />
       )

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
 
 /**
- * The Notifications page, against the local fixture server.
+ * The Emails page, against the local fixture server.
  *
  * The fake stands in for Cloudflare's destination-address list, and fakes the
  * one step a test cannot perform — clicking a link in somebody's real mailbox.
@@ -10,7 +10,7 @@ import type { Page } from '@playwright/test';
  * address verifies the moment it is added. Both states have to be reachable
  * from here, and that convention is what makes them so.
  *
- * Nothing in this file sends mail. `/notifications/test` reaches the fixture's
+ * Nothing in this file sends mail. `/emails/test` reaches the fixture's
  * stand-in for the Worker's `POST /notify/test`, which computes the same count
  * and sends nothing.
  */
@@ -28,7 +28,7 @@ const VERIFIED = 'aunt@example.test';
 const PENDING = 'pending-uncle@example.test';
 
 const row = (page: Page, email: string) =>
-  page.locator('.notifications tbody tr').filter({ hasText: email });
+  page.locator('.emails tbody tr').filter({ hasText: email });
 
 async function add(page: Page, email: string) {
   await page.getByLabel('Add an address').fill(email);
@@ -48,23 +48,29 @@ async function remove(page: Page, email: string) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.goto(`${BASE}/notifications`);
+  await page.goto(`${BASE}/emails`);
   await expect(page.getByLabel('Add an address')).toBeVisible();
 });
 
 test.afterEach(async ({ page }) => {
   // The fixture's list is shared process state; leave it as it was found.
-  await page.goto(`${BASE}/notifications`);
+  await page.goto(`${BASE}/emails`);
+  // Wait for the list to have loaded before looking for rows in it. The form
+  // exists only in the ready branch, so its presence is the signal — without
+  // it, `remove` can find no row on a page that has not rendered one yet and
+  // leave the address behind for the next test to trip over.
+  await expect(page.getByLabel('Add an address')).toBeVisible();
   await remove(page, VERIFIED);
   await remove(page, PENDING);
 });
 
 test('is reachable from the header of every other admin page', async ({ page }) => {
   await page.goto(`${BASE}/`);
-  const link = page.getByRole('link', { name: 'Notifications' });
+  // The page is Emails; its address stays the one every link already uses.
+  const link = page.getByRole('link', { name: 'Emails' });
   await expect(link).toBeVisible();
   await link.click();
-  await expect(page).toHaveURL(`${BASE}/notifications`);
+  await expect(page).toHaveURL(`${BASE}/emails`);
   await expect(page.getByLabel('Add an address')).toBeVisible();
 });
 
@@ -79,22 +85,59 @@ test('shows a newly added address as verified, and a pending one as not', async 
   await add(page, PENDING);
   await expect(row(page, PENDING)).toContainText('Awaiting verification');
 
-  // Neither control does anything for an address nobody has confirmed.
-  await expect(row(page, PENDING).getByRole('switch')).toBeDisabled();
+  // No control does anything for an address nobody has confirmed — all three
+  // switches included. Verification proves someone controls the mailbox; for
+  // Can submit, DKIM then proves a message came from it, and neither alone is
+  // enough.
+  for (const name of ['Notifications', 'Can submit', 'Reviews inbox']) {
+    await expect(row(page, PENDING).getByRole('switch', { name })).toBeDisabled();
+  }
   await expect(
     row(page, PENDING).getByRole('button', { name: 'Send test' }),
   ).toBeDisabled();
 });
 
+test('switches Can submit and Reviews inbox independently of the digest', async ({
+  page,
+}) => {
+  await add(page, VERIFIED);
+  const target = row(page, VERIFIED);
+
+  const digest = target.getByRole('switch', { name: 'Notifications' });
+  const submit = target.getByRole('switch', { name: 'Can submit' });
+  const reviews = target.getByRole('switch', { name: 'Reviews inbox' });
+
+  // A new address starts with the digest on and both new bits off; each is a
+  // deliberate decision, not a default that follows from another.
+  await expect(digest).toBeChecked();
+  await expect(submit).not.toBeChecked();
+  await expect(reviews).not.toBeChecked();
+
+  await submit.click();
+  await expect(submit).toBeChecked();
+  await expect(digest).toBeChecked();
+
+  await reviews.click();
+  await expect(reviews).toBeChecked();
+
+  // Switching the digest off leaves the other two exactly where they were.
+  await digest.click();
+  await expect(digest).not.toBeChecked();
+  await expect(submit).toBeChecked();
+  await expect(reviews).toBeChecked();
+});
+
 test('starts a new address switched on, and has never sent to it', async ({ page }) => {
   await add(page, VERIFIED);
-  await expect(row(page, VERIFIED).getByRole('switch')).toBeChecked();
+  await expect(
+    row(page, VERIFIED).getByRole('switch', { name: 'Notifications' }),
+  ).toBeChecked();
   await expect(row(page, VERIFIED)).toContainText('Never');
 });
 
 test('switches an address off and on again', async ({ page }) => {
   await add(page, VERIFIED);
-  const toggle = row(page, VERIFIED).getByRole('switch');
+  const toggle = row(page, VERIFIED).getByRole('switch', { name: 'Notifications' });
 
   // A click, not `uncheck()`: the switch is controlled by the refetched list
   // rather than by the click, so a helper that clicks until the box agrees
@@ -116,7 +159,7 @@ test('sends a test and reports the result on the row', async ({ page }) => {
   // there is not new to this address — which is exactly the point.
   await expect(row(page, VERIFIED)).toContainText('Sent: no new photos');
   // It reports in place; it never navigates.
-  await expect(page).toHaveURL(`${BASE}/notifications`);
+  await expect(page).toHaveURL(`${BASE}/emails`);
 });
 
 test('removes an address after naming it in the confirmation', async ({ page }) => {
@@ -139,11 +182,11 @@ test('refuses an address that is not one, and says why', async ({ page }) => {
 });
 
 test('is a 404 under the display path', async ({ page }) => {
-  // `notifications` is admin vocabulary. The viewer's parser is never given
-  // it, so the page cannot exist there — nor can its code be in that bundle.
-  await page.goto('http://localhost:5173/dev-display-path/notifications');
+  // `emails` is admin vocabulary. The viewer's parser is never given it, so
+  // the page cannot exist there — nor can its code be in that bundle.
+  await page.goto('http://localhost:5173/dev-display-path/emails');
   await expect(page.getByRole('heading', { name: 'Not found' })).toBeVisible();
 
   const response = await page.goto('http://localhost:5173/dev-display-path/');
-  expect((await response?.text()) ?? '').not.toContain('Notifications');
+  expect((await response?.text()) ?? '').not.toContain('Emails');
 });

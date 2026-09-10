@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { timelineResponse } from '../../src/shared/display-api.ts';
+import { timelineResponse, toPublicPhoto } from '../../src/shared/display-api.ts';
 import { fixtureCatalog, FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
+import { makePhoto, testPhotoId } from '../../fixtures/photos.ts';
 
 /**
  * The timeline projection: the whole library in one response.
@@ -110,5 +111,26 @@ describe('timelineResponse', () => {
     expect(empty.years).toEqual([]);
     expect(empty.undated).toEqual({ count: 0, photos: [] });
     expect(empty.total).toBe(0);
+  });
+});
+
+/**
+ * The projection is a whitelist, and `submittedBy` is not on it.
+ *
+ * An address id is not an address, but it is still a fact about who sent a
+ * photograph, and no viewer has any business with it. The catalog carries it;
+ * the viewer's projection does not.
+ */
+describe('submittedBy is never projected', () => {
+  it('omits it from a public photo', () => {
+    const photo = makePhoto({
+      id: testPhotoId('emailed'),
+      submittedBy: 'cf-address-7',
+    });
+
+    const projected = toPublicPhoto(photo);
+
+    expect('submittedBy' in projected).toBe(false);
+    expect(JSON.stringify(projected)).not.toContain('cf-address-7');
   });
 });

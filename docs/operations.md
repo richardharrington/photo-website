@@ -17,6 +17,11 @@ domain, and until it has one it is inert rather than broken.
 [Adding email notifications](#adding-email-notifications) is the whole
 procedure, self-contained, and can be followed at any time.
 
+**Email submissions, 2026-09-09.** Likewise shipped and inert. It builds on the
+notifications setup and needs one routing rule, one Worker secret, and two
+lines added to the bucket's CORS policy;
+[Adding email submissions](#adding-email-submissions) is the whole procedure.
+
 ## Local development
 
 No account of any kind is needed.
@@ -343,8 +348,9 @@ Back in the Cloudflare console, now that there is a Netlify origin to name.
   [
     {
       "AllowedOrigins": ["https://<your-site>.netlify.app"],
-      "AllowedMethods": ["PUT"],
-      "AllowedHeaders": ["content-type"],
+      "AllowedMethods": ["PUT", "GET"],
+      "AllowedHeaders": ["content-type", "Range"],
+      "ExposeHeaders": ["Content-Range", "Content-Length"],
       "MaxAgeSeconds": 3600
     }
   ]
@@ -354,14 +360,27 @@ Back in the Cloudflare console, now that there is a Netlify origin to name.
   sent even under `Referrer-Policy: no-referrer` — this rule does work, unlike
   an origin check on image loads.
 
-  It is deliberately narrower than most CORS advice. `uploadArtifact` in
-  `src/admin/components/Upload.tsx` is the only request in either app that
-  leaves the site's origin: it sends one header, `content-type`, uses `PUT`
-  alone, and reads only `response.ok`. So there is no `GET` here — reads go
-  through the Worker and the bucket stays private — and no `ExposeHeaders`,
-  which guides commonly add for `ETag`. A `PUT` carrying an image content type
-  is never a simple request, so every upload is preceded by an `OPTIONS`
-  preflight that R2 answers from this rule.
+  It is deliberately narrower than most CORS advice. Only two requests in
+  either app leave the site's origin, and this rule is exactly what they need
+  and nothing more.
+
+  `uploadArtifact` in `src/admin/upload/create.ts` sends one header,
+  `content-type`, uses `PUT`, and reads only `response.ok`. A `PUT` carrying an
+  image content type is never a simple request, so every upload is preceded by
+  an `OPTIONS` preflight that R2 answers from this rule.
+
+  The `GET`, the `Range` header, and the two exposed headers are for the
+  **Inbox** alone: the admin browser reads an emailed original back out of
+  `inbox/` through a presigned GET, once as a `Range` request for the EXIF
+  thumbnail and once in full on Add. Nothing else reads from the bucket — every
+  other read goes through the Worker and the bucket stays private. **A
+  signature does not cover `Range`**, so this is a CORS question rather than a
+  signing one, and getting it wrong looks like a network error with no status
+  code (decisions.md #84). There is still no `ExposeHeaders` entry for `ETag`,
+  which guides commonly add and nothing here reads.
+
+  If you are not using email submissions, `["PUT"]` and `["content-type"]`
+  alone remain correct.
 
 - [ ] Confirm the rule with a preflight. It is unauthenticated, so this needs
       no credentials:
@@ -374,9 +393,22 @@ Back in the Cloudflare console, now that there is a Netlify origin to name.
   ```
 
   Expect `204` with `Access-Control-Allow-Origin` echoing your origin rather
-  than `*`, `Allow-Methods: PUT`, `Allow-Headers: content-type`, and
+  than `*`, `Allow-Methods` naming `PUT`, `Allow-Headers: content-type`, and
   `Vary: Origin` — the last confirming R2 will not serve that allow to a
   different origin.
+
+- [ ] With email submissions, probe the Inbox's read as well:
+
+  ```sh
+  curl -si -X OPTIONS "https://<account-id>.r2.cloudflarestorage.com/<bucket>/probe" \
+    -H "Origin: https://<your-site>.netlify.app" \
+    -H "Access-Control-Request-Method: GET" \
+    -H "Access-Control-Request-Headers: range"
+  ```
+
+  Expect `Allow-Headers` to name `range` and `Access-Control-Expose-Headers` to
+  name `Content-Range`. Without the first, every Inbox card shows neutral tiles
+  and the browser console shows a failed fetch with no status.
 
 Uploads fail until this is in place, so it must precede the launch checklist's
 end-to-end upload. A custom domain later is a second origin and has to be
@@ -619,7 +651,7 @@ page can ask it to.
 
 Until this is done nothing sends, and nothing else is affected. The nightly
 cron logs `Notifications are not configured; sending nothing.` beside its
-usual maintenance line and carries on. The Notifications page itself shows
+usual maintenance line and carries on. The Emails page itself shows
 `Something went wrong` until step 5 gives it a token — a missing environment
 variable is a 500 here exactly as it is on every other admin route
 (`requiredEnv`), so it is the expected face of "not set up yet" rather than a
@@ -658,7 +690,7 @@ than it sounds — see [Moving the site to the domain](#moving-the-site-to-the-d
       inbox, so a reply to a digest is not silently lost. Note the
       consequence: the forwarding target then *is* a verified destination
       address in the account, and will therefore appear as a row on the
-      Notifications page. That is correct — every verified address in the
+      Emails page. That is correct — every verified address in the
       account is a potential recipient (decisions.md #70) — but it is
       surprising the first time.
 
@@ -677,7 +709,7 @@ Two rather than one so the cron can never alter the recipient list, whatever
 else goes wrong (decisions.md #70). Each variable is named for the permission
 you tick when creating the token, which is the only check there is: **crossing
 them fails silently in the dangerous direction.** Give Netlify the read-only
-token and the Notifications page throws a permission error the first time you
+token and the Emails page throws a permission error the first time you
 add an address — loud, and immediately obvious. Give the *Worker* the
 write-capable one and nothing breaks at all: the digest sends, the test button
 works, no error is logged, and the nightly cron quietly holds the power to
@@ -752,16 +784,16 @@ npx wrangler secret put CLOUDFLARE_ADDRESSES_READ_TOKEN
       twice, something has gone wrong.
 - [ ] Confirm `R2_ACCOUNT_ID` is set. Nothing read it before this feature; the
       admin function reads it now as the Cloudflare account ID. Without it
-      every request to the Notifications page is a 500.
+      every request to the Emails page is a 500.
 - [ ] Deploy. An environment-variable change alone does not rebuild the site,
       and the notification code has to ship anyway, so push to `master` or
       trigger a deploy by hand.
 
 ### 6. Prove it end to end
 
-- [ ] Open the admin site's **Notifications** page. It should list any
-      destination addresses the account already has — including a forwarding
-      target from step 1, if one was added.
+- [ ] Open the admin site's **Emails** page (`/emails` under the admin path).
+      It should list any destination addresses the account already has —
+      including a forwarding target from step 1, if one was added.
 - [ ] Add your own address. Cloudflare emails it a confirmation link; the row
       shows **Awaiting verification** until you click it.
 - [ ] Click the link, reload the page, and confirm the row now reads
@@ -796,6 +828,147 @@ npx wrangler secret put CLOUDFLARE_ADDRESSES_READ_TOKEN
       unsubscribe link because there is deliberately no unauthenticated write
       path on this site — they ask you, and you remove the address
       (decisions.md #74).
+
+## Adding email submissions
+
+Lets a family member the administrator has switched on **email photographs to
+the site**. They wait in the admin app's Inbox until an administrator has
+looked at them; nothing is published by sending it.
+
+Everything this needs already exists after
+[Adding email notifications](#adding-email-notifications): the domain, Email
+Routing, the send binding, the destination-address list, and the Worker. This
+adds one routing rule, one Worker secret, and two lines to the bucket's CORS
+policy. Nothing new is bought or subscribed to.
+
+### 1. A routing rule for the submission address
+
+- [ ] **Cloudflare → Email → Email Routing → Routing rules → Create address.**
+      Custom address `submit`, action **Send to a Worker**, destination
+      `photo-assets`.
+
+  Pick a local part that is not guessable-adjacent to anything else if you
+  like, but it is not a secret: the two proofs are what protect this, not the
+  address (decisions.md #80). The digest's `photos@` address stays send-only
+  and gets no rule — mail to it is not read, and now there is somewhere else to
+  send photographs.
+
+- [ ] A **catch-all** rule, if the account has one, must not point at this
+      Worker. The handler compares the recipient against `SUBMIT_ADDRESS` and
+      drops anything else, so a catch-all cannot feed it by accident — but a
+      catch-all sending every stray message to a Worker is worth not having.
+
+### 2. The Worker's sixth secret
+
+```sh
+printf '%s' "submit@<your-domain>" | npx wrangler secret put SUBMIT_ADDRESS
+```
+
+- [ ] The **full address**, not the local part. It is compared against the
+      message's recipient after lowercasing.
+- [ ] Without it the handler accepts nothing at all — the same
+      "unconfigured means inert" posture the digest has. That is also the way
+      to switch the feature off: delete the secret, and mail to the address is
+      silently dropped.
+- [ ] No new Netlify variable. The admin function already holds the S3
+      credentials that presign uploads, and presigning a read uses the same
+      client.
+
+### 3. Deploy, and widen the bucket's CORS
+
+- [ ] `npx wrangler deploy`. The `email()` handler ships with the Worker; the
+      routing rule has nothing to deliver to until it does.
+- [ ] Extend the bucket's CORS policy with `GET`, the `Range` request header,
+      and the `Content-Range` and `Content-Length` exposed headers — see
+      [Cloudflare: bucket CORS](#7-cloudflare-bucket-cors), which now shows the
+      full rule and a probe for it. **Do this before the first submission**, or
+      the Inbox loads with every tile blank and no error worth reading.
+
+### 4. Switch a sender on
+
+- [ ] On the admin site's **Emails** page, find a **verified** address and turn
+      **Can submit** on. The switch is inert until Cloudflare has the
+      confirmation, which is the same rule the digest has and for the same
+      reason.
+- [ ] Turn **Reviews inbox** on for your own address. Your daily email then
+      says how much is waiting, and arrives even on a day when nothing new was
+      added — which is the point, since otherwise a quiet week is exactly when
+      you would not hear.
+
+### 5. Prove it end to end
+
+- [ ] From that address, email one photograph to the submission address with a
+      real subject line. Expect a plain-text receipt within a minute or two:
+      *"1 photo from your message … arrived and will appear on … once they have
+      been looked at."*
+- [ ] Open the admin site's **Inbox**. Expect one card naming the sender, the
+      subject as sent, the caption it proposes, and one ticked row. A JPEG
+      shows its embedded thumbnail; **a HEIC shows a neutral tile with its
+      filename and size, and that is correct** — a HEIC has no EXIF thumbnail
+      (decisions.md #84).
+- [ ] Press **Show** on that row. It decodes the photograph here in the
+      browser and the tile becomes the picture, upright. That decode is the
+      slow half of adding a photograph, which is why it waits to be asked and
+      runs one file at a time; a card with several hidden photographs offers
+      **Show all**, and they still decode in turn.
+- [ ] Correct the caption and press **Add**. The photograph goes through the
+      same pipeline a dropped file does, in this browser, and appears in
+      Recently added. The Inbox count returns to zero.
+- [ ] Send a second message from an address that is **not** switched on. Expect
+      **nothing at all** — no bounce, no receipt, no card. That silence is the
+      design (decisions.md #80); confirm it in `npx wrangler tail`, which logs
+      the drop with the sender's domain and never their address.
+
+- [ ] **If the first message never arrives, read the log before anything
+      else.** Watch `npx wrangler tail` and send again. A line like
+
+      ```text
+      Submission dropped {"reason":"not-authenticated",
+        "detail":"foreign-authserv","sawAuthservId":"…","fromDomain":"…"}
+      ```
+
+      means the one value in this feature that was never verified against a
+      real message is wrong: `CLOUDFLARE_AUTHSERV_ID` in
+      `src/shared/email-auth.ts`. Cloudflare does not document the identity it
+      stamps its `Authentication-Results` header with, so that constant is an
+      expectation, and it is checked strictly because a header written under
+      somebody else's identity is somebody else's claim. Set it to whatever
+      `sawAuthservId` printed, deploy, and send again.
+
+      While it is wrong the feature fails closed: every submission is dropped
+      and no sender is told, which is the right direction to be wrong in and
+      also indistinguishable from nobody having sent anything. Hence this step.
+
+- [ ] **Capture the real header into the test fixture** while you are here. Add
+      one line to `handleSubmission` to log
+      `authenticationResultsHeaders(message.headers)[0]`, send a message from
+      each provider your family actually uses, and paste what arrives into
+      `CLOUDFLARE_GMAIL` in `tests/unit/email-auth.test.ts` — one fixture per
+      provider is better than one. The parser is a pure function of that
+      string, so the fixture *is* the test, and until it holds a real capture
+      what it pins is the RFC 8601 grammar rather than what Cloudflare emits.
+      Remove the log line afterwards: a full `Authentication-Results` header
+      names the sender's domain and their signing selector.
+- [ ] Send a message with a PDF and no image. Expect an ordinary
+      delivery-failure message saying no photos were found.
+
+### What to tell a sender
+
+- The subject line becomes the caption, and every photograph in one message
+  gets the same one.
+- JPEG, PNG and HEIC only. Anything else in the message is ignored.
+- Nothing appears on the site until somebody has looked at it.
+- Send from the address that was switched on. A forward from another mailbox
+  will not arrive.
+
+### Retention, and what it costs
+
+Submissions are deleted **30 days** after they arrive, reviewed or not, by the
+same daily pass that purges the trash. An administrator away for a month loses
+them, and the sender is not told. That is deliberate: these are originals as
+sent, GPS and all, and the site should not hold one indefinitely because nobody
+got round to it (decisions.md #79). The Worker also bounces new mail once the
+inbox holds more than 200 parts or 2 GB.
 
 ## Moving the site to the domain
 
@@ -903,7 +1076,7 @@ name itself.
 
 ### Afterwards
 
-- [ ] Send yourself a test from the Notifications page and check the link in
+- [ ] Send yourself a test from the Emails page and check the link in
       it points at the new host.
 - [ ] Give the family the new display URL. The old one keeps working: Netlify
       301s `<your-site>.netlify.app` to the primary domain preserving the
@@ -983,7 +1156,7 @@ there.
 `catalog/notifications.json` is restored the same way — a conditional write
 against its current ETag — but it is not on the critical path and there is no
 snapshot history for it. If it is gone, do not reconstruct it: switch each
-recipient back on from the Notifications page and accept that their clocks
+recipient back on from the Emails page and accept that their clocks
 start again.
 
 ## Launch checklist
@@ -1197,6 +1370,12 @@ the photo ID the rest of that group uses.
       or, on a deployment without the five secrets,
       `Notifications are not configured; sending nothing.` Both are
       acceptable; silence is not. Watch it with `npx wrangler tail`.
+
+- [ ] **The maintenance line accounts for the inbox too.** Its
+      `purgedSubmissionIds` is the emailed submissions whose 30 days have
+      elapsed — empty on a healthy week. It is the *only* thing that deletes
+      from `inbox/` unattended; `orphanKeysDeleted` covers `photos/` alone and
+      must never grow to include the inbox (decisions.md #85).
 
 - [ ] **One nightly backup completes and mirrors everything.** Run
       `scripts/backup.sh` by hand, per [Backup](#backup), and confirm the

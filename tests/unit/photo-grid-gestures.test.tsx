@@ -43,6 +43,7 @@ function harness(select: boolean, selected: readonly string[] = []) {
     selectAll: () => {},
     trash: () => {},
     edit: () => Promise.reject(new Error('not in this test')),
+    attribution: () => Promise.resolve(null),
     can: { edit: true, download: true, trash: true, select },
   };
   return { calls, curation };

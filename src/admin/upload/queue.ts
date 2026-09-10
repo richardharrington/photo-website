@@ -78,6 +78,16 @@ export interface QueueItem {
    * commit has already happened.
    */
   edit: PhotoEdit | null;
+  /**
+   * A caption settled before this file was added at all.
+   *
+   * A drop has none. The Inbox has one for the whole message — the subject
+   * line, as the administrator corrected it — and it applies to every part
+   * ticked. It travels into each file's own commit rather than being applied
+   * afterwards as N separate edits, so nothing is ever stored with a caption
+   * already known to be wrong. Anything typed per-photo (`edit`) outranks it.
+   */
+  caption: string | null;
   /** The picture, once the encoders have produced it. */
   preview: PendingPreview | null;
   /** Set for `skipped`: the photo already in the catalog. */
@@ -135,6 +145,13 @@ export interface CommitBody {
   batchSeq: number;
   selectionIndex: number;
   derivatives: Record<Rendition, DerivativeDescriptor>;
+  /**
+   * Set when these bytes came out of the Inbox. The queue does not know or
+   * care what a submission is; the Inbox page supplies a `commit` that adds
+   * these two, and the server resolves the sender from the stored record.
+   */
+  submissionId?: string;
+  claimToken?: string;
 }
 
 const EMPTY_COUNTS: Record<ItemState, number> = {
@@ -194,9 +211,10 @@ export class UploadQueue {
    *
    * `selectionIndex` comes from position in this drop, and combines with the
    * server-assigned batch number to give date-only photos a stable order
-   * across batches (decisions.md #10).
+   * across batches (decisions.md #10). One email is one batch, so the Inbox
+   * hands its ticked parts over in one call and gets the same ordering.
    */
-  async add(files: readonly File[]): Promise<void> {
+  async add(files: readonly File[], caption: string | null = null): Promise<void> {
     const offset = this.items.length;
     const added: string[] = [];
     for (const [index, file] of files.entries()) {
@@ -210,6 +228,7 @@ export class UploadQueue {
         progress: 0,
         source: null,
         edit: null,
+        caption,
         preview: null,
       });
     }
@@ -445,7 +464,7 @@ export class UploadQueue {
           captureDate === photo.captureDate && captureTime === photo.captureTime
             ? photo.timestampSource
             : 'manual',
-        caption: typed?.caption ?? null,
+        caption: typed?.caption ?? item.caption,
         batchSeq: this.batchSeq,
         selectionIndex: item.selectionIndex,
         derivatives: photo.derivatives,

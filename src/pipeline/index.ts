@@ -13,6 +13,7 @@
  */
 
 import type { Rendition } from '../shared/constants.ts';
+import { MIME_BY_FORMAT } from '../shared/image-signature.ts';
 import type { DerivativeDescriptor, TimestampSource } from '../shared/catalog.ts';
 import { downloadFilenameFor } from '../shared/filename.ts';
 import { decodeToSrgb } from './decode.ts';
@@ -58,12 +59,6 @@ export interface ProcessOptions {
    */
   metadata?: SourceMetadata;
 }
-
-const MIME_BY_FORMAT = {
-  jpeg: 'image/jpeg',
-  png: 'image/png',
-  heif: 'image/heic',
-} as const;
 
 /**
  * Process one file.

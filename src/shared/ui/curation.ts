@@ -42,6 +42,20 @@ export interface Curation {
   trash(id: string): void;
   /** Save an edit; resolves with the stored photo. Rejects with a message. */
   edit(id: string, edit: PhotoEdit): Promise<PublicPhoto>;
+  /**
+   * Who emailed this photograph in, or null when nobody did.
+   *
+   * A separate request rather than a field on `PublicPhoto`, because that
+   * projection is a whitelist the viewer receives and who sent a photograph is
+   * none of a viewer's business. It is asked for only when the info panel is
+   * opened, and the address is resolved on the server — the browser never
+   * holds an address id either.
+   *
+   * Required, like every other member here, so a new listing has to decide
+   * rather than inherit: the trash, the upload panel, and the tests all answer
+   * null, and only the library ever asks.
+   */
+  attribution(id: string): Promise<string | null>;
   /** What the photo view offers for these photographs; see `Capabilities`. */
   can: Capabilities;
 }

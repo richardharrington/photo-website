@@ -126,6 +126,12 @@ test.describe('the admin timeline', () => {
     const target = page.getByRole('button', { name: /Add photos/ });
     await expect(target).toBeVisible();
 
+    // The header's two counts arrive after the page does, and each widens its
+    // link when it lands. Measure only once both are in, or a reflow can land
+    // between the scroll and the geometry read below.
+    await expect(page.getByRole('link', { name: /^Trash \(\d+\)$/ })).toBeVisible();
+    await expect(page.getByRole('link', { name: /^Inbox \(\d+\)$/ })).toBeVisible();
+
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await expect(target).toBeInViewport();
 

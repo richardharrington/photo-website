@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  NOTIFICATION_SCHEMA_VERSION,
   digestBody,
   digestFor,
   digestSubject,
@@ -25,12 +26,14 @@ function state(
   recipients: Record<string, Partial<NotificationState['recipients'][string]>>,
 ): NotificationState {
   return {
-    schemaVersion: 1,
+    schemaVersion: NOTIFICATION_SCHEMA_VERSION,
     recipients: Object.fromEntries(
       Object.entries(recipients).map(([email, partial]) => [
         email,
         {
           enabled: true,
+          canSubmit: false,
+          reviewsInbox: false,
           seenThrough: '2026-09-01T00:00:00.000Z',
           lastSent: null,
           ...partial,
@@ -190,10 +193,14 @@ describe('recordDigestSent', () => {
       count: 2,
       seenThrough: '2026-09-04T09:00:00.000Z',
       at: NOW,
+      canSubmit: false,
+      waiting: null,
     });
 
     expect(after.recipients['a@example.com']).toEqual({
       enabled: true,
+      canSubmit: false,
+      reviewsInbox: false,
       seenThrough: '2026-09-04T09:00:00.000Z',
       lastSent: { at: NOW, count: 2 },
     });
@@ -210,6 +217,8 @@ describe('recordDigestSent', () => {
         count: 1,
         seenThrough: NOW,
         at: NOW,
+        canSubmit: false,
+        waiting: null,
       }),
     ).toBe(before);
   });
@@ -236,6 +245,8 @@ describe('digestFor', () => {
     // The test button sends this one; the nightly pass declines to.
     const plan = digestFor([], 'a@example.com', '2026-09-01T00:00:00.000Z', NOW);
     expect(plan).toEqual({
+      canSubmit: false,
+      waiting: null,
       email: 'a@example.com',
       count: 0,
       seenThrough: '2026-09-01T00:00:00.000Z',
@@ -296,5 +307,173 @@ describe('addresses', () => {
 
   it('lowercases, so one recipient cannot become two state entries', () => {
     expect(normalizeEmail('  Aunt@Example.COM ')).toBe('aunt@example.com');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The two submission additions
+// ---------------------------------------------------------------------------
+
+describe('planDigests and the inbox', () => {
+  const catalog = makeCatalog([uploaded('2026-09-03T09:00:00.000Z')]);
+  const quiet = makeCatalog([]);
+  const waiting = { parts: 3, messages: 2 };
+
+  it('marks a submitter’s plan, and leaves everyone else’s alone', () => {
+    const plans = planDigests(
+      catalog,
+      state({
+        'sender@example.com': { canSubmit: true },
+        'reader@example.com': {},
+      }),
+      [address('sender@example.com'), address('reader@example.com')],
+      NOW,
+      waiting,
+    );
+
+    expect(plans.map((plan) => [plan.email, plan.canSubmit])).toEqual([
+      ['reader@example.com', false],
+      ['sender@example.com', true],
+    ]);
+  });
+
+  it('carries the waiting count only to a reviewer', () => {
+    const plans = planDigests(
+      catalog,
+      state({
+        'reviewer@example.com': { reviewsInbox: true },
+        'reader@example.com': {},
+      }),
+      [address('reviewer@example.com'), address('reader@example.com')],
+      NOW,
+      waiting,
+    );
+
+    const byEmail = Object.fromEntries(plans.map((plan) => [plan.email, plan.waiting]));
+    expect(byEmail['reviewer@example.com']).toEqual(waiting);
+    expect(byEmail['reader@example.com']).toBeNull();
+  });
+
+  /**
+   * The one place the "only on a day something arrived" rule bends, and it
+   * bends in the plan rather than in the executor so what is sent stays a pure
+   * function of the three inputs.
+   */
+  it('sends to a reviewer on a quiet day when something is waiting', () => {
+    const plans = planDigests(
+      quiet,
+      state({ 'reviewer@example.com': { reviewsInbox: true } }),
+      [address('reviewer@example.com')],
+      NOW,
+      waiting,
+    );
+
+    expect(plans).toHaveLength(1);
+    expect(plans[0]?.count).toBe(0);
+    expect(plans[0]?.waiting).toEqual(waiting);
+  });
+
+  it('sends a reviewer nothing on a quiet day with an empty inbox', () => {
+    expect(
+      planDigests(
+        quiet,
+        state({ 'reviewer@example.com': { reviewsInbox: true } }),
+        [address('reviewer@example.com')],
+        NOW,
+        { parts: 0, messages: 0 },
+      ),
+    ).toEqual([]);
+  });
+
+  it('sends a non-reviewer nothing on a quiet day, whatever is waiting', () => {
+    expect(
+      planDigests(
+        quiet,
+        state({ 'reader@example.com': {} }),
+        [address('reader@example.com')],
+        NOW,
+        waiting,
+      ),
+    ).toEqual([]);
+  });
+
+  it('leaves the watermark exactly where it was for a waiting-only send', () => {
+    const seenThrough = '2026-09-04T00:00:00.000Z';
+    const plans = planDigests(
+      quiet,
+      state({ 'reviewer@example.com': { reviewsInbox: true, seenThrough } }),
+      [address('reviewer@example.com')],
+      NOW,
+      waiting,
+    );
+
+    // Nothing was counted, so the new watermark is the old one.
+    expect(plans[0]?.seenThrough).toBe(seenThrough);
+  });
+
+  it('defaults to an empty inbox when no argument is given', () => {
+    const plans = planDigests(
+      catalog,
+      state({ 'reviewer@example.com': { reviewsInbox: true } }),
+      [address('reviewer@example.com')],
+      NOW,
+    );
+    expect(plans[0]?.waiting).toBeNull();
+  });
+});
+
+describe('the digest message, with submissions', () => {
+  const url = 'https://photos.test/secret/recent';
+
+  it('is byte-for-byte unchanged for a recipient with neither bit', () => {
+    expect(digestBody(2, 'Family Photos', url, {})).toBe(
+      digestBody(2, 'Family Photos', url),
+    );
+  });
+
+  it('adds the submission address only for a submitter', () => {
+    const body = digestBody(2, 'Family Photos', url, {
+      submitAddress: 'submit@example.test',
+    });
+    expect(body).toContain('email them to submit@example.test');
+    expect(body).toContain('The subject');
+    expect(body).toContain('line becomes the caption.');
+
+    // The address travels only to people already allowed to send there.
+    expect(digestBody(2, 'Family Photos', url, { submitAddress: null })).not.toContain(
+      'submit@example.test',
+    );
+  });
+
+  it('states what is waiting, after the opening', () => {
+    const body = digestBody(2, 'Family Photos', url, {
+      waiting: { parts: 3, messages: 2 },
+    });
+    expect(body).toContain(
+      '3 emailed photos from 2 messages are waiting to be looked at.',
+    );
+    expect(body.indexOf('waiting to be looked at')).toBeLessThan(
+      body.indexOf('See them here'),
+    );
+  });
+
+  it('counts one photo and one message in the singular', () => {
+    expect(
+      digestBody(0, 'Family Photos', url, { waiting: { parts: 1, messages: 1 } }),
+    ).toContain('1 emailed photo from 1 message is waiting to be looked at.');
+  });
+
+  it('says so in the subject when the waiting is the only news', () => {
+    expect(digestSubject(0, 'Family Photos', false, true)).toBe(
+      'Photos waiting for review on Family Photos',
+    );
+    // With new photos, the count is still the headline.
+    expect(digestSubject(2, 'Family Photos', false, true)).toBe(
+      '2 new photos on Family Photos',
+    );
+    // And with nothing waiting, nothing changed.
+    expect(digestSubject(0, 'Family Photos', false, false)).toBe(
+      'No new photos on Family Photos',
+    );
   });
 });

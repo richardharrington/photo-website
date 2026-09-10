@@ -52,11 +52,12 @@ origin/master..master` and `npx wrangler deployments status`.
 
 ## Architecture
 
-All image processing happens in the administrator's browser. The server never
-touches image bytes. The browser decodes, orients, converts to sRGB, resizes,
-and encodes four artifacts, then PUTs them straight to R2 with presigned URLs;
-the admin API only issues those URLs, verifies the objects landed, and updates
-the catalog.
+All image processing happens in the administrator's browser. **The server never
+decodes image bytes**; an emailed original is stored under `inbox/` untouched
+until the admin browser processes it. The browser decodes, orients, converts to
+sRGB, resizes, and encodes four artifacts, then PUTs them straight to R2 with
+presigned URLs; the admin API only issues those URLs, verifies the objects
+landed, and updates the catalog.
 
 Four runtimes share one `src/shared/` model layer:
 
@@ -160,6 +161,23 @@ fixture server.
   reachable only through a short-lived HMAC-signed URL, never from a photo ID.
 - Objects never move. Trash is a catalog field; only permanent deletion or the
   daily cron removes bytes.
+- **The orphan sweep must never be extended to `inbox/`.** It deletes
+  `photos/` objects with no catalog record, and every object under `inbox/`
+  has no catalog record by definition — sweeping it would delete every waiting
+  submission on its first run. The 30-day retention purge is that prefix's
+  only reaper, and a test asserts it.
+- **An email address is never stored, anywhere.** The catalog, the audit log,
+  and the inbox all record a sender as Cloudflare's destination-_address id_;
+  the pages resolve it against the account's list when they show it. The
+  catalog is loaded on every viewer request, and the audit log is kept forever.
+- `postal-mime` is Worker-only and `exifr` is browser-only. The pure rules
+  they feed — the authentication-header parser, the part sniff, the caption
+  proposal — live in `src/shared/` and are compiled by all three tsconfigs.
+- **Every decode is serial, including the Inbox's.** `src/pipeline/preview.ts`
+  decodes an emailed part on request, behind a Show button, and queues on one
+  module-global promise chain — the same rule as the upload pipeline, and the
+  only thing between a six-photograph email and six simultaneous libheif
+  decodes.
 - Adding a non-secret env var whose value also appears in the repo may trip
   Netlify's secrets scanner — see `SECRETS_SCAN_OMIT_KEYS` in `netlify.toml`.
 
@@ -197,6 +215,7 @@ by number:
 | `docs/decisions.md`           | Why, including the defects that shaped it         |
 | `docs/operations.md`          | Account setup, backup, recovery, launch checklist |
 
-`docs/operations.md` must never contain a real secret path segment or key. Its
+`docs/operations.md` must never contain a real secret path segment, key, or
+email address or domain. Its
 command blocks source `.env` into the shell instead, and the values are written
 as variable references.

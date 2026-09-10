@@ -957,7 +957,7 @@ its ordering, and its URLs are unchanged.
     unauthenticated write path on a site whose entire access model is that it
     has no authenticated ones, and it would have to be reachable from a link
     that travels in mail. The footer says to ask whoever runs the site; the
-    administrator removes the address on the Notifications page, which deletes
+    administrator removes the address on the Emails page, which deletes
     it at Cloudflare. For a list of family members this is the right size of
     mechanism.
 
@@ -1090,3 +1090,195 @@ its ordering, and its URLs are unchanged.
     undo were added; Escape and the background click clear rather than restore.
     The selection bar is now up almost all the time, which is itself the
     confirmation that a click registered — the tile wash alone is easy to miss.
+
+## Letting the family send photographs — 2026-09-09
+
+79. **The pipeline stays in the browser, and the server only stores.** The
+    rule in `CLAUDE.md` was "the server never touches image bytes"; it is now
+    "the server never *decodes* image bytes". An emailed original is written to
+    `inbox/` byte for byte and never decoded, transformed, or served to a
+    viewer; everything else happens where it always did.
+
+    Rejected: **processing in the Worker** — WASM libheif and libwebp inside
+    Cloudflare, committing directly, so a photograph would appear seconds after
+    it was sent. It ports the whole pipeline to a second runtime with a 128 MB
+    memory ceiling and a CPU-time cap that a 12 MP HEIC decode already strains;
+    it creates a second orientation decision, a second colour path, and a
+    second EXIF strip that must agree with the first (#18, #21 are about how
+    hard the first one was to get right); and it makes any allowed sender a
+    publisher with no review.
+
+    Rejected: **a mailbox with a Download button** — store the raw file and let
+    the administrator download and re-drop it. Least code by far. It makes
+    email a delivery channel rather than a submission path, and the caption is
+    typed a second time.
+
+    Rejected: **auto-process on the administrator's next visit**, with the
+    Trash as the review surface. The caption is what kills it: the subject line
+    is the weakest input in this design — iOS Mail defaults it to "4 images", a
+    forward gives "Fwd: Fwd: beach", a blank gives nothing — and the edit form
+    edits one photograph's caption at a time. Twenty photographs captioned "20
+    images" are twenty round-trips to fix once committed, and one field to fix
+    before. "Restore" meaning "publish" is also the wrong verb, and the trash's
+    30-day purge would silently delete unreviewed submissions.
+
+80. **Two proofs, both required, and both already paid for.** A submission is
+    accepted only when the From address is a **verified destination address in
+    the account with `canSubmit` set**, *and* the message **authenticates for
+    that address's domain** — DMARC pass, or a DKIM pass whose `header.d`
+    aligns with the From domain under DMARC's relaxed rule.
+
+    Verification proves someone controls the mailbox; DKIM proves the message
+    came from it. Requiring verification for Can submit is the same rule
+    Notifications already has, and it means the switch is inert until the owner
+    has clicked Cloudflare's link.
+
+    Rejected: **the From address alone** — anyone who learns the submission
+    address and a family member's address can fill the bucket. Rejected: **a
+    per-sender token in the subject or a plus-address** — strong, but it has to
+    be delivered and remembered, and a token in the subject collides with
+    subject-as-caption.
+
+    Two traps are load-bearing in the parser. Only the **first**
+    `Authentication-Results` header counts, because a sender may attach as many
+    more as they like and Cloudflare prepends its own; and its **authserv-id
+    must be Cloudflare's**, because a header written under somebody else's
+    identity is somebody else's claim. Scanning the header block for any
+    `dkim=pass` would accept a forgery outright.
+
+    **One value here is expected rather than measured**, and it is worth naming
+    plainly: `CLOUDFLARE_AUTHSERV_ID`. No account with a domain existed when
+    this was built, and Cloudflare does not document the identity it stamps the
+    header with. The grammar around it is RFC 8601 and safe to rely on — every
+    provider emits it — but that one string is a guess, checked strictly.
+
+    If it is wrong the feature fails **closed and silently**: every submission
+    drops and no sender is told, which is the right direction to be wrong in
+    and also indistinguishable from nobody having sent anything. So a mismatch
+    logs the identity it actually saw — Cloudflare's own hostname, never
+    anything about the sender — and that one line is the whole diagnosis.
+    Confirming it, and replacing the hand-written test fixture with a real
+    capture, are steps in operations.md.
+
+81. **A claim, not a lock and not a hash.** Adding is a browser-side job of
+    seconds to minutes and two admin tabs can be open, so a tab writes a random
+    token onto the submission record under an ETag-guarded conditional write
+    before it starts, and carries that token on every later write. The loser of
+    the race is told, rather than finding out by doing the work twice. A claim
+    expires after fifteen minutes and the Inbox then offers Take over, so a
+    closed tab strands nothing.
+
+    Rejected: **no claim at all**, relying on the commit's content-hash
+    duplicate check. It works — the second tab's photographs would come back as
+    duplicates — but only after it has burned a full decode per file to find
+    out, and the page cannot say "someone else is on this". Rejected: **a
+    heartbeat lock object** — strongest, most machinery, and one more thing
+    that can wedge.
+
+82. **`submittedBy` was added without bumping the catalog version.** The field
+    is optional on read, absent read as `null`, and always written. Bumping
+    `CATALOG_SCHEMA_VERSION` would touch snapshots, the export, and every
+    fixture for the sake of a field whose loss on a rollback costs attribution
+    and nothing else.
+
+    What makes that safe is a property the mutations already had and now have a
+    test for: every one of them **spreads the record it is given** rather than
+    rebuilding it, so a build that has never heard of the field still carries it
+    through a trash, a restore, or an edit. The notification state went the
+    other way — a version bump to 2 with an in-memory upgrade on read — because
+    a rolled-back build must *refuse* that file rather than write back a shape
+    that drops the two new switches.
+
+    It is an **address id, never an address**, for the same reason the catalog
+    carries no addresses: the catalog is loaded on every viewer request. The
+    display projection is a whitelist and was not changed; a test asserts a
+    record with `submittedBy` set projects to an object without it.
+
+83. **`createdAt` is the commit instant, as it is for every photograph.** It is
+    when the photograph became visible, which is what Recently added groups by
+    and what the digest watermark compares against. Five emails from last week
+    added in one sitting are one sitting and one digest count, which is the
+    truth of what the family can see. Rejected: `createdAt` = the instant the
+    mail arrived — a photograph could then predate a digest watermark and never
+    be announced, and Recently added could grow a sitting in the past. Rejected:
+    a second `receivedAt` field on the record — a schema change for a nicety.
+    The receipt instant lives on the submission record and in the audit trail.
+
+84. **The Inbox previews from the EXIF thumbnail, and HEIC has none.** No part
+    is decoded before Add: a decode is the expensive, memory-risky, strictly
+    serial thing #21 exists to bound, and a card of six photographs must not do
+    it six times over so the administrator can see what they are. A JPEG's
+    embedded thumbnail is read from the first 128 KB by a Range request and
+    shown, rotated by its `Orientation` tag with a **CSS transform** — not the
+    pipeline's orientation code, which compares a decoded shape against a
+    tagged one and has no decoded shape here.
+
+    **Measured during implementation:** `exifr.thumbnail` returns nothing for
+    every HEIC in `sample-photos/`, prefix or whole file. exifr reads the TIFF
+    IFD1 thumbnail; a HEIC keeps its thumbnail as a separate image item in the
+    ISO container, and that item is itself HEVC — so even extracting it would
+    leave bytes no browser can paint without the decoder this page exists to
+    avoid running. HEIC parts therefore get the neutral tile, alongside PNGs and
+    signature logos.
+
+    That left a card of iPhone photographs showing no pictures, only filenames
+    and sizes — which is most of what the decision turns on, since a 3 MB file
+    is a photograph and a 4 KB file is a logo, but thin. So the fix named as
+    the honest one was built: **a decode behind an explicit Show**.
+
+    `src/pipeline/preview.ts` validates from the header, decodes through the
+    pipeline's own `decodeToSrgb` — so the picture is upright, sRGB and
+    orientation-correct by the same code that will process it for real — shrinks
+    it to 640 px, and hands back an object URL. It skips the four WASM encodes
+    entirely, and the full-resolution JPEG in particular, which is what
+    dominates the pipeline's cost; the browser's own scaler and
+    `convertToBlob` do the rest, because nothing here is stored and the
+    reproducibility that #2 chose mozjpeg and libwebp for buys nothing.
+
+    **Every decode goes through one promise chain, module-global.** Show all
+    hands six over at once and they still run one at a time — the rule
+    from #21, and the only thing standing between a six-photograph email and
+    six simultaneous libheif decodes. A rejected decode must not wedge the
+    queue behind it, which is why the chain links with `then(work, work)`.
+    `runSerially` is exported as a test seam because that is the load-bearing
+    part and the only piece testable without a browser.
+
+    Rejected: **decoding on open**, which is the thing the whole page is
+    arranged to avoid. Rejected: **reusing `processFile`** and taking its
+    `thumb` artifact — correct, and it pays for the full-resolution JPEG encode
+    per part to throw it away.
+
+85. **`inbox/` is not swept, and that is a rule rather than an omission.** The
+    orphan sweep deletes `photos/` objects with no catalog record after a grace
+    period. Every object under `inbox/` has no catalog record *by definition*,
+    so extending the sweep would delete every waiting submission on its first
+    run — including one that arrived a minute ago. The 30-day retention purge is
+    the inbox's only reaper, and a test asserts the sweep leaves the prefix
+    alone.
+
+86. **A failed part is not swept up with the successful ones.** The spec says
+    the page removes the submission once every ticked part has reached an
+    outcome. Implemented as: it removes itself when nothing failed, and waits
+    for an explicit **Finish** when something did. A failure has a Retry beside
+    it, and retrying is impossible once the raw bytes are deleted — the same
+    reasoning that makes a claim expire rather than a tab's death be fatal. A
+    tab that dies before either leaves the claim to expire; the submission
+    reappears in full, and re-adding it finds its committed parts as duplicates,
+    which is the right answer.
+
+87. **The Notifications page became Emails, route and all.** It now carries
+    three switches rather than one, and "Notifications" no longer describes
+    what it is for.
+
+    The route moved with it — `/emails`, not `/notifications` — and so did the
+    admin API family (`/api/emails/*`), the component, the spec file, and the
+    CSS classes. The usual reason not to move a route is the links already
+    pointing at it; here there is exactly one holder of that link, the
+    administrator, and a page whose address disagrees with its name is a
+    lasting small confusion for the only person who will ever read it.
+
+    Two things deliberately kept their names. `catalog/notifications.json` is
+    stored data, and renaming a stored object is a migration, not a rename.
+    `src/shared/notifications.ts` and its repository are still about the digest
+    — the two new switches are *carried* in that state, but the module's
+    subject is what gets sent to whom.

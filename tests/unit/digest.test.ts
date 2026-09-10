@@ -8,7 +8,9 @@ import { bindingFor } from '../../fixtures/r2-binding.ts';
 import { makeCatalog, makePhoto, testPhotoId } from '../../fixtures/photos.ts';
 import { R2_KEYS } from '../../src/shared/constants.ts';
 import { encodeJson } from '../../src/shared/store.ts';
+import { storeSubmission } from '../../src/shared/inbox-repository.ts';
 import { signNotificationTest } from '../../src/shared/signing.ts';
+import { NOTIFICATION_SCHEMA_VERSION } from '../../src/shared/notifications.ts';
 import type { NotificationState } from '../../src/shared/notifications.ts';
 import type { FetchLike } from '../../src/shared/cloudflare-addresses.ts';
 import type { Catalog } from '../../src/shared/catalog.ts';
@@ -92,14 +94,27 @@ function seedStore(
 }
 
 function stateWith(
-  recipients: Record<string, { enabled: boolean; seenThrough: string }>,
+  recipients: Record<
+    string,
+    {
+      enabled: boolean;
+      seenThrough: string;
+      canSubmit?: boolean;
+      reviewsInbox?: boolean;
+    }
+  >,
 ): NotificationState {
   return {
-    schemaVersion: 1,
+    schemaVersion: NOTIFICATION_SCHEMA_VERSION,
     recipients: Object.fromEntries(
       Object.entries(recipients).map(([email, value]) => [
         email,
-        { ...value, lastSent: null },
+        {
+          canSubmit: false,
+          reviewsInbox: false,
+          ...value,
+          lastSent: null,
+        },
       ]),
     ),
   };
@@ -691,5 +706,186 @@ describe('the Cloudflare boundary', () => {
 
     expect(response.status).toBe(200);
     expect(sent[0]?.to).toBe('aunt@example.com');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The submission additions, through the executor
+// ---------------------------------------------------------------------------
+
+async function seedInbox(
+  store: InMemoryObjectStore,
+  messages: number,
+  partsEach: number,
+): Promise<void> {
+  for (let m = 0; m < messages; m += 1) {
+    const id = testPhotoId(`inbox-${m}`);
+    await storeSubmission(
+      store,
+      {
+        schemaVersion: 1,
+        id,
+        receivedAt: '2026-09-04T09:00:00.000Z',
+        submittedBy: 'cf-0',
+        subject: null,
+        proposedCaption: null,
+        bodyLine: null,
+        parts: Array.from({ length: partsEach }, (_, index) => ({
+          index,
+          filename: `p${index}.jpg`,
+          contentType: 'image/jpeg',
+          bytes: 10,
+        })),
+        claim: null,
+      },
+      Array.from({ length: partsEach }, (_, index) => ({
+        index,
+        bytes: new Uint8Array(10),
+        contentType: 'image/jpeg',
+      })),
+    );
+  }
+}
+
+describe('runDigest with submissions', () => {
+  it('adds the submission address only to a submitter’s message', async () => {
+    const store = seedStore(
+      CATALOG,
+      stateWith({
+        'sender@example.com': {
+          enabled: true,
+          seenThrough: '2026-09-01T00:00:00.000Z',
+          canSubmit: true,
+        },
+        'reader@example.com': {
+          enabled: true,
+          seenThrough: '2026-09-01T00:00:00.000Z',
+        },
+      }),
+    );
+    const { binding, sent } = fakeEmail();
+    const { fetchImpl } = fakeFetch([
+      { email: 'sender@example.com', verified: true },
+      { email: 'reader@example.com', verified: true },
+    ]);
+
+    await runDigest({
+      ...deps(store, binding, fetchImpl),
+      submitAddress: 'submit@example.test',
+    });
+
+    const byEmail = Object.fromEntries(
+      sent.map((message) => [message.to, message.text]),
+    );
+    expect(byEmail['sender@example.com']).toContain('submit@example.test');
+    expect(byEmail['reader@example.com']).not.toContain('submit@example.test');
+  });
+
+  it('tells a reviewer what is waiting, and sends on a quiet day', async () => {
+    const store = seedStore(
+      makeCatalog([]),
+      stateWith({
+        'reviewer@example.com': {
+          enabled: true,
+          seenThrough: '2026-09-01T00:00:00.000Z',
+          reviewsInbox: true,
+        },
+        'reader@example.com': {
+          enabled: true,
+          seenThrough: '2026-09-01T00:00:00.000Z',
+        },
+      }),
+    );
+    await seedInbox(store, 2, 3);
+    const { binding, sent } = fakeEmail();
+    const { fetchImpl } = fakeFetch([
+      { email: 'reviewer@example.com', verified: true },
+      { email: 'reader@example.com', verified: true },
+    ]);
+
+    await runDigest(deps(store, binding, fetchImpl));
+
+    // Only the reviewer hears anything at all on a day with no new photos.
+    expect(sent.map((message) => message.to)).toEqual(['reviewer@example.com']);
+    expect(sent[0]?.subject).toBe('Photos waiting for review on Family Photos');
+    expect(sent[0]?.text).toContain(
+      '6 emailed photos from 2 messages are waiting to be looked at.',
+    );
+  });
+
+  it('leaves the watermark alone after a waiting-only send', async () => {
+    const seenThrough = '2026-09-04T09:00:00.000Z';
+    const store = seedStore(
+      CATALOG,
+      stateWith({
+        'reviewer@example.com': { enabled: true, seenThrough, reviewsInbox: true },
+      }),
+    );
+    await seedInbox(store, 1, 1);
+    const { binding, sent } = fakeEmail();
+    const { fetchImpl } = fakeFetch([
+      { email: 'reviewer@example.com', verified: true },
+    ]);
+
+    await runDigest(deps(store, binding, fetchImpl));
+
+    expect(sent).toHaveLength(1);
+    expect(readState(store).recipients['reviewer@example.com']?.seenThrough).toBe(
+      seenThrough,
+    );
+  });
+
+  it('still sends when the inbox cannot be counted', async () => {
+    // The waiting line is an addition to the digest, not the digest.
+    const store = seedStore(
+      CATALOG,
+      stateWith({
+        'reviewer@example.com': {
+          enabled: true,
+          seenThrough: '2026-09-01T00:00:00.000Z',
+          reviewsInbox: true,
+        },
+      }),
+    );
+    const { binding, sent } = fakeEmail();
+    const { fetchImpl } = fakeFetch([
+      { email: 'reviewer@example.com', verified: true },
+    ]);
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    vi.spyOn(store, 'list').mockRejectedValue(new Error('R2 is having a day'));
+
+    await runDigest(deps(store, binding, fetchImpl));
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.text).not.toContain('waiting to be looked at');
+  });
+});
+
+describe('runDigestTest with submissions', () => {
+  it('shows the administrator both additions', async () => {
+    const store = seedStore(
+      CATALOG,
+      stateWith({
+        'admin@example.com': {
+          enabled: false,
+          seenThrough: '2026-09-01T00:00:00.000Z',
+          canSubmit: true,
+          reviewsInbox: true,
+        },
+      }),
+    );
+    await seedInbox(store, 1, 2);
+    const { binding, sent } = fakeEmail();
+    const { fetchImpl } = fakeFetch([{ email: 'admin@example.com', verified: true }]);
+
+    await runDigestTest(
+      { ...deps(store, binding, fetchImpl), submitAddress: 'submit@example.test' },
+      'admin@example.com',
+    );
+
+    expect(sent[0]?.text).toContain(
+      '2 emailed photos from 1 message are waiting to be looked at.',
+    );
+    expect(sent[0]?.text).toContain('submit@example.test');
   });
 });

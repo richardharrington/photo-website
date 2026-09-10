@@ -32,6 +32,8 @@ import type { R2Like } from './binding-store.ts';
 import { runMaintenance } from './maintenance.ts';
 import { runDigest, runDigestTest } from './digest.ts';
 import type { DigestDeps, SendEmailLike } from './digest.ts';
+import { handleSubmission } from './email.ts';
+import type { EmailMessageLike, SubmissionDeps } from './email.ts';
 
 export interface Env {
   PHOTOS: R2Like;
@@ -61,6 +63,15 @@ export interface Env {
    * the ability to delete recipients (decisions.md #70).
    */
   CLOUDFLARE_ADDRESSES_READ_TOKEN?: string;
+  /**
+   * The full submission address, `submit@<domain>`.
+   *
+   * Compared against `message.to` after normalization, so a catch-all routing
+   * rule can never feed the email handler by accident. Missing means the
+   * handler drops everything — the same "unconfigured means inert" posture the
+   * digest has.
+   */
+  SUBMIT_ADDRESS?: string;
   /** Test seam: the digest's HTTP client. Production uses the global. */
   FETCH?: FetchLike;
 }
@@ -298,6 +309,9 @@ function digestDeps(env: Env, now: () => Date): DigestDeps | null {
     // perfectly good mail under the wrong name, which nothing would report.
     siteTitle: env.SITE_TITLE!,
     displaySiteUrl: env.DISPLAY_SITE_URL!,
+    // Optional: a deployment that sends digests but accepts no mail simply
+    // omits the footer that would name an address nothing routes to.
+    submitAddress: env.SUBMIT_ADDRESS ?? null,
     now,
   };
 }
@@ -364,6 +378,39 @@ async function handleNotifyTest(
   });
 }
 
+/**
+ * The inbound-mail half's dependencies, or null when this deployment cannot
+ * accept submissions.
+ *
+ * It reuses everything the digest needs and adds one secret. A Worker without
+ * `SUBMIT_ADDRESS` accepts no mail at all, which is what an installation that
+ * has not created the routing rule should do.
+ */
+function submissionDeps(env: Env, now: () => Date): SubmissionDeps | null {
+  const digest = digestDeps(env, now);
+  if (!digest || !env.SUBMIT_ADDRESS) {
+    if (digest) {
+      console.warn(
+        'Email submissions are not configured; accepting nothing.',
+        JSON.stringify({ missing: ['SUBMIT_ADDRESS'] }),
+      );
+    }
+    return null;
+  }
+
+  return {
+    store: digest.store,
+    email: digest.email,
+    fetch: digest.fetch,
+    accountId: digest.accountId,
+    apiToken: digest.apiToken,
+    from: digest.from,
+    siteTitle: digest.siteTitle,
+    submitAddress: env.SUBMIT_ADDRESS,
+    now,
+  };
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -393,6 +440,26 @@ export default {
     }
 
     return notFound();
+  },
+
+  /**
+   * Inbound mail, from the Email Routing rule for the submission address.
+   *
+   * Returning normally without calling `setReject` **is** the silent drop: the
+   * message is gone and the sender learns nothing, which is the email analogue
+   * of the site's uniform 404. A thrown error would be a delivery failure and
+   * therefore a bounce, so nothing here is allowed to throw.
+   */
+  async email(message: EmailMessageLike, env: Env): Promise<void> {
+    try {
+      const deps = submissionDeps(env, () => new Date());
+      if (!deps) return;
+      await handleSubmission(deps, message);
+    } catch (error) {
+      // Logged and swallowed. A fault here must not become a bounce that tells
+      // an unknown sender their message reached something.
+      console.error('Inbound mail failed', error);
+    }
   },
 
   /**

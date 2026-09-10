@@ -8,10 +8,17 @@ workers_dev = true
 [triggers]
 crons = ["17 4 * * *"]
 
+# Inbound mail reaches the `email()` handler through an Email Routing rule
+# created in the dashboard — "custom address `submit`, send to a Worker" — not
+# through anything in this file. See "Adding email submissions" in
+# docs/operations.md.
+
 # Cloudflare Email Service. Sends to *verified destination addresses* in this
 # account are free and unlimited; this feature never sends anywhere else.
 # Requires a zone in this account with Email Routing enabled — see "Adding
-# email notifications" in docs/operations.md.
+# email notifications" in docs/operations.md. The same binding sends the receipt
+# for an emailed submission, which goes to a verified destination address like
+# everything else this Worker sends.
 # `name`, not `binding` — send_email is the one binding type that spells this
 # field differently, and wrangler refuses the whole config if it is wrong.
 # No destination_address or allowed_destination_addresses: the recipient list
@@ -46,5 +53,13 @@ preview_bucket_name = "family-photos-dev"
 #                                anyone can fork. Must match the SITE_TITLE set
 #                                on Netlify, or the mail and the website will
 #                                disagree.
+#   SUBMIT_ADDRESS               submit@<domain>, the address family email
+#                                photographs to. Compared against the
+#                                recipient of every inbound message, so a
+#                                catch-all routing rule cannot feed the email
+#                                handler by accident. Unset means the handler
+#                                accepts nothing — the same "unconfigured
+#                                means inert" posture the digest has, and the
+#                                way to switch submissions off.
 [vars]
 CATALOG_CACHE_SECONDS = "60"

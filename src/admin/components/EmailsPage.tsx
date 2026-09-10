@@ -11,6 +11,42 @@ import { ConfirmDialog } from './Confirm.tsx';
 const NO_RECIPIENTS: readonly Recipient[] = [];
 
 /**
+ * One of a row's three switches.
+ *
+ * The accessible name says which one, because a row now carries three and
+ * "On" alone would leave a screen reader announcing the same thing three
+ * times.
+ */
+function Switch({
+  label,
+  on,
+  disabled,
+  title,
+  onChange,
+}: {
+  label: string;
+  on: boolean;
+  disabled: boolean;
+  title: string | undefined;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <label className="emails__switch">
+      <input
+        type="checkbox"
+        role="switch"
+        aria-label={label}
+        checked={on}
+        disabled={disabled}
+        title={title}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      <span>{on ? 'On' : 'Off'}</span>
+    </label>
+  );
+}
+
+/**
  * `lastSent.at` is a genuine instant, unlike a capture time, so it is shown in
  * the reader's own zone — the administrator wants to know when the mail went
  * out by their clock, not the camera's.
@@ -24,19 +60,19 @@ function photos(count: number): string {
 }
 
 /**
- * Who gets told when new photographs arrive.
+ * Every address the site has anything to do with, and what each may do.
  *
  * The list here is **Cloudflare's**, not this site's. Adding an address creates
  * a destination address in the Cloudflare account, which is what sends the
  * confirmation link; removing one deletes it there. Nothing is stored about an
- * address anywhere else except whether the digest goes to it and how far it has
- * been told about (decisions.md, "Notifications").
+ * address anywhere else except the three switches and how far the digest has
+ * told it about (decisions.md, "Notifications").
  *
  * Every action refetches the whole list rather than patching a row. The list is
  * a handful of rows, the truth is remote, and a verification that landed while
  * the page was open should appear the moment anything else is done.
  */
-export function NotificationsPage({ nav }: { nav: ReactNode }) {
+export function EmailsPage({ nav }: { nav: ReactNode }) {
   const [reloadKey, setReloadKey] = useState(0);
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
@@ -47,7 +83,7 @@ export function NotificationsPage({ nav }: { nav: ReactNode }) {
   const [removing, setRemoving] = useState<Recipient | null>(null);
 
   const resource = useResource<{ recipients: Recipient[] }>(
-    (signal) => adminApi.notifications(signal),
+    (signal) => adminApi.emails(signal),
     [reloadKey],
   );
 
@@ -88,6 +124,16 @@ export function NotificationsPage({ nav }: { nav: ReactNode }) {
   async function setEnabled(recipient: Recipient, enabled: boolean) {
     setTested(null);
     await act(() => adminApi.setRecipientEnabled(recipient.email, enabled));
+  }
+
+  async function setCanSubmit(recipient: Recipient, canSubmit: boolean) {
+    setTested(null);
+    await act(() => adminApi.setRecipientCanSubmit(recipient.email, canSubmit));
+  }
+
+  async function setReviewsInbox(recipient: Recipient, reviewsInbox: boolean) {
+    setTested(null);
+    await act(() => adminApi.setRecipientReviewsInbox(recipient.email, reviewsInbox));
   }
 
   async function sendTest(recipient: Recipient) {
@@ -144,16 +190,23 @@ export function NotificationsPage({ nav }: { nav: ReactNode }) {
   return (
     <>
       <Layout nav={nav}>
-        <p className="notifications__intro">
+        <p className="emails__intro">
           Each of these addresses gets one plain-text email a day when new photos have
           been added — a count and a link, nothing else. Nothing is sent to an address
           until its owner confirms it.
         </p>
+        <p className="emails__intro">
+          <strong>Can submit</strong> lets an address email photographs to the site;
+          they wait in the Inbox until you have looked at them, and nobody else sees
+          them before that. <strong>Reviews inbox</strong> adds a line to that
+          address&rsquo;s daily email saying how much is waiting — and sends it even on
+          a day when nothing new arrived.
+        </p>
 
-        <form className="notifications__add" onSubmit={(event) => void add(event)}>
-          <label htmlFor="notifications-email">Add an address</label>
+        <form className="emails__add" onSubmit={(event) => void add(event)}>
+          <label htmlFor="emails-address">Add an address</label>
           <input
-            id="notifications-email"
+            id="emails-address"
             type="email"
             autoComplete="off"
             value={email}
@@ -166,7 +219,7 @@ export function NotificationsPage({ nav }: { nav: ReactNode }) {
         </form>
 
         {added ? (
-          <p className="notifications__note" role="status">
+          <p className="emails__note" role="status">
             Cloudflare has emailed {added} a link to confirm. Nothing is sent until they
             click it.
           </p>
@@ -181,13 +234,15 @@ export function NotificationsPage({ nav }: { nav: ReactNode }) {
         {recipients.length === 0 ? (
           <p className="state state--empty">Nobody is on the list yet.</p>
         ) : (
-          <div className="notifications__scroll">
-            <table className="notifications">
+          <div className="emails__scroll">
+            <table className="emails">
               <thead>
                 <tr>
                   <th scope="col">Address</th>
                   <th scope="col">Status</th>
                   <th scope="col">Notifications</th>
+                  <th scope="col">Can submit</th>
+                  <th scope="col">Reviews inbox</th>
                   <th scope="col">Last sent</th>
                   <th scope="col">Actions</th>
                 </tr>
@@ -200,43 +255,64 @@ export function NotificationsPage({ nav }: { nav: ReactNode }) {
                       <span
                         className={
                           recipient.verified
-                            ? 'notifications__badge'
-                            : 'notifications__badge notifications__badge--pending'
+                            ? 'emails__badge'
+                            : 'emails__badge emails__badge--pending'
                         }
                       >
                         {recipient.verified ? 'Verified' : 'Awaiting verification'}
                       </span>
                     </td>
+                    {/*
+                     * Three switches, not actions: each is a state, and each is
+                     * inert until Cloudflare has the confirmation. Verification
+                     * proves someone controls the mailbox; for Can submit, DKIM
+                     * proves a message came from it. Neither alone is enough,
+                     * which is why the switch waits for the first.
+                     */}
                     <td>
-                      {/*
-                       * A switch, not a pair of buttons: it is a state, and it is
-                       * the one control on this page that is not an action. It is
-                       * inert until Cloudflare has the confirmation, because until
-                       * then the answer is the same either way.
-                       */}
-                      <label className="notifications__switch">
-                        <input
-                          type="checkbox"
-                          role="switch"
-                          checked={recipient.enabled}
-                          disabled={busy || !recipient.verified}
-                          title={
-                            recipient.verified
-                              ? undefined
-                              : 'Nothing is sent until this address is confirmed.'
-                          }
-                          onChange={(event) =>
-                            void setEnabled(recipient, event.target.checked)
-                          }
-                        />
-                        <span>{recipient.enabled ? 'On' : 'Off'}</span>
-                      </label>
+                      <Switch
+                        label="Notifications"
+                        on={recipient.enabled}
+                        disabled={busy || !recipient.verified}
+                        title={
+                          recipient.verified
+                            ? undefined
+                            : 'Nothing is sent until this address is confirmed.'
+                        }
+                        onChange={(next) => void setEnabled(recipient, next)}
+                      />
+                    </td>
+                    <td>
+                      <Switch
+                        label="Can submit"
+                        on={recipient.canSubmit}
+                        disabled={busy || !recipient.verified}
+                        title={
+                          recipient.verified
+                            ? undefined
+                            : 'Mail is only accepted from a confirmed address.'
+                        }
+                        onChange={(next) => void setCanSubmit(recipient, next)}
+                      />
+                    </td>
+                    <td>
+                      <Switch
+                        label="Reviews inbox"
+                        on={recipient.reviewsInbox}
+                        disabled={busy || !recipient.verified}
+                        title={
+                          recipient.verified
+                            ? undefined
+                            : 'Nothing is sent until this address is confirmed.'
+                        }
+                        onChange={(next) => void setReviewsInbox(recipient, next)}
+                      />
                     </td>
                     <td>
                       {recipient.lastSent ? (
                         <>
                           {sentAt(recipient.lastSent.at)}
-                          <span className="notifications__count">
+                          <span className="emails__count">
                             {photos(recipient.lastSent.count)}
                           </span>
                         </>
@@ -245,7 +321,7 @@ export function NotificationsPage({ nav }: { nav: ReactNode }) {
                       )}
                     </td>
                     <td>
-                      <div className="notifications__actions">
+                      <div className="emails__actions">
                         <button
                           type="button"
                           disabled={busy || !recipient.verified}
@@ -268,7 +344,7 @@ export function NotificationsPage({ nav }: { nav: ReactNode }) {
                         </button>
                       </div>
                       {tested?.email === recipient.email ? (
-                        <p className="notifications__result" role="status">
+                        <p className="emails__result" role="status">
                           {tested.message}
                         </p>
                       ) : null}

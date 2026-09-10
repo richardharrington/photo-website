@@ -41,10 +41,11 @@ export function appRoutes(base: string) {
     trash: () => `${root}/trash`,
     /**
      * Admin-only pages, alongside `trash`. Building a URL is not knowing a
-     * route: the viewer's parser is never given either name, so `/trash` and
-     * `/notifications` under the display base are its own 404.
+     * route: the viewer's parser is never given any of these names, so
+     * `/trash`, `/emails` and `/inbox` under the display base are its own 404.
      */
-    notifications: () => `${root}/notifications`,
+    emails: () => `${root}/emails`,
+    inbox: () => `${root}/inbox`,
     api: (path: string) => `${root}/api${path.startsWith('/') ? path : `/${path}`}`,
   };
 }

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  expiredSubmissions,
   expiredTrashIds,
   orphanedKeys,
   photoIdFromKey,
@@ -7,7 +8,14 @@ import {
 } from '../../worker/src/maintenance.ts';
 import { InMemoryObjectStore } from '../../fixtures/in-memory-store.ts';
 import { makeCatalog, makePhoto, testPhotoId } from '../../fixtures/photos.ts';
-import { R2_KEYS, photoObjectKey } from '../../src/shared/constants.ts';
+import {
+  R2_KEYS,
+  photoObjectKey,
+  submissionPartKey,
+  submissionRecordKey,
+} from '../../src/shared/constants.ts';
+import { storeSubmission } from '../../src/shared/inbox-repository.ts';
+import type { Submission } from '../../src/shared/submissions.ts';
 import { encodeJson } from '../../src/shared/store.ts';
 import type { Catalog } from '../../src/shared/catalog.ts';
 import { objectKeysFor } from '../../src/shared/admin-operations.ts';
@@ -243,6 +251,7 @@ describe('runMaintenance', () => {
 
     expect(report).toEqual({
       purgedPhotoIds: [],
+      purgedSubmissionIds: [],
       orphanKeysDeleted: 0,
       snapshotsPruned: 0,
     });
@@ -257,5 +266,127 @@ describe('runMaintenance', () => {
 
     expect(second.purgedPhotoIds).toEqual([]);
     expect(second.orphanKeysDeleted).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The inbox retention purge
+// ---------------------------------------------------------------------------
+
+function submissionRecord(id: string, receivedAt: string): Submission {
+  return {
+    schemaVersion: 1,
+    id,
+    receivedAt,
+    submittedBy: 'cf-1',
+    subject: 'Beach day',
+    proposedCaption: 'Beach day',
+    bodyLine: null,
+    parts: [
+      { index: 0, filename: 'a.jpg', contentType: 'image/jpeg', bytes: 10 },
+      { index: 1, filename: 'b.jpg', contentType: 'image/jpeg', bytes: 10 },
+    ],
+    claim: null,
+  };
+}
+
+async function seedSubmission(
+  store: InMemoryObjectStore,
+  record: Submission,
+): Promise<void> {
+  await storeSubmission(
+    store,
+    record,
+    record.parts.map((part) => ({
+      index: part.index,
+      bytes: new Uint8Array(part.bytes),
+      contentType: part.contentType,
+    })),
+  );
+}
+
+describe('expiredSubmissions', () => {
+  it('selects messages past the 30-day window and no others', () => {
+    const old = submissionRecord(testPhotoId('old-sub'), daysAgo(31));
+    const boundary = submissionRecord(testPhotoId('boundary-sub'), daysAgo(30));
+    const recent = submissionRecord(testPhotoId('recent-sub'), daysAgo(29));
+
+    expect(
+      expiredSubmissions([old, boundary, recent], NOW_MS).map((each) => each.id),
+    ).toEqual([old.id, boundary.id]);
+  });
+
+  it('gives a claimed submission no reprieve', () => {
+    // A tab that claimed something a month ago is a tab that is long gone.
+    const claimed = {
+      ...submissionRecord(testPhotoId('claimed'), daysAgo(31)),
+      claim: { token: 'tab', at: daysAgo(31) },
+    };
+    expect(expiredSubmissions([claimed], NOW_MS)).toHaveLength(1);
+  });
+});
+
+describe('runMaintenance and the inbox', () => {
+  it('deletes an expired submission, parts and record, and audits it', async () => {
+    const store = new InMemoryObjectStore({ now: () => NOW });
+    store.seed(R2_KEYS.catalog, encodeJson(makeCatalog([])));
+    const old = submissionRecord(testPhotoId('old-sub'), daysAgo(31));
+    await seedSubmission(store, old);
+
+    const report = await runMaintenance(store, () => NOW);
+
+    expect(report.purgedSubmissionIds).toEqual([old.id]);
+    expect(store.keys().filter((key) => key.startsWith(R2_KEYS.inboxPrefix))).toEqual(
+      [],
+    );
+
+    const audits = store
+      .keys()
+      .filter((key) => key.startsWith(R2_KEYS.auditPrefix))
+      .map((key) => store.readJson<{ action: string; note?: string }>(key)!);
+    const purge = audits.find((event) => event.action === 'submission-purged');
+    expect(purge?.note).toContain(old.id);
+    expect(purge?.note).toContain('2 parts');
+    // Never the address and never the subject: the audit log is forever.
+    expect(purge?.note).not.toContain('cf-1');
+    expect(purge?.note).not.toContain('Beach day');
+  });
+
+  it('leaves a submission inside the window exactly where it is', async () => {
+    const store = new InMemoryObjectStore({ now: () => NOW });
+    store.seed(R2_KEYS.catalog, encodeJson(makeCatalog([])));
+    const recent = submissionRecord(testPhotoId('recent-sub'), daysAgo(3));
+    await seedSubmission(store, recent);
+
+    const report = await runMaintenance(store, () => NOW);
+
+    expect(report.purgedSubmissionIds).toEqual([]);
+    expect(store.has(submissionRecordKey(recent.id))).toBe(true);
+  });
+
+  /**
+   * The one rule the inbox depends on. Every object under `inbox/` has no
+   * catalog record by definition, so an orphan sweep extended to that prefix
+   * would delete every waiting submission on its first run — including one
+   * that arrived a minute ago.
+   */
+  it('leaves inbox/ alone when sweeping objects with no catalog record', async () => {
+    const store = new InMemoryObjectStore({
+      // Old enough that the orphan grace period has long elapsed.
+      now: () => new Date(NOW_MS - 48 * 3_600_000),
+    });
+    store.seed(R2_KEYS.catalog, encodeJson(makeCatalog([])));
+    const recent = submissionRecord(testPhotoId('untouched'), daysAgo(1));
+    await seedSubmission(store, recent);
+
+    const report = await runMaintenance(store, () => NOW);
+
+    expect(report.orphanKeysDeleted).toBe(0);
+    expect(store.has(submissionRecordKey(recent.id))).toBe(true);
+    expect(store.has(submissionPartKey(recent.id, 0))).toBe(true);
+    // No delete named an inbox key at all. The prefix is listed — the
+    // retention purge reads it — but nothing under it is ever swept.
+    const deletes = store.calls.filter((call) => call.startsWith('delete '));
+    expect(deletes.some((call) => call.includes(R2_KEYS.inboxPrefix))).toBe(false);
   });
 });

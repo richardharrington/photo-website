@@ -8,9 +8,11 @@
  */
 
 import {
+  INBOX_CLAIM_TTL_MINUTES,
   RENDITIONS,
   SIGNED_URL_TTL_SECONDS,
   photoObjectKey,
+  submissionPartKey,
 } from '../../src/shared/constants.ts';
 import type { Rendition } from '../../src/shared/constants.ts';
 import {
@@ -56,19 +58,33 @@ import {
   CloudflareApiError,
 } from '../../src/shared/cloudflare-addresses.ts';
 import type { FetchLike } from '../../src/shared/cloudflare-addresses.ts';
-import { isValidEmailAddress, normalizeEmail } from '../../src/shared/notifications.ts';
+import {
+  isValidEmailAddress,
+  newRecipient,
+  normalizeEmail,
+} from '../../src/shared/notifications.ts';
 import type {
   DestinationAddress,
   NotificationState,
+  RecipientState,
 } from '../../src/shared/notifications.ts';
 import {
   loadNotificationState,
   mutateNotificationState,
 } from '../../src/shared/notifications-repository.ts';
 import { toPublicPhoto } from '../../src/shared/display-api.ts';
+import {
+  claimSubmission,
+  isValidSubmissionId,
+  listSubmissions,
+  loadSubmission,
+  removeSubmission,
+} from '../../src/shared/inbox-repository.ts';
+import { claimAgeMs, isClaimLive } from '../../src/shared/submissions.ts';
+import type { Submission } from '../../src/shared/submissions.ts';
 import { S3ObjectStore } from './lib/s3-store.ts';
 import { readRoute } from './lib/read-routes.ts';
-import { presignedUploadUrls } from './lib/presign.ts';
+import { presignedGetUrl, presignedUploadUrls } from './lib/presign.ts';
 import {
   badRequest,
   checkAccess,
@@ -122,10 +138,18 @@ export default async function handler(request: Request): Promise<Response> {
     if (method === 'GET' && path === '/export') return exportCatalog();
     if (method === 'GET' && path === '/trash') return listTrash();
     if (method === 'GET' && path === '/trash/count') return trashCount();
-    if (method === 'GET' && path === '/notifications') return listNotifications();
+    if (method === 'GET' && path === '/emails') return listEmails();
+    if (method === 'GET' && path === '/inbox') return listInbox();
+    if (method === 'GET' && path === '/inbox/count') return inboxCount();
+    if (method === 'GET' && path === '/inbox/part-url') {
+      return inboxPartUrl(new URL(request.url));
+    }
 
     const download = /^\/download\/([0-9a-f]{32})$/.exec(path);
     if (method === 'GET' && download) return downloadLink(download[1]!);
+
+    const attribution = /^\/attribution\/([0-9a-f]{32})$/.exec(path);
+    if (method === 'GET' && attribution) return photoAttribution(attribution[1]!);
 
     // The admin app browses through the viewer's own projections; see
     // lib/read-routes.ts for why both functions must answer these.
@@ -156,13 +180,23 @@ export default async function handler(request: Request): Promise<Response> {
         return await handlePreview(request, 'permanent-delete');
       case '/permanent-delete/confirm':
         return await handlePermanentDeleteConfirm(request);
-      case '/notifications/add':
+      case '/emails/add':
         return await handleAddRecipient(request);
-      case '/notifications/remove':
+      case '/emails/remove':
         return await handleRemoveRecipient(request);
-      case '/notifications/set-enabled':
-        return await handleSetEnabled(request);
-      case '/notifications/test':
+      case '/emails/set-enabled':
+        return await handleSetEnabled(request, 'enabled');
+      case '/emails/set-submit':
+        return await handleSetEnabled(request, 'canSubmit');
+      case '/emails/set-reviews':
+        return await handleSetEnabled(request, 'reviewsInbox');
+      case '/inbox/claim':
+        return await handleInboxClaim(request);
+      case '/inbox/resolve':
+        return await handleInboxResolve(request, 'accepted');
+      case '/inbox/discard':
+        return await handleInboxResolve(request, 'discarded');
+      case '/emails/test':
         return await handleSendTest(request);
       default:
         return notFound();
@@ -244,6 +278,9 @@ interface CommitBody {
   batchSeq?: number;
   selectionIndex?: number;
   derivatives?: Record<string, DerivativeDescriptor>;
+  /** Set when this photograph came out of the Inbox; see below. */
+  submissionId?: string;
+  claimToken?: string;
 }
 
 const TIMESTAMP_SOURCES = new Set([
@@ -277,6 +314,24 @@ async function handleCommit(request: Request): Promise<Response> {
 
   const objectStore = store();
 
+  /*
+   * Attribution, resolved here and never taken from the browser.
+   *
+   * The request names a submission and presents the claim it took on it; the
+   * *sender* comes from the stored record. A tab cannot therefore attribute a
+   * photograph to somebody who did not send it, and a tab whose claim was
+   * taken over cannot commit against that submission at all — which is the
+   * same uniform 404 every other refusal is.
+   */
+  let submittedBy: string | null = null;
+  if (body.submissionId !== undefined) {
+    if (!isValidSubmissionId(body.submissionId)) return notFound();
+    const loaded = await loadSubmission(objectStore, body.submissionId);
+    if (!loaded) return notFound();
+    if (loaded.submission.claim?.token !== (body.claimToken ?? '')) return notFound();
+    submittedBy = loaded.submission.submittedBy;
+  }
+
   // Verify the objects actually landed before creating a record that promises
   // they exist. A record whose images 404 is worse than no record.
   for (const rendition of RENDITIONS) {
@@ -303,6 +358,7 @@ async function handleCommit(request: Request): Promise<Response> {
         captureUtcOffset: body.captureUtcOffset ?? null,
         timestampSource: body.timestampSource as never,
         caption: body.caption ?? null,
+        submittedBy,
         batchSeq: body.batchSeq!,
         selectionIndex: body.selectionIndex!,
         derivatives,
@@ -657,7 +713,7 @@ async function exportCatalog(): Promise<Response> {
 }
 
 // ---------------------------------------------------------------------------
-// Notifications
+// Emails: the recipient list, the three switches, and the test send
 // ---------------------------------------------------------------------------
 
 /**
@@ -686,6 +742,10 @@ interface RecipientRow {
   email: string;
   verified: boolean;
   enabled: boolean;
+  /** Mail from this address is accepted into the Inbox. */
+  canSubmit: boolean;
+  /** This administrator's digest reports a non-empty Inbox. */
+  reviewsInbox: boolean;
   lastSent: { at: string; count: number } | null;
 }
 
@@ -707,11 +767,13 @@ function recipientRow(
     email: address.email,
     verified: address.verified,
     enabled: recipient?.enabled ?? false,
+    canSubmit: recipient?.canSubmit ?? false,
+    reviewsInbox: recipient?.reviewsInbox ?? false,
     lastSent: recipient?.lastSent ?? null,
   };
 }
 
-async function listNotifications(): Promise<Response> {
+async function listEmails(): Promise<Response> {
   const [addresses, { state }] = await Promise.all([
     addressClient().list(),
     loadNotificationState(store()),
@@ -759,8 +821,9 @@ async function handleAddRecipient(request: Request): Promise<Response> {
       recipients: {
         ...state.recipients,
         // Enabling starts the clock: `seenThrough` is now, so the first digest
-        // never announces the library that was already there.
-        [address.email]: { enabled: true, seenThrough: at, lastSent: null },
+        // never announces the library that was already there. The two
+        // submission bits start off; each is a deliberate decision.
+        [address.email]: newRecipient(at),
       },
     },
     value: undefined,
@@ -772,6 +835,8 @@ async function handleAddRecipient(request: Request): Promise<Response> {
       email: address.email,
       verified: address.verified,
       enabled: true,
+      canSubmit: false,
+      reviewsInbox: false,
       lastSent: null,
     } satisfies RecipientRow,
   });
@@ -810,40 +875,65 @@ async function handleRemoveRecipient(request: Request): Promise<Response> {
   return json({ removed: address.email });
 }
 
-interface SetEnabledBody {
+interface SetSwitchBody {
   email?: unknown;
   enabled?: unknown;
+  canSubmit?: unknown;
+  reviewsInbox?: unknown;
 }
 
+/** Which of the three switches a row's endpoint sets. */
+type SwitchName = 'enabled' | 'canSubmit' | 'reviewsInbox';
+
 /**
- * Switch the digest on or off for one address.
+ * Switch one of the three bits on or off for one address.
  *
- * Going off→on sets `seenThrough` to now, always. Turning an address off and on
- * again never backfills: the switch means "from here on", not "catch me up".
+ * The three are independent in every combination: digest on and cannot submit,
+ * submit on and no digest, both, neither. One handler because the validation,
+ * the refusal for an address Cloudflare does not hold, and the reply are the
+ * same for all three; only the field and the watermark rule differ.
+ *
+ * For `enabled`, going off→on sets `seenThrough` to now, always. Turning an
+ * address off and on again never backfills: the switch means "from here on",
+ * not "catch me up". The other two never touch the watermark.
+ *
+ * Switching `canSubmit` off does **not** remove submissions already waiting in
+ * the Inbox. They were accepted in good standing, and the administrator
+ * decides them there.
  */
-async function handleSetEnabled(request: Request): Promise<Response> {
-  const body = await readJson<SetEnabledBody>(request);
+async function handleSetEnabled(
+  request: Request,
+  which: SwitchName,
+): Promise<Response> {
+  const body = await readJson<SetSwitchBody>(request);
   const email = readEmail(body?.email);
   if (email instanceof Response) return email;
-  if (typeof body?.enabled !== 'boolean')
-    return badRequest('enabled must be a boolean.');
 
-  const enabled = body.enabled;
+  const value = body?.[which];
+  if (typeof value !== 'boolean') return badRequest(`${which} must be a boolean.`);
+
   const at = nowIso();
 
   const addresses = await addressClient().list();
   const address = addresses.find((candidate) => candidate.email === email);
   if (!address) return notFound();
+  // The same rule as the digest's: the switch is inert until Cloudflare has
+  // the confirmation, so an unverified address cannot be given either new
+  // capability through a request that skipped the page.
+  if (!address.verified) return notFound();
 
   const state = await mutateNotificationState(store(), (current) => {
-    const existing = current.recipients[email];
-    const wasEnabled = existing?.enabled ?? false;
-    const next = {
-      enabled,
-      // Only when the clock actually starts. Switching off, or setting on to
-      // on, leaves the watermark exactly where it was.
-      seenThrough: enabled && !wasEnabled ? at : (existing?.seenThrough ?? at),
-      lastSent: existing?.lastSent ?? null,
+    const existing: RecipientState =
+      current.recipients[email] ?? newRecipient(at, false);
+    const startingDigest = which === 'enabled' && value && !existing.enabled;
+
+    const next: RecipientState = {
+      ...existing,
+      [which]: value,
+      // Only when the digest's clock actually starts. Switching off, setting
+      // on to on, or touching either of the other two, leaves the watermark
+      // exactly where it was.
+      seenThrough: startingDigest ? at : existing.seenThrough,
     };
     const updated: NotificationState = {
       ...current,
@@ -919,4 +1009,245 @@ async function handleSendTest(request: Request): Promise<Response> {
     count?: unknown;
   } | null;
   return json({ count: typeof result?.count === 'number' ? result.count : 0 });
+}
+
+/**
+ * Who emailed this photograph in, as an address.
+ *
+ * The catalog holds a Cloudflare address **id**, and the resolution happens
+ * here rather than in the browser so no id reaches it either. A photograph
+ * that was dropped, one whose sender Cloudflare no longer holds, and one that
+ * does not exist all answer `null`: the admin's photo view has one line to
+ * show or none, and there is nothing useful to say about the difference.
+ *
+ * Deliberately its own route rather than a field on the projection. The
+ * projection is a whitelist the viewer receives, and this is a fact about how
+ * a photograph arrived, which is none of a viewer's business.
+ */
+async function photoAttribution(photoId: string): Promise<Response> {
+  const { catalog } = await loadCatalog(store(), nowIso);
+  const submittedBy = catalog.photos[photoId]?.submittedBy ?? null;
+  if (!submittedBy) return json({ email: null });
+
+  const addresses = await addressClient().list();
+  const address = addresses.find((candidate) => candidate.id === submittedBy);
+  return json({ email: address?.email ?? null });
+}
+
+// ---------------------------------------------------------------------------
+// The Inbox
+// ---------------------------------------------------------------------------
+
+/**
+ * One card on the Inbox page.
+ *
+ * The sender is resolved here, from the address list Cloudflare holds, because
+ * the record carries only an address **id** — `inbox/` is read by this
+ * function and by the maintenance cron, and neither should have to see an
+ * email address to do its job. A sender since removed from Cloudflare has no
+ * address to resolve to, and the page says so rather than showing an id.
+ *
+ * The From display name is never used for anything here: it is
+ * sender-controlled text that never left the message.
+ */
+interface InboxRow {
+  id: string;
+  receivedAt: string;
+  /** The sender's address, or null when Cloudflare no longer holds it. */
+  from: string | null;
+  subject: string | null;
+  proposedCaption: string | null;
+  bodyLine: string | null;
+  parts: {
+    index: number;
+    filename: string | null;
+    contentType: string;
+    bytes: number;
+  }[];
+  /** Another tab is adding this right now; its controls stand down. */
+  claimedAt: string | null;
+  /** That claim has expired, so this card offers Take over. */
+  claimExpired: boolean;
+}
+
+function inboxRow(
+  submission: Submission,
+  addressesById: ReadonlyMap<string, DestinationAddress>,
+  atMs: number,
+): InboxRow {
+  const live = isClaimLive(submission, atMs);
+  return {
+    id: submission.id,
+    receivedAt: submission.receivedAt,
+    from: addressesById.get(submission.submittedBy)?.email ?? null,
+    subject: submission.subject,
+    proposedCaption: submission.proposedCaption,
+    bodyLine: submission.bodyLine,
+    parts: submission.parts,
+    claimedAt: submission.claim?.at ?? null,
+    claimExpired: submission.claim !== null && !live,
+  };
+}
+
+async function listInbox(): Promise<Response> {
+  const [submissions, addresses] = await Promise.all([
+    listSubmissions(store()),
+    addressClient().list(),
+  ]);
+
+  const byId = new Map(addresses.map((address) => [address.id, address]));
+  const at = nowMs();
+
+  return json({
+    submissions: submissions.map((submission) => inboxRow(submission, byId, at)),
+    claimTtlMinutes: INBOX_CLAIM_TTL_MINUTES,
+  });
+}
+
+/**
+ * Just the number, for the header's Inbox link.
+ *
+ * Separate from `listInbox` so a page view does not also fetch Cloudflare's
+ * address list, exactly as `trashCount` is separate from `listTrash`.
+ */
+async function inboxCount(): Promise<Response> {
+  const submissions = await listSubmissions(store());
+  return json({ count: submissions.length });
+}
+
+/**
+ * A short-lived presigned GET for one raw part.
+ *
+ * The browser fetches it directly, twice: a `Range: bytes=0-…` request for the
+ * embedded EXIF thumbnail, and a full fetch on Add. The part is never decoded
+ * here or served through the Worker — the server stores an emailed original
+ * and does nothing else with it.
+ *
+ * Every refusal is the uniform 404, including an index that names no stored
+ * part: a URL must not be signable for a key that does not exist.
+ */
+async function inboxPartUrl(url: URL): Promise<Response> {
+  const submissionId = url.searchParams.get('submission') ?? '';
+  const index = Number(url.searchParams.get('part'));
+  if (!isValidSubmissionId(submissionId)) return notFound();
+  if (!Number.isInteger(index) || index < 0) return notFound();
+
+  const loaded = await loadSubmission(store(), submissionId);
+  if (!loaded) return notFound();
+  const part = loaded.submission.parts.find((candidate) => candidate.index === index);
+  if (!part) return notFound();
+
+  const signed = await presignedGetUrl(
+    s3Config(),
+    submissionPartKey(submissionId, index),
+    SIGNED_URL_TTL_SECONDS,
+  );
+
+  return json({
+    url: signed,
+    contentType: part.contentType,
+    bytes: part.bytes,
+    expiresAt: new Date(Date.now() + SIGNED_URL_TTL_SECONDS * 1000).toISOString(),
+  });
+}
+
+interface ClaimBody {
+  submissionId?: unknown;
+  claimToken?: unknown;
+}
+
+function readClaim(body: ClaimBody | null): { id: string; token: string } | null {
+  const id = typeof body?.submissionId === 'string' ? body.submissionId : '';
+  const token = typeof body?.claimToken === 'string' ? body.claimToken : '';
+  if (!isValidSubmissionId(id)) return null;
+  // A token is opaque to this tier; it only has to be present and bounded.
+  if (token.length < 8 || token.length > 128) return null;
+  return { id, token };
+}
+
+/**
+ * Take the claim on a submission before adding it.
+ *
+ * The tab mints its own token and presents it; the conditional write inside
+ * `claimSubmission` decides who gets it. A live claim held by another tab is
+ * reported as `held` with its age, which is what lets the page say "being
+ * added in another tab, started 3 minutes ago" rather than simply failing.
+ */
+async function handleInboxClaim(request: Request): Promise<Response> {
+  const claim = readClaim(await readJson<ClaimBody>(request));
+  if (!claim) return notFound();
+
+  const outcome = await claimSubmission(store(), claim.id, claim.token, nowIso());
+
+  if (outcome.status === 'not-found') return notFound();
+  if (outcome.status === 'conflict') {
+    // Someone wrote between the read and the write. The page reloads the
+    // listing and finds whatever is actually there now.
+    return json({ status: 'conflict' });
+  }
+  if (outcome.status === 'held') {
+    return json({
+      status: 'held',
+      claimedAt: outcome.submission.claim?.at ?? null,
+      claimAgeMs: claimAgeMs(outcome.submission, nowMs()),
+    });
+  }
+
+  return json({ status: 'claimed' });
+}
+
+interface ResolveBody extends ClaimBody {
+  photoIds?: unknown;
+}
+
+/**
+ * Remove a submission: its raw parts and its record.
+ *
+ * The same work either way, and the audit event is the difference. `accepted`
+ * carries the photo ids that were committed out of it; `discarded` carries
+ * none, because nothing was. Neither carries the address or the subject.
+ *
+ * Discarding is immediate and permanent: the trash is for photographs, and
+ * these never were.
+ */
+async function handleInboxResolve(
+  request: Request,
+  kind: 'accepted' | 'discarded',
+): Promise<Response> {
+  const body = await readJson<ResolveBody>(request);
+  const claim = readClaim(body);
+  if (!claim) return notFound();
+
+  const photoIds =
+    kind === 'accepted' && Array.isArray(body?.photoIds)
+      ? body.photoIds.filter(
+          (id): id is string => typeof id === 'string' && isValidPhotoId(id),
+        )
+      : [];
+
+  const objectStore = store();
+  const outcome = await removeSubmission(objectStore, claim.id, claim.token);
+  // A submission that is gone, and one whose claim was taken over, are the
+  // same plain 404 — as every other refusal on this site is.
+  if (outcome.status === 'refused') return notFound();
+
+  await writeAuditEvent(
+    objectStore,
+    makeAuditEvent(
+      kind === 'accepted' ? 'submission-accepted' : 'submission-discarded',
+      photoIds,
+      {
+        at: nowIso(),
+        // `via` records the surface a change came through, and this one came
+        // through the admin API like every other curation act. Only the
+        // Worker's own `submission-received` is `email`.
+        via: 'admin-api',
+        note:
+          `submission ${outcome.submission.id}, ` +
+          `${outcome.submission.parts.length} parts`,
+      },
+    ),
+  );
+
+  return json({ status: 'removed' });
 }

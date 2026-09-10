@@ -422,3 +422,64 @@ describe('resolveTrashedSelection', () => {
     expect(ids).toEqual([FIXTURE_PHOTO_IDS['deleted-0']]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Attribution for an emailed photograph
+// ---------------------------------------------------------------------------
+
+/**
+ * `submittedBy` is optional on read and always written, and
+ * `CATALOG_SCHEMA_VERSION` stays 1. That is only safe because every mutation
+ * *spreads* the record it is given rather than rebuilding it — so a build that
+ * has never heard of the field still carries it through a trash, a restore, or
+ * a metadata edit rather than silently stripping it. These say so.
+ */
+describe('submittedBy', () => {
+  const SENDER = 'cf-address-7';
+
+  it('is recorded on commit, from the input', () => {
+    const result = apply(
+      commitPhoto(emptyCatalog(NOW), commitInput({ submittedBy: SENDER }), NOW, AUDIT),
+    );
+    expect(
+      (result.value as { photo: { submittedBy?: string | null } }).photo.submittedBy,
+    ).toBe(SENDER);
+  });
+
+  it('is null for a dropped file, never undefined', () => {
+    const result = apply(commitPhoto(emptyCatalog(NOW), commitInput(), NOW, AUDIT));
+    expect(
+      (result.value as { photo: { submittedBy?: string | null } }).photo.submittedBy,
+    ).toBeNull();
+  });
+
+  it('survives a metadata edit', () => {
+    const photo = makePhoto({ id: testPhotoId('emailed'), submittedBy: SENDER });
+    const result = apply(
+      editPhotoMetadata(
+        makeCatalog([photo]),
+        photo.id,
+        { date: '2026-01-01', time: null, caption: 'Corrected' },
+        NOW,
+        AUDIT,
+      ),
+    );
+    expect(result.catalog?.photos[photo.id]?.submittedBy).toBe(SENDER);
+  });
+
+  it('survives a trash and a restore', () => {
+    const photo = makePhoto({ id: testPhotoId('emailed'), submittedBy: SENDER });
+    const trashed = apply(trashPhotos(makeCatalog([photo]), [photo.id], NOW, AUDIT));
+    expect(trashed.catalog?.photos[photo.id]?.submittedBy).toBe(SENDER);
+
+    const restored = apply(restorePhotos(trashed.catalog!, [photo.id], NOW, AUDIT));
+    expect(restored.catalog?.photos[photo.id]?.submittedBy).toBe(SENDER);
+  });
+
+  it('reads as null on a record written before the field existed', () => {
+    // The shape a version-1 catalog written by an older build actually has.
+    const photo = makePhoto({ id: testPhotoId('old') });
+    delete (photo as { submittedBy?: unknown }).submittedBy;
+    expect(makeCatalog([photo]).photos[photo.id]?.submittedBy ?? null).toBeNull();
+  });
+});

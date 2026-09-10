@@ -61,6 +61,14 @@ trusted.
   see the photographs at all. Nothing about a photograph travels with it: the
   message is a count and a link, in plain text, with no images and nothing
   that could report a read.
+- The only new inbound path is **mail to one address**, accepted only from
+  senders who are verified in the account, switched on for submissions, and
+  DKIM-authenticated for their own domain — and nothing it carries is shown to
+  anyone before an administrator has looked at it. An emailed original is
+  stored untouched and never served to a viewer.
+- No email address is written anywhere the site keeps: the catalog, the audit
+  log, and the inbox all record a sender as Cloudflare's **address id**, and
+  the pages resolve it against the account's list when they show it.
 - The only party that ever holds a recipient's email address is Cloudflare,
   which already holds the photographs. There is no third-party mail service,
   no marketing platform, and no tracking pixel. The account's destination
@@ -426,16 +434,27 @@ path, and everything below applies on top of the display site's rules.
 - Mobile viewing is responsive. Admin workflows are explicitly
   laptop-oriented; touch-specific bulk-selection UI is out of scope.
 
-### Notifications
+### Emails
 
-- A **Notifications** page, beside Trash in the header, is where the
-  administrator decides who is told when new photographs arrive: add an
-  address, remove one, switch an address on or off, see whether its owner has
-  confirmed it, see when they were last sent a digest, and send oneself a test.
+- An **Emails** page at `/emails`, beside Trash in the header, is where the
+  administrator decides what each address may do: add one, remove one, see whether its owner
+  has confirmed it, see when they were last sent a digest, send oneself a test,
+  and set three independent switches — **Notifications** (the daily digest),
+  **Can submit** (mail from this address is accepted into the Inbox), and
+  **Reviews inbox** (this address's digest says when the Inbox is waiting). Any
+  combination is allowed, and all three are inert until the address is
+  confirmed.
 - A recipient who is confirmed and switched on receives **one plain-text email
   a day**, and only on a day something arrived: how many photographs were added
   since the last message they were sent, and a link to the Recently added view.
-  No thumbnails, no per-photo text, no HTML, no replies.
+  No thumbnails, no per-photo text, no HTML; replies are not read.
+- A recipient who **can submit** gets one extra line naming the submission
+  address. It travels only to people already allowed to use it.
+- A recipient who **reviews the inbox** gets a line saying how many emailed
+  photographs are waiting, and receives the digest even on a day when nothing
+  new arrived — the waiting is the news. That is the only exception to the
+  "only on a day something arrived" rule, and a reviewer with an empty Inbox
+  still gets nothing.
 - Adding an address creates a destination address in the Cloudflare account,
   which is what sends its owner a confirmation link. Nothing is sent to an
   address until they click it — Cloudflare's rule, and the one click this
@@ -453,6 +472,53 @@ path, and everything below applies on top of the display site's rules.
   removes the address.
 - The digest runs on the existing daily cron, after the maintenance pass, so
   the count describes the library as it stands after any purge.
+
+### Submissions
+
+- A family member the administrator has switched on can **email photographs to
+  the site**, at a submission address separate from the one the digest is sent
+  from. The subject line becomes the caption, and every attachment in one
+  message gets the same one.
+- Two independent proofs are required, and both every time. The From address
+  must be a **verified destination address in the Cloudflare account with Can
+  submit switched on**; and the message must **authenticate for that address's
+  domain** — DMARC pass, or an aligned DKIM pass. Verification proves someone
+  controls the mailbox; DKIM proves the message came from it. Neither alone is
+  enough, and a forged From from anywhere else fails.
+- Nothing a sender emails is shown to anyone until an administrator has looked
+  at it. The photographs wait in an **Inbox** page in the admin app, where the
+  administrator sees who sent what, corrects the caption, unticks anything that
+  is not a photograph, and presses **Add**. Only then do they enter the
+  library, through the exact pipeline a dropped file goes through. A committed
+  emailed photograph is indistinguishable from a dropped one to the display
+  site; its date is the moment it was added, as every photograph's is.
+- Which parts are photographs is decided by **sniffing the bytes**, never by
+  the declared type or the filename — mail clients label HEIC as
+  `application/octet-stream` routinely. Inline parts count as well as
+  attachments, so signature logos arrive too; they show as small
+  thumbnail-less tiles and are unticked.
+- The Inbox shows a photograph's own embedded thumbnail where it has one,
+  which costs no decode at all. A HEIC has none, so those rows carry a
+  **Show** button — and a card with several carries **Show all** — that
+  decodes the photograph in the browser on request. Decoding happens only when
+  asked and only one file at a time, because it is the slow, memory-hungry
+  half of adding a photograph and a page of waiting messages must not do it
+  unbidden. Nothing decoded to look at is stored or uploaded.
+- **Emailed originals are stored, never decoded.** The server keeps the file
+  byte for byte under an inbox prefix and does nothing else with it: no decode,
+  no transform, and it is never served to a viewer. All the image work still
+  happens in the administrator's browser.
+- Refusals are silent for anyone who has not passed both proofs — the email
+  analogue of the site's uniform 404, so a prober learns nothing. A sender who
+  has passed both and sent no usable image, or arrived when the inbox is over
+  its cap, gets an ordinary bounce saying so.
+- Every sender who is accepted gets a plain-text receipt: how many photographs
+  arrived, and that they will appear once they have been looked at. No links,
+  no images, nothing that could report a read.
+- Submissions are kept **30 days**. The daily maintenance pass then deletes
+  them, parts and record alike, reviewed or not. An administrator away for a
+  month loses them, which is the deliberate price of not holding
+  GPS-bearing originals indefinitely.
 
 ### Trash
 

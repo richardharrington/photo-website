@@ -89,6 +89,47 @@ export const RENDITION_SPECS: Record<Rendition, RenditionSpec> = {
 /** Days a trashed photo is retained before the daily cron purges it. */
 export const TRASH_RETENTION_DAYS = 30;
 
+// ---------------------------------------------------------------------------
+// Emailed submissions
+// ---------------------------------------------------------------------------
+
+/**
+ * Days an unreviewed emailed submission is kept before the daily maintenance
+ * pass deletes it, parts and record alike.
+ *
+ * The same number as the trash, and for a stronger reason: an emailed original
+ * is the sender's file exactly as they sent it, GPS and all, and the site
+ * should not hold one indefinitely because nobody got round to looking at it.
+ * An administrator away for a month loses those submissions, which is the
+ * deliberate price.
+ */
+export const INBOX_RETENTION_DAYS = 30;
+
+/**
+ * The inbox's ceiling, counted from a `list` of the prefix when a message
+ * arrives. Cheap, approximate, and enough to stop a compromised family mailbox
+ * from filling the bucket; a sender over it gets a bounce, not silence.
+ */
+export const INBOX_MAX_PARTS = 200;
+export const INBOX_MAX_BYTES = 2 * 1024 * 1024 * 1024;
+
+/**
+ * How long one tab's claim on a submission holds before another may take it
+ * over. Adding is a browser-side job of seconds to minutes; this is generous
+ * enough to cover a slow batch and short enough that a closed tab does not
+ * strand a submission for the afternoon.
+ */
+export const INBOX_CLAIM_TTL_MINUTES = 15;
+
+/**
+ * Parts smaller than this start unticked in the Inbox.
+ *
+ * The aim is that a signature logo or an inline emoji starts unticked and a
+ * photograph never does. It is a default, not a filter: every tick can be
+ * flipped, and nothing is decided by it.
+ */
+export const INBOX_SMALL_PART_BYTES = 32 * 1024;
+
 /**
  * The Recently Uploaded view's two numbers (design.md, "Display site").
  *
@@ -126,8 +167,25 @@ export const R2_KEYS = {
   snapshotPrefix: 'catalog/snapshots/',
   auditPrefix: 'catalog/audit/',
   photoPrefix: 'photos/',
+  /**
+   * Emailed submissions awaiting review: one record and its raw parts per
+   * message. Deliberately outside `photos/`, because the orphan sweep reaps
+   * that prefix and an unreviewed submission has no catalog record by
+   * definition. The retention purge is the inbox's only reaper.
+   */
+  inboxPrefix: 'inbox/',
 } as const;
 
 export function photoObjectKey(photoId: string, rendition: Rendition): string {
   return `${R2_KEYS.photoPrefix}${photoId}/${RENDITION_SPECS[rendition].objectName}`;
+}
+
+/** `inbox/<submissionId>/message.json` — the record for one message. */
+export function submissionRecordKey(submissionId: string): string {
+  return `${R2_KEYS.inboxPrefix}${submissionId}/message.json`;
+}
+
+/** `inbox/<submissionId>/parts/<n>` — one raw part, byte for byte as sent. */
+export function submissionPartKey(submissionId: string, index: number): string {
+  return `${R2_KEYS.inboxPrefix}${submissionId}/parts/${index}`;
 }

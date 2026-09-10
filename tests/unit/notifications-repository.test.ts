@@ -9,7 +9,9 @@ import {
   mutateNotificationState,
 } from '../../src/shared/notifications-repository.ts';
 import {
+  NOTIFICATION_SCHEMA_VERSION,
   emptyNotificationState,
+  newRecipient,
   pruneNotificationState,
 } from '../../src/shared/notifications.ts';
 import type {
@@ -21,8 +23,8 @@ const NOW = '2026-09-05T04:17:00.000Z';
 
 function withRecipient(email: string, seenThrough = NOW): NotificationState {
   return {
-    schemaVersion: 1,
-    recipients: { [email]: { enabled: true, seenThrough, lastSent: null } },
+    schemaVersion: NOTIFICATION_SCHEMA_VERSION,
+    recipients: { [email]: newRecipient(seenThrough) },
   };
 }
 
@@ -36,7 +38,7 @@ function enable(state: NotificationState, email: string) {
       ...state,
       recipients: {
         ...state.recipients,
-        [email]: { enabled: true, seenThrough: NOW, lastSent: null },
+        [email]: newRecipient(NOW),
       },
     },
     value: email,
@@ -61,6 +63,64 @@ describe('loadNotificationState', () => {
     await expect(loadNotificationState(store)).rejects.toBeInstanceOf(
       NotificationSchemaError,
     );
+  });
+
+  /**
+   * Version 1 predates `canSubmit` and `reviewsInbox`. Reading it must give
+   * every recipient both switched off — not undefined, which would read as
+   * neither on nor off and would reach the page as an uncontrolled checkbox.
+   */
+  it('upgrades a version-1 object in memory, with both new bits off', async () => {
+    const store = new InMemoryObjectStore();
+    store.seed(
+      R2_KEYS.notifications,
+      encodeJson({
+        schemaVersion: 1,
+        recipients: {
+          'a@example.com': { enabled: true, seenThrough: NOW, lastSent: null },
+        },
+      }),
+    );
+
+    const { state } = await loadNotificationState(store);
+
+    expect(state.schemaVersion).toBe(NOTIFICATION_SCHEMA_VERSION);
+    expect(state.recipients['a@example.com']).toEqual({
+      enabled: true,
+      canSubmit: false,
+      reviewsInbox: false,
+      seenThrough: NOW,
+      lastSent: null,
+    });
+  });
+
+  it('does not write the upgrade back just to read it', async () => {
+    const store = new InMemoryObjectStore();
+    store.seed(R2_KEYS.notifications, encodeJson({ schemaVersion: 1, recipients: {} }));
+
+    await loadNotificationState(store);
+
+    expect(store.calls.filter((call) => call.startsWith('putConditional'))).toEqual([]);
+  });
+
+  it('writes the upgraded shape back on the next mutation', async () => {
+    const store = new InMemoryObjectStore();
+    store.seed(
+      R2_KEYS.notifications,
+      encodeJson({
+        schemaVersion: 1,
+        recipients: {
+          'a@example.com': { enabled: true, seenThrough: NOW, lastSent: null },
+        },
+      }),
+    );
+
+    await mutateNotificationState(store, (state) => enable(state, 'b@example.com'));
+
+    const after = stored(store)!;
+    expect(after.schemaVersion).toBe(NOTIFICATION_SCHEMA_VERSION);
+    expect(after.recipients['a@example.com']?.canSubmit).toBe(false);
+    expect(after.recipients['a@example.com']?.reviewsInbox).toBe(false);
   });
 });
 
@@ -223,7 +283,9 @@ describe('mutateNotificationState', () => {
     await mutateNotificationState(store, (state) => enable(state, 'a@example.com'));
 
     const raw = await store.get(R2_KEYS.notifications);
-    expect(decodeJson<NotificationState>(raw!.body).schemaVersion).toBe(1);
+    expect(decodeJson<NotificationState>(raw!.body).schemaVersion).toBe(
+      NOTIFICATION_SCHEMA_VERSION,
+    );
     expect((await loadNotificationState(store)).etag).toBe(raw!.etag);
   });
 });

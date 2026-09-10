@@ -8,6 +8,7 @@
  */
 
 import {
+  INBOX_RETENTION_DAYS,
   ORPHAN_GRACE_HOURS,
   R2_KEYS,
   TRASH_RETENTION_DAYS,
@@ -25,10 +26,32 @@ import {
 } from '../../src/shared/admin-operations.ts';
 import { makeAuditEvent, writeAuditEvent } from '../../src/shared/audit.ts';
 import { generateAuditId } from '../../src/shared/ids.ts';
+import {
+  listSubmissions,
+  submissionObjectKeys,
+} from '../../src/shared/inbox-repository.ts';
+import type { Submission } from '../../src/shared/submissions.ts';
 import type { ObjectStore, ObjectSummary } from '../../src/shared/store.ts';
 
 const TRASH_RETENTION_MS = TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const ORPHAN_GRACE_MS = ORPHAN_GRACE_HOURS * 60 * 60 * 1000;
+const INBOX_RETENTION_MS = INBOX_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+/**
+ * Submissions whose retention has elapsed, claimed or not.
+ *
+ * A live claim is no reprieve: a tab that claimed a submission a month ago is
+ * a tab that is long gone. Nothing tells the sender, which is the deliberate
+ * price of not holding GPS-bearing originals indefinitely.
+ */
+export function expiredSubmissions(
+  submissions: readonly Submission[],
+  nowMs: number,
+): Submission[] {
+  return submissions.filter(
+    (submission) => nowMs - Date.parse(submission.receivedAt) >= INBOX_RETENTION_MS,
+  );
+}
 
 /** Photo IDs whose trash retention has elapsed. */
 export function expiredTrashIds(catalog: Catalog, nowMs: number): string[] {
@@ -90,6 +113,7 @@ export interface MaintenanceReport {
   purgedPhotoIds: string[];
   orphanKeysDeleted: number;
   snapshotsPruned: number;
+  purgedSubmissionIds: string[];
 }
 
 export async function runMaintenance(
@@ -102,6 +126,7 @@ export async function runMaintenance(
     purgedPhotoIds: [],
     orphanKeysDeleted: 0,
     snapshotsPruned: 0,
+    purgedSubmissionIds: [],
   };
 
   // 1. Purge photos whose 30-day trash retention has elapsed.
@@ -158,6 +183,27 @@ export async function runMaintenance(
   if (doomed.length > 0) {
     await store.delete(doomed);
     report.snapshotsPruned = doomed.length;
+  }
+
+  // 4. Purge emailed submissions nobody reviewed. This is the inbox's *only*
+  //    reaper: the orphan sweep above walks `photos/` alone, because an
+  //    unreviewed submission has no catalog record by definition and extending
+  //    that sweep to `inbox/` would delete every submission on its first run.
+  const expiredMessages = expiredSubmissions(await listSubmissions(store), nowMs);
+  for (const submission of expiredMessages) {
+    await store.delete(submissionObjectKeys(submission));
+    // Named by id and part count, never by address or subject.
+    await writeAuditEvent(
+      store,
+      makeAuditEvent('submission-purged', [], {
+        at,
+        via: 'scheduled-maintenance',
+        note:
+          `submission ${submission.id}, ${submission.parts.length} parts, ` +
+          `retention of ${INBOX_RETENTION_DAYS} days elapsed`,
+      }),
+    );
+    report.purgedSubmissionIds.push(submission.id);
   }
 
   return report;

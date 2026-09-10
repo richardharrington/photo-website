@@ -53,6 +53,13 @@ export interface CommitInput {
   batchSeq: number;
   selectionIndex: number;
   derivatives: Record<Rendition, DerivativeDescriptor>;
+  /**
+   * The sender's Cloudflare address id, for a photograph that arrived by
+   * email. Resolved server-side from the submission record — the browser
+   * never supplies it — so a commit cannot attribute a photograph to
+   * somebody who did not send it.
+   */
+  submittedBy?: string | null;
 }
 
 export type CommitOutcome =
@@ -111,8 +118,15 @@ export function commitPhoto(
     captureUtcOffset: input.captureUtcOffset,
     timestampSource: input.timestampSource,
     caption: input.caption,
+    submittedBy: input.submittedBy ?? null,
     batchSeq: input.batchSeq,
     selectionIndex: input.selectionIndex,
+    // The commit instant, as for every photograph: it is when the photo became
+    // visible, which is what Recently added groups by and what the digest
+    // watermark compares against. Five emails from last week added in one
+    // sitting are one sitting and one digest count, which is the truth of what
+    // the family can see. The instant the mail arrived lives on the submission
+    // record and in the audit trail, not here.
     createdAt: now,
     updatedAt: now,
     trashedAt: null,

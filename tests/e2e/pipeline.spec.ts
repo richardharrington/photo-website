@@ -363,6 +363,14 @@ test.describe('rejecting bad input', () => {
   });
 
   test('survives a batch without the page falling over', async ({ page }) => {
+    // Five full HEIC pipeline runs back to back, at roughly 4-5.5 seconds each
+    // on an idle machine (decisions.md, "Implementation validation") — so this
+    // one sits close to the default 30-second budget by design, and goes over
+    // it whenever the rest of the suite is competing for the same cores. What
+    // is under test is that the page does not fall over, not how long five
+    // decodes take, so it gets the headroom rather than a flake.
+    test.setTimeout(120_000);
+
     // Firefox crashed on a fourth consecutive file (decisions.md #20), which
     // is why it is unsupported for admin. Chromium and WebKit must not.
     const names = [
@@ -381,6 +389,113 @@ test.describe('rejecting bad input', () => {
       expect(result.ok, name).toBe(true);
     }
 
+    await expect(page.locator('#status')).toHaveText('ready');
+  });
+});
+
+/**
+ * The Inbox's Show: a decode asked for on purpose, to look at and not to keep.
+ *
+ * Exercised here, in every supported engine, because what it turns on is
+ * engine machinery — libheif-WASM, `createImageBitmap` with a resize, and
+ * `OffscreenCanvas.convertToBlob`, which Safari and Chromium implement
+ * separately. The admin page that reaches it is covered in `inbox.spec.ts`.
+ */
+test.describe('the on-request preview', () => {
+  test('comes back upright, at the preview size, and small', async ({ page }) => {
+    const fixture = FIXTURES.portraitWithGps;
+
+    const reference = await page.evaluate(
+      (name) => window.pipelineHarness.decodeReference(name),
+      fixture,
+    );
+    const preview = await page.evaluate(
+      (name) => window.pipelineHarness.preview(name),
+      fixture,
+    );
+
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) return;
+
+    // libheif honoured irot, so the known-good rendering is portrait; the
+    // preview went through the pipeline's own decode path and must agree.
+    expect(reference.height).toBeGreaterThan(reference.width);
+    expect(preview.height).toBeGreaterThan(preview.width);
+    expect(Math.max(preview.width, preview.height)).toBe(preview.maxEdge);
+
+    // The part dimensions cannot tell you, and the same standard the stored
+    // artifacts are held to: closer to the known-good rendering than to any
+    // rotation or mirror of it, by a wide margin.
+    const measured = distances(preview.fingerprint, reference.fingerprint);
+    const others = Object.entries(measured).filter(([name]) => name !== 'identity');
+    expect(measured['identity'], JSON.stringify(measured)).toBeLessThan(
+      Math.min(...others.map(([, value]) => value)) / 3,
+    );
+
+    // A picture to glance at, not an artifact: a JPEG of tens of kilobytes,
+    // because Safari cannot encode WebP through a canvas (decisions.md #2).
+    expect(preview.type).toBe('image/jpeg');
+    expect(preview.bytes).toBeLessThan(200_000);
+  });
+
+  test('refuses an unusable file rather than throwing', async ({ page }) => {
+    // The same contract `processFile` has: a rejection is an answer about this
+    // file, returned, not an exception for the page to catch.
+    const preview = await page.evaluate(() =>
+      window.pipelineHarness.previewBytes(
+        [...new TextEncoder().encode('this is not an image at all')],
+        'notes.txt',
+        'text/plain',
+      ),
+    );
+
+    expect(preview.ok).toBe(false);
+    if (preview.ok) return;
+    expect(preview.code).toBe('unsupported-format');
+  });
+
+  test('a refused preview does not wedge the ones behind it', async ({ page }) => {
+    // The queue is one chain and a rejection must not break it, or a single
+    // unreadable part would stop every later Show for the session.
+    const outcome = await page.evaluate(async (name) => {
+      const bad = window.pipelineHarness.previewBytes([1, 2, 3], 'x.txt', 'text/plain');
+      const good = window.pipelineHarness.preview(name);
+      return { bad: await bad, good: await good };
+    }, FIXTURES.landscape);
+
+    expect(outcome.bad.ok).toBe(false);
+    expect(outcome.good.ok).toBe(true);
+  });
+
+  /**
+   * Show all, in a real engine.
+   *
+   * The *ordering* — that these never overlap — is `runSerially`'s, pinned
+   * deterministically in `tests/unit/preview-queue.test.ts`; timing here would
+   * only be a flakier restatement of it. What this adds is the thing a unit
+   * test cannot reach: three consecutive libheif decodes and three
+   * `convertToBlob`s in one page, all coming back correct. Per-file memory
+   * release cannot be assumed, and a run of consecutive files is what crashed
+   * Firefox (decisions.md #20).
+   */
+  test('survives several requested at once, as Show all asks for them', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { outcomes } = await page.evaluate(
+      (names) => window.pipelineHarness.previewsTogether(names),
+      [FIXTURES.landscape, FIXTURES.portraitWithGps, FIXTURES.noOrientationTag],
+    );
+
+    expect(outcomes).toHaveLength(3);
+    for (const outcome of outcomes) {
+      expect(outcome.ok, outcome.name).toBe(true);
+      if (!outcome.ok) continue;
+      expect(Math.max(outcome.width, outcome.height), outcome.name).toBe(640);
+    }
+
+    // The harness page is still answering afterwards.
     await expect(page.locator('#status')).toHaveText('ready');
   });
 });

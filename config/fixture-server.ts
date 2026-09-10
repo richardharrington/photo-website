@@ -35,26 +35,46 @@ import {
 } from '../src/shared/admin-operations.ts';
 import type { SelectionQuery } from '../src/shared/admin-operations.ts';
 import {
+  INBOX_CLAIM_TTL_MINUTES,
   R2_KEYS,
   RENDITION_SPECS,
   SIGNED_URL_TTL_SECONDS,
+  submissionPartKey,
 } from '../src/shared/constants.ts';
 import type { Rendition } from '../src/shared/constants.ts';
 import { encodeJson } from '../src/shared/store.ts';
 import {
   digestFor,
   isValidEmailAddress,
+  newRecipient,
   normalizeEmail,
 } from '../src/shared/notifications.ts';
 import type {
   DestinationAddress,
   NotificationState,
+  RecipientState,
 } from '../src/shared/notifications.ts';
 import {
   loadNotificationState,
   mutateNotificationState,
 } from '../src/shared/notifications-repository.ts';
 import { generateAuditId, generatePhotoId } from '../src/shared/ids.ts';
+import {
+  claimSubmission,
+  isValidSubmissionId,
+  listSubmissions,
+  loadSubmission,
+  removeSubmission,
+} from '../src/shared/inbox-repository.ts';
+import { storeSubmission } from '../src/shared/inbox-repository.ts';
+import {
+  SUBMISSION_SCHEMA_VERSION,
+  firstBodyLine,
+  isClaimLive,
+  proposeCaption,
+  selectImageParts,
+} from '../src/shared/submissions.ts';
+import type { Submission } from '../src/shared/submissions.ts';
 import { downloadFilenameFor } from '../src/shared/filename.ts';
 import { baseSecurityHeaders } from '../src/shared/headers.ts';
 
@@ -229,7 +249,7 @@ async function handleDisplay(route: string, res: ServerResponse): Promise<boolea
 }
 
 // ---------------------------------------------------------------------------
-// Cloudflare destination addresses, faked
+// Cloudflare destination addresses, faked, and the Emails page's routes
 // ---------------------------------------------------------------------------
 
 /**
@@ -274,6 +294,8 @@ function recipientRow(address: DestinationAddress, state: NotificationState) {
     email: address.email,
     verified: address.verified,
     enabled: recipient?.enabled ?? false,
+    canSubmit: recipient?.canSubmit ?? false,
+    reviewsInbox: recipient?.reviewsInbox ?? false,
     lastSent: recipient?.lastSent ?? null,
   };
 }
@@ -299,13 +321,13 @@ async function fakeNotifyTest(email: string): Promise<{ count: number } | null> 
   return { count: plan.count };
 }
 
-async function handleNotifications(
+async function handleEmails(
   route: string,
   method: string,
   body: Body,
   res: ServerResponse,
 ): Promise<boolean> {
-  if (method === 'GET' && route === '/notifications') {
+  if (method === 'GET' && route === '/emails') {
     const state = await notificationState();
     sendJson(res, 200, {
       recipients: listFakeAddresses().map((address) => recipientRow(address, state)),
@@ -315,7 +337,7 @@ async function handleNotifications(
 
   if (method !== 'POST') return false;
 
-  if (route === '/notifications/add') {
+  if (route === '/emails/add') {
     const email = normalizeEmail(String(body['email'] ?? ''));
     if (!isValidEmailAddress(email)) {
       sendBadRequest(res, 'That is not an email address.');
@@ -334,7 +356,7 @@ async function handleNotifications(
         ...state,
         recipients: {
           ...state.recipients,
-          [email]: { enabled: true, seenThrough: at, lastSent: null },
+          [email]: newRecipient(at),
         },
       },
       value: undefined,
@@ -346,7 +368,7 @@ async function handleNotifications(
     return true;
   }
 
-  if (route === '/notifications/remove') {
+  if (route === '/emails/remove') {
     const id = String(body['id'] ?? '');
     const address = listFakeAddresses().find((candidate) => candidate.id === id);
     if (!address) {
@@ -364,27 +386,37 @@ async function handleNotifications(
     return true;
   }
 
-  if (route === '/notifications/set-enabled') {
+  // The three switches, which differ only in which bit they set and whether
+  // the digest's clock starts. The real function has one handler for the same
+  // reason.
+  const SWITCHES: Record<string, 'enabled' | 'canSubmit' | 'reviewsInbox'> = {
+    '/emails/set-enabled': 'enabled',
+    '/emails/set-submit': 'canSubmit',
+    '/emails/set-reviews': 'reviewsInbox',
+  };
+  const which = SWITCHES[route];
+  if (which) {
     const email = normalizeEmail(String(body['email'] ?? ''));
-    const enabled = body['enabled'] === true;
+    const value = body[which] === true;
     const address = fakeAddresses.get(email);
-    if (!address) {
+    if (!address?.verified) {
       sendNotFound(res);
       return true;
     }
 
     const at = now();
     const state = await mutateNotificationState(store, (current) => {
-      const existing = current.recipients[email];
-      const wasEnabled = existing?.enabled ?? false;
+      const existing: RecipientState =
+        current.recipients[email] ?? newRecipient(at, false);
+      const startingDigest = which === 'enabled' && value && !existing.enabled;
       const updated: NotificationState = {
         ...current,
         recipients: {
           ...current.recipients,
           [email]: {
-            enabled,
-            seenThrough: enabled && !wasEnabled ? at : (existing?.seenThrough ?? at),
-            lastSent: existing?.lastSent ?? null,
+            ...existing,
+            [which]: value,
+            seenThrough: startingDigest ? at : existing.seenThrough,
           },
         },
       };
@@ -395,7 +427,7 @@ async function handleNotifications(
     return true;
   }
 
-  if (route === '/notifications/test') {
+  if (route === '/emails/test') {
     const email = normalizeEmail(String(body['email'] ?? ''));
     const outcome = await fakeNotifyTest(email);
     if (!outcome) {
@@ -415,6 +447,230 @@ async function handleNotifications(
 }
 
 // ---------------------------------------------------------------------------
+// The Inbox, faked
+// ---------------------------------------------------------------------------
+
+/**
+ * The inbox routes run the *real* repository over the in-memory store, so the
+ * claim's conditional write, the token check on every later write, and the
+ * listing order are the real ones. What is faked is the two things a laptop
+ * cannot have: Cloudflare Email Routing delivering a message, and a presigned
+ * R2 GET.
+ *
+ * `POST /__dev/inbox` stands in for the first. It takes a multipart form of
+ * files plus `from` and `subject`, sniffs the parts exactly as the Worker
+ * does, and builds a `Submission` the same way — so the Inbox page is
+ * developable and testable without a domain.
+ */
+async function handleDevSubmission(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<boolean> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+
+  const form = await new Response(Buffer.concat(chunks), {
+    headers: { 'content-type': req.headers['content-type'] ?? '' },
+  }).formData();
+
+  const from = normalizeEmail(String(form.get('from') ?? ''));
+  const subject = String(form.get('subject') ?? '').trim() || null;
+  const bodyText = String(form.get('body') ?? '') || null;
+
+  // The Worker refuses a sender who is not an allowed, verified, switched-on
+  // address; the fixture refuses the same way so the rule is exercisable.
+  const address = fakeAddresses.get(from);
+  const state = await notificationState();
+  if (!address?.verified || !state.recipients[from]?.canSubmit) {
+    sendJson(res, 403, { error: 'That address may not submit.' });
+    return true;
+  }
+
+  // Any field whose name starts with `file`, in the order the form lists them.
+  // Several rather than one repeated name because Playwright's multipart helper
+  // takes an object, and an object cannot hold the same key twice.
+  const candidates: { filename: string | null; bytes: Uint8Array }[] = [];
+  for (const [name, entry] of form.entries()) {
+    if (!name.startsWith('file') || typeof entry === 'string') continue;
+    candidates.push({
+      filename: entry.name || null,
+      bytes: new Uint8Array(await entry.arrayBuffer()),
+    });
+  }
+
+  const selected = selectImageParts(candidates);
+  if (selected.length === 0) {
+    // The Worker bounces here; there is nothing to bounce to locally.
+    sendJson(res, 400, { error: 'No photos were found in that message.' });
+    return true;
+  }
+
+  const submission: Submission = {
+    schemaVersion: SUBMISSION_SCHEMA_VERSION,
+    id: generatePhotoId(),
+    receivedAt: now(),
+    submittedBy: address.id,
+    subject,
+    proposedCaption: proposeCaption(subject, bodyText),
+    bodyLine: firstBodyLine(bodyText),
+    parts: selected.map((part) => ({
+      index: part.index,
+      filename: part.filename,
+      contentType: part.contentType,
+      bytes: part.bytes.byteLength,
+    })),
+    claim: null,
+  };
+
+  await storeSubmission(store, submission, selected);
+  sendJson(res, 200, { id: submission.id, parts: submission.parts.length });
+  return true;
+}
+
+/**
+ * The stand-in for a presigned R2 GET of one raw part.
+ *
+ * It honours `Range`, because the Inbox's thumbnail read depends on it and a
+ * fake that always returned the whole object would hide exactly the failure
+ * the bucket's CORS rule exists to prevent.
+ */
+async function serveInboxPart(
+  req: IncomingMessage,
+  res: ServerResponse,
+  submissionId: string,
+  index: number,
+): Promise<boolean> {
+  const stored = await store.get(submissionPartKey(submissionId, index));
+  if (!stored) {
+    sendNotFound(res);
+    return true;
+  }
+
+  const loaded = await loadSubmission(store, submissionId);
+  const contentType =
+    loaded?.submission.parts.find((part) => part.index === index)?.contentType ??
+    'application/octet-stream';
+
+  const range = /^bytes=(\d+)-(\d*)$/.exec(String(req.headers['range'] ?? ''));
+  if (range) {
+    const start = Number(range[1]);
+    const end = Math.min(
+      range[2] === '' ? stored.body.byteLength - 1 : Number(range[2]),
+      stored.body.byteLength - 1,
+    );
+    const slice = stored.body.slice(start, end + 1);
+    res.writeHead(206, {
+      'content-type': contentType,
+      'content-range': `bytes ${start}-${end}/${stored.body.byteLength}`,
+      'content-length': String(slice.byteLength),
+    });
+    res.end(Buffer.from(slice));
+    return true;
+  }
+
+  res.writeHead(200, {
+    'content-type': contentType,
+    'content-length': String(stored.body.byteLength),
+  });
+  res.end(Buffer.from(stored.body));
+  return true;
+}
+
+async function handleInbox(
+  route: string,
+  method: string,
+  body: Body,
+  url: URL,
+  res: ServerResponse,
+): Promise<boolean> {
+  if (method === 'GET' && route === '/inbox') {
+    const submissions = await listSubmissions(store);
+    const byId = new Map(listFakeAddresses().map((address) => [address.id, address]));
+    const at = Date.now();
+    sendJson(res, 200, {
+      submissions: submissions.map((submission) => ({
+        id: submission.id,
+        receivedAt: submission.receivedAt,
+        from: byId.get(submission.submittedBy)?.email ?? null,
+        subject: submission.subject,
+        proposedCaption: submission.proposedCaption,
+        bodyLine: submission.bodyLine,
+        parts: submission.parts,
+        claimedAt: submission.claim?.at ?? null,
+        claimExpired: submission.claim !== null && !isClaimLive(submission, at),
+      })),
+      claimTtlMinutes: INBOX_CLAIM_TTL_MINUTES,
+    });
+    return true;
+  }
+
+  if (method === 'GET' && route === '/inbox/count') {
+    sendJson(res, 200, { count: (await listSubmissions(store)).length });
+    return true;
+  }
+
+  if (method === 'GET' && route === '/inbox/part-url') {
+    const submissionId = url.searchParams.get('submission') ?? '';
+    const index = Number(url.searchParams.get('part'));
+    if (!isValidSubmissionId(submissionId) || !Number.isInteger(index)) {
+      sendNotFound(res);
+      return true;
+    }
+    const loaded = await loadSubmission(store, submissionId);
+    const part = loaded?.submission.parts.find(
+      (candidate) => candidate.index === index,
+    );
+    if (!part) {
+      sendNotFound(res);
+      return true;
+    }
+    sendJson(res, 200, {
+      // Production returns a presigned R2 URL; locally this is the fixture's
+      // own part route, which honours Range the same way.
+      url: `/__inbox-part/${submissionId}/${index}`,
+      contentType: part.contentType,
+      bytes: part.bytes,
+      expiresAt: new Date(Date.now() + SIGNED_URL_TTL_SECONDS * 1000).toISOString(),
+    });
+    return true;
+  }
+
+  if (method !== 'POST') return false;
+
+  const submissionId = String(body['submissionId'] ?? '');
+  const claimToken = String(body['claimToken'] ?? '');
+  if (!isValidSubmissionId(submissionId) || claimToken.length < 8) {
+    sendNotFound(res);
+    return true;
+  }
+
+  if (route === '/inbox/claim') {
+    const outcome = await claimSubmission(store, submissionId, claimToken, now());
+    if (outcome.status === 'not-found') sendNotFound(res);
+    else if (outcome.status === 'claimed') sendJson(res, 200, { status: 'claimed' });
+    else if (outcome.status === 'conflict') sendJson(res, 200, { status: 'conflict' });
+    else
+      sendJson(res, 200, {
+        status: 'held',
+        claimedAt: outcome.submission.claim?.at ?? null,
+        claimAgeMs:
+          Date.now() -
+          Date.parse(outcome.submission.claim?.at ?? new Date(0).toISOString()),
+      });
+    return true;
+  }
+
+  if (route === '/inbox/resolve' || route === '/inbox/discard') {
+    const outcome = await removeSubmission(store, submissionId, claimToken);
+    if (outcome.status === 'refused') sendNotFound(res);
+    else sendJson(res, 200, { status: 'removed' });
+    return true;
+  }
+
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Admin API
 // ---------------------------------------------------------------------------
 
@@ -426,15 +682,22 @@ async function handleAdmin(
   route: string,
   method: string,
   body: Body,
+  url: URL,
   res: ServerResponse,
 ): Promise<boolean> {
   // Answered here and nowhere else. This handler is otherwise more permissive
   // than production — an unrecognized GET falls through to handleDisplay,
   // which once hid the admin API missing the viewer's read routes entirely
-  // (CLAUDE.md) — so an unknown /notifications path is a 404 here, as it is
-  // in the real function.
-  if (route === '/notifications' || route.startsWith('/notifications/')) {
-    if (await handleNotifications(route, method, body, res)) return true;
+  // (CLAUDE.md) — so an unknown /emails or /inbox path is a 404 here,
+  // as it is in the real function.
+  if (route === '/emails' || route.startsWith('/emails/')) {
+    if (await handleEmails(route, method, body, res)) return true;
+    sendNotFound(res);
+    return true;
+  }
+
+  if (route === '/inbox' || route.startsWith('/inbox/')) {
+    if (await handleInbox(route, method, body, url, res)) return true;
     sendNotFound(res);
     return true;
   }
@@ -472,6 +735,17 @@ async function handleAdmin(
         'content-disposition': 'attachment; filename="photo-catalog.json"',
       });
       res.end(JSON.stringify(catalog, null, 2));
+      return true;
+    }
+
+    const attribution = /^\/attribution\/([0-9a-f]{32})$/.exec(route);
+    if (attribution) {
+      const photo = (await currentCatalog()).photos[attribution[1]!];
+      const id = photo?.submittedBy ?? null;
+      const address = id
+        ? listFakeAddresses().find((candidate) => candidate.id === id)
+        : undefined;
+      sendJson(res, 200, { email: address?.email ?? null });
       return true;
     }
 
@@ -523,6 +797,21 @@ async function handleAdmin(
     case '/commit': {
       const auditId = generateAuditId();
       const at = now();
+
+      // Attribution is resolved from the stored submission record, never taken
+      // from the request — the same rule the real function applies, and the
+      // reason it is worth having here rather than only in production.
+      let submittedBy: string | null = null;
+      const submissionId = String(body['submissionId'] ?? '');
+      if (submissionId !== '') {
+        const loaded = await loadSubmission(store, submissionId);
+        if (!loaded || loaded.submission.claim?.token !== String(body['claimToken'])) {
+          sendNotFound(res);
+          return true;
+        }
+        submittedBy = loaded.submission.submittedBy;
+      }
+
       const outcome = await mutateCatalog(store, context, (catalog) =>
         commitPhoto(
           catalog,
@@ -540,6 +829,7 @@ async function handleAdmin(
             captureUtcOffset: (body['captureUtcOffset'] as string | null) ?? null,
             timestampSource: body['timestampSource'] as never,
             caption: (body['caption'] as string | null) ?? null,
+            submittedBy,
             batchSeq: Number(body['batchSeq']),
             selectionIndex: Number(body['selectionIndex']),
             derivatives: body['derivatives'] as never,
@@ -670,6 +960,17 @@ async function handle(
     return true;
   }
 
+  // Local stand-in for Cloudflare Email Routing delivering a message, and for
+  // a presigned R2 GET of one raw part. Development only, both.
+  if (path === '/__dev/inbox' && method === 'POST') {
+    return handleDevSubmission(req, res);
+  }
+
+  const inboxPart = /^\/__inbox-part\/([0-9a-f]{32})\/(\d+)$/.exec(path);
+  if (inboxPart) {
+    return serveInboxPart(req, res, inboxPart[1]!, Number(inboxPart[2]));
+  }
+
   const capability = /^\/p\/([0-9a-f]{32})\/([a-z0-9-]+)$/.exec(path);
   if (capability) return serveAsset(res, capability[1]!, capability[2]!, false);
 
@@ -686,7 +987,7 @@ async function handle(
   const isAdmin = base === (process.env.ADMIN_PATH || 'dev-admin-path');
 
   if (isAdmin) {
-    return handleAdmin(route, method, (await readBody(req)) as Body, res);
+    return handleAdmin(route, method, (await readBody(req)) as Body, url, res);
   }
   if (method !== 'GET') {
     sendNotFound(res);

@@ -94,7 +94,53 @@ export interface Recipient {
   email: string;
   verified: boolean;
   enabled: boolean;
+  /** Mail from this address is accepted into the Inbox. */
+  canSubmit: boolean;
+  /** This administrator's digest reports a non-empty Inbox. */
+  reviewsInbox: boolean;
   lastSent: { at: string; count: number } | null;
+}
+
+/** One part of an emailed message, as the Inbox lists it. */
+export interface InboxPart {
+  index: number;
+  filename: string | null;
+  /** Sniffed, not declared: what the bytes actually are. */
+  contentType: string;
+  bytes: number;
+}
+
+/** One card on the Inbox page: a message, its parts, and its claim. */
+export interface InboxSubmission {
+  id: string;
+  receivedAt: string;
+  /** Null when Cloudflare no longer holds the sender's address. */
+  from: string | null;
+  subject: string | null;
+  proposedCaption: string | null;
+  bodyLine: string | null;
+  parts: InboxPart[];
+  claimedAt: string | null;
+  claimExpired: boolean;
+}
+
+export interface InboxListing {
+  submissions: InboxSubmission[];
+  claimTtlMinutes: number;
+}
+
+export type ClaimResult =
+  | { status: 'claimed' }
+  /** Another tab holds it; `claimedAt` is when they started. */
+  | { status: 'held'; claimedAt: string | null; claimAgeMs: number | null }
+  /** The record moved between the read and the write; reload and look again. */
+  | { status: 'conflict' };
+
+export interface InboxPartUrl {
+  url: string;
+  contentType: string;
+  bytes: number;
+  expiresAt: string;
 }
 
 export interface TrashListing {
@@ -114,26 +160,62 @@ export const adminApi = {
   trashCount: (signal?: AbortSignal) =>
     request<{ count: number }>('/trash/count', { signal: signal ?? null }),
 
-  // ---- Notifications ----------------------------------------------------
+  // ---- Emails -----------------------------------------------------------
   // Every action refetches the whole list rather than patching a row: the
   // truth is Cloudflare's, the list is tiny, and a verification that landed
   // between two clicks should show up.
 
-  notifications: (signal?: AbortSignal) =>
-    request<{ recipients: Recipient[] }>('/notifications', { signal: signal ?? null }),
+  emails: (signal?: AbortSignal) =>
+    request<{ recipients: Recipient[] }>('/emails', { signal: signal ?? null }),
 
   addRecipient: (email: string) =>
-    post<{ recipient: Recipient }>('/notifications/add', { email }),
+    post<{ recipient: Recipient }>('/emails/add', { email }),
 
-  removeRecipient: (id: string) =>
-    post<{ removed: string }>('/notifications/remove', { id }),
+  removeRecipient: (id: string) => post<{ removed: string }>('/emails/remove', { id }),
 
   setRecipientEnabled: (email: string, enabled: boolean) =>
-    post<{ recipient: Recipient }>('/notifications/set-enabled', { email, enabled }),
+    post<{ recipient: Recipient }>('/emails/set-enabled', { email, enabled }),
+
+  setRecipientCanSubmit: (email: string, canSubmit: boolean) =>
+    post<{ recipient: Recipient }>('/emails/set-submit', { email, canSubmit }),
+
+  setRecipientReviewsInbox: (email: string, reviewsInbox: boolean) =>
+    post<{ recipient: Recipient }>('/emails/set-reviews', { email, reviewsInbox }),
+
+  // ---- Inbox ------------------------------------------------------------
+  // Emailed submissions waiting to be looked at. Every mutation refetches the
+  // listing rather than patching a card: a claim taken in another tab should
+  // show up the moment anything else is done here.
+
+  inbox: (signal?: AbortSignal) =>
+    request<InboxListing>('/inbox', { signal: signal ?? null }),
+
+  inboxCount: (signal?: AbortSignal) =>
+    request<{ count: number }>('/inbox/count', { signal: signal ?? null }),
+
+  /** A five-minute presigned GET for one raw part, straight from R2. */
+  inboxPartUrl: (submissionId: string, part: number) =>
+    request<InboxPartUrl>(
+      `/inbox/part-url?submission=${encodeURIComponent(submissionId)}&part=${part}`,
+    ),
+
+  claimSubmission: (submissionId: string, claimToken: string) =>
+    post<ClaimResult>('/inbox/claim', { submissionId, claimToken }),
+
+  /** Adding finished: delete the raw parts and the record, and audit what
+   *  came out of it. */
+  resolveSubmission: (submissionId: string, claimToken: string, photoIds: string[]) =>
+    post<{ status: 'removed' }>('/inbox/resolve', {
+      submissionId,
+      claimToken,
+      photoIds,
+    }),
+
+  discardSubmission: (submissionId: string, claimToken: string) =>
+    post<{ status: 'removed' }>('/inbox/discard', { submissionId, claimToken }),
 
   /** Tonight's digest for one address, sent now and marked as a test. */
-  sendTest: (email: string) =>
-    post<{ count: number }>('/notifications/test', { email }),
+  sendTest: (email: string) => post<{ count: number }>('/emails/test', { email }),
 
   // ---- Upload flow ------------------------------------------------------
   beginBatch: () => post<{ batchSeq: number }>('/begin-batch', {}),
@@ -154,9 +236,24 @@ export const adminApi = {
     batchSeq: number;
     selectionIndex: number;
     derivatives: Record<Rendition, DerivativeDescriptor>;
+    /** Set for a photograph coming out of the Inbox. The server resolves the
+     *  sender from the record; the browser never supplies one. */
+    submissionId?: string;
+    claimToken?: string;
   }) => post<CommitResult>('/commit', body),
 
   // ---- Curation ---------------------------------------------------------
+
+  /**
+   * The address that emailed a photograph in, or null.
+   *
+   * Its own request rather than a field on the timeline: it is wanted for one
+   * photograph at a time, when the info panel is opened, and the projection
+   * both apps read is a whitelist that must not grow a fact about senders.
+   */
+  attribution: async (photoId: string) =>
+    (await request<{ email: string | null }>(`/attribution/${photoId}`)).email,
+
   edit: (photoId: string, edit: PhotoEdit) =>
     post<{ photo: PublicPhoto }>('/edit', { photoId, ...edit }),
 

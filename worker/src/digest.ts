@@ -21,7 +21,12 @@ import {
   pruneNotificationState,
   recordDigestSent,
 } from '../../src/shared/notifications.ts';
-import type { DestinationAddress, DigestPlan } from '../../src/shared/notifications.ts';
+import type {
+  DestinationAddress,
+  DigestPlan,
+  InboxWaiting,
+} from '../../src/shared/notifications.ts';
+import { inboxUsage } from '../../src/shared/inbox-repository.ts';
 import {
   loadNotificationState,
   mutateNotificationState,
@@ -63,6 +68,13 @@ export interface DigestDeps {
   siteTitle: string;
   /** The display site's base URL, including its secret path, no trailing `/`. */
   displaySiteUrl: string;
+  /**
+   * The submission address, when this deployment accepts mail.
+   *
+   * It reaches only the digests of recipients who may actually use it, so the
+   * address travels to nobody who is not already allowed to send there.
+   */
+  submitAddress?: string | null;
   now: () => Date;
 }
 
@@ -80,17 +92,23 @@ function recentUrl(displaySiteUrl: string): string {
   return `${displaySiteUrl.replace(/\/+$/, '')}/recent`;
 }
 
-async function send(
-  deps: DigestDeps,
-  to: string,
-  count: number,
-  test: boolean,
-): Promise<void> {
+/**
+ * One message, from a plan.
+ *
+ * Everything the plan carries decides what is in it: the count, whether a
+ * reviewer has something waiting, and whether this recipient may submit. A
+ * recipient with neither of the two new bits receives a message byte for byte
+ * identical to the one this feature found.
+ */
+async function send(deps: DigestDeps, plan: DigestPlan, test: boolean): Promise<void> {
   await deps.email.send({
     from: { name: deps.siteTitle, email: deps.from },
-    to,
-    subject: digestSubject(count, deps.siteTitle, test),
-    text: digestBody(count, deps.siteTitle, recentUrl(deps.displaySiteUrl)),
+    to: plan.email,
+    subject: digestSubject(plan.count, deps.siteTitle, test, plan.waiting !== null),
+    text: digestBody(plan.count, deps.siteTitle, recentUrl(deps.displaySiteUrl), {
+      waiting: plan.waiting,
+      submitAddress: plan.canSubmit ? (deps.submitAddress ?? null) : null,
+    }),
   });
 }
 
@@ -130,6 +148,9 @@ export async function runDigest(deps: DigestDeps): Promise<DigestReport> {
   const nowIso = deps.now().toISOString();
   const { catalog } = await loadCatalog(deps.store, () => nowIso);
   const { state } = await loadNotificationState(deps.store);
+  // One list of the inbox prefix for the whole run: what is waiting is the
+  // same fact for every reviewer.
+  const waiting = await waitingInInbox(deps);
 
   const report: DigestReport = {
     considered: addresses.length,
@@ -147,7 +168,7 @@ export async function runDigest(deps: DigestDeps): Promise<DigestReport> {
     else if (!state.recipients[address.email]?.enabled) report.skippedDisabled += 1;
   }
 
-  const plans = planDigests(catalog, state, addresses, nowIso);
+  const plans = planDigests(catalog, state, addresses, nowIso, waiting);
   report.skippedEmpty =
     report.considered -
     report.skippedUnverified -
@@ -156,7 +177,7 @@ export async function runDigest(deps: DigestDeps): Promise<DigestReport> {
 
   for (const plan of plans) {
     try {
-      await send(deps, plan.email, plan.count, false);
+      await send(deps, plan, false);
       await recordSend(deps, addresses, plan);
       report.sent += 1;
     } catch (error) {
@@ -201,8 +222,34 @@ export async function runDigestTest(
   // preview against. Counting the whole library instead would show a number no
   // real digest could ever produce.
   const seenThrough = state.recipients[email]?.seenThrough ?? nowIso;
-  const plan = digestFor(livePhotos(catalog), email, seenThrough, nowIso);
+  const recipient = state.recipients[email];
 
-  await send(deps, email, plan.count, true);
+  // Whatever the recipient would get tonight, both additions included, so the
+  // administrator can see them. `reviewsInbox` gates the waiting line here
+  // exactly as it does in the real pass.
+  const inbox = await waitingInInbox(deps);
+  const plan = digestFor(livePhotos(catalog), email, seenThrough, nowIso, {
+    canSubmit: recipient?.canSubmit ?? false,
+    waiting: recipient?.reviewsInbox && inbox.parts > 0 ? inbox : null,
+  });
+
+  await send(deps, plan, true);
   return { count: plan.count };
+}
+
+/**
+ * What the Inbox is holding, for the reviewers' line.
+ *
+ * Fails soft. The waiting line is an addition to the digest, not the digest:
+ * a failed listing must cost a reviewer that one sentence, never tonight's
+ * message about the photographs that actually arrived.
+ */
+async function waitingInInbox(deps: DigestDeps): Promise<InboxWaiting> {
+  try {
+    const usage = await inboxUsage(deps.store);
+    return { parts: usage.parts, messages: usage.messages };
+  } catch (error) {
+    console.error('The inbox could not be counted for the digest', error);
+    return { parts: 0, messages: 0 };
+  }
 }

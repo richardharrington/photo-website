@@ -51,6 +51,22 @@ export interface PhotoRecord {
   /** Plain text with line breaks. Never HTML or Markdown. */
   caption: string | null;
 
+  /**
+   * The Cloudflare destination-address id of the sender, when this photograph
+   * arrived by email; null for a dropped file.
+   *
+   * An **id**, never an address: the catalog is loaded on every viewer request
+   * through the Worker and must not carry one. The Inbox and the admin's photo
+   * view resolve it against the address list they already fetch.
+   *
+   * Optional on read and always written, and `CATALOG_SCHEMA_VERSION` stays 1.
+   * Bumping it would touch snapshots, the export, and every fixture for the
+   * sake of a field whose loss on a rollback costs attribution and nothing
+   * else — and every mutation spreads the record it is given rather than
+   * rebuilding it, so even a rollback would not strip it.
+   */
+  submittedBy?: string | null;
+
   /** Server-assigned, global, monotonic. Orders batches against each other. */
   batchSeq: number;
   /** Position within its batch's selection or drop order. */

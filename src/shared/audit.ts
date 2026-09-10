@@ -20,7 +20,17 @@ export type AuditAction =
   | 'restore'
   | 'permanent-delete'
   | 'trash-purge'
-  | 'orphan-sweep';
+  | 'orphan-sweep'
+  /**
+   * Emailed submissions. None of these ever carries an email address or a
+   * subject line: the audit log is retained forever, and the rule that keeps
+   * addresses out of the catalog applies to it too. A submission is named by
+   * its id, and its sender by their Cloudflare address id.
+   */
+  | 'submission-received'
+  | 'submission-accepted'
+  | 'submission-discarded'
+  | 'submission-purged';
 
 /** The metadata fields worth recording before and after a change. */
 export interface AuditMetadata {
@@ -35,7 +45,7 @@ export interface AuditEvent {
   action: AuditAction;
   photoIds: string[];
   /** How the change arrived. Not a claim about who made it. */
-  via: 'admin-api' | 'scheduled-maintenance';
+  via: 'admin-api' | 'scheduled-maintenance' | 'email';
   before?: AuditMetadata;
   after?: AuditMetadata;
   note?: string;

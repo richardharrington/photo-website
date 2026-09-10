@@ -157,6 +157,9 @@ export function TrashPage({
         // Unreachable: `can.trash` is false, so no Delete button and no key.
       },
       edit: () => Promise.reject(new Error('A trashed photo cannot be edited.')),
+      // The trash identifies a photograph well enough to decide about it;
+      // where it came from is a library question.
+      attribution: () => Promise.resolve(null),
       can: { edit: false, download: false, trash: false, select: true },
     }),
     // Both are recomputed only when the listing itself changes.

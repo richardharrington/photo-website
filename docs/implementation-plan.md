@@ -165,6 +165,8 @@ photos/<photo-id>/full.jpg
 photos/<photo-id>/thumb.webp
 photos/<photo-id>/display-1280.webp
 photos/<photo-id>/display-2560.webp
+inbox/<submission-id>/message.json
+inbox/<submission-id>/parts/<n>
 ```
 
 `notifications.json` is per-recipient notification state — whether the daily
@@ -176,6 +178,15 @@ the same store seam, with the same ETag-guarded conditional write and the same
 reload-and-retry, by `src/shared/notifications-repository.ts`. Which addresses
 exist, and whether each has been verified, is not stored here at all — that is
 Cloudflare's destination-address list, read live (decisions.md #70).
+
+`inbox/` holds emailed submissions awaiting review: one record per message and
+its image parts, stored **byte for byte as sent** and never decoded, never
+transformed, and never served to a viewer. The record carries the sender's
+Cloudflare *address id*, never their address, for the same reason the catalog
+carries none. The prefix is deliberately outside `photos/`: the orphan sweep
+reaps that prefix, and every object here has no catalog record by definition,
+so sweeping it would delete every waiting submission (decisions.md #85). The
+30-day retention purge is its only reaper.
 
 Four objects per photo; derivatives are WebP-only because every supported
 browser decodes WebP. Objects never move: trash state lives in the catalog,
@@ -336,14 +347,32 @@ open. Signed download URLs last about five minutes.
 - trash listing (returns signed thumbnail and preview URLs, since the Worker
   refuses capability-URL access to trashed photos; it never signs
   full-resolution URLs for trashed photos);
-- notification recipients: `GET /notifications` merges Cloudflare's
-  destination-address list with the R2 state file;
-  `POST /notifications/add`, `/notifications/remove`,
-  `/notifications/set-enabled`, and `/notifications/test`. Removal is a POST
+- the Emails page: `GET /emails` merges Cloudflare's destination-address
+  list with the R2 state file;
+  `POST /emails/add`, `/emails/remove`, `/emails/set-enabled`,
+  `/emails/set-submit`, `/emails/set-reviews`, and `/emails/test`. The routes
+  are named for the page they serve; `catalog/notifications.json` keeps its
+  own name, because renaming a stored object is a migration rather than a
+  rename. Removal is a POST
   because this function accepts only GET and POST. `add` and `remove` write
   Cloudflare first and R2 second, always (decisions.md #70), and `test` signs
   a sixty-second grant and relays it to the Worker with a five-second
-  `AbortSignal.timeout` so a hung Worker cannot become a Netlify timeout.
+  `AbortSignal.timeout` so a hung Worker cannot become a Netlify timeout. The
+  three `set-*` routes share one handler; each refuses an address Cloudflare
+  does not hold or has not verified, and only `set-enabled` ever moves the
+  watermark;
+- the Inbox: `GET /inbox` lists waiting submissions with each sender resolved
+  from Cloudflare's list, `GET /inbox/count` is just the number for the header,
+  and `GET /inbox/part-url` issues a five-minute presigned **GET** for one raw
+  part — the only thing the admin browser ever reads directly from R2, fetched
+  once as a `Range` request for the EXIF thumbnail and once in full on Add.
+  `POST /inbox/claim` takes the claim (decisions.md #81) under an ETag-guarded
+  conditional write; `POST /inbox/resolve` and `/inbox/discard` delete the raw
+  parts and the record, and differ only in the audit event they write. Every
+  refusal — an unknown id, a claim taken over, a part index that names nothing
+  — is the same plain 404. `/commit` accepts an optional `submissionId` and
+  `claimToken`, checks the claim, and takes `submittedBy` from the **stored
+  record**: the browser never supplies it.
 
 Every destructive request is a two-step preview/confirm: the preview endpoint
 resolves the selection or date-group query to an **explicit photo ID list**,
@@ -375,6 +404,24 @@ replay.
   malformed body, or a deployment with notifications unconfigured is the same
   plain 404 as everything else (decisions.md #73).
 
+The Worker also has an `email()` handler beside `fetch` and `scheduled` — one
+Worker, one deploy, as before. It answers the Email Routing rule for
+`SUBMIT_ADDRESS`, and works cheapest check first: the recipient matches that
+secret, the From address is an allowed and verified `canSubmit` address, the
+message's **first** `Authentication-Results` header passes for the From domain
+(decisions.md #80), the inbox is under its cap, and the parsed message holds at
+least one part whose *bytes* sniff as JPEG, PNG or HEIF. It then writes the
+parts, then the record, appends `submission-received`, and mails a receipt.
+
+Refusing means **returning normally without calling `setReject`** — nothing is
+stored and the message is gone, which is the email analogue of the site's
+uniform 404. A bounce (`setReject`) is reserved for senders who have already
+passed both proofs, so its wording is feedback to family and an oracle to
+nobody. Nothing in the handler may throw: a thrown error is a delivery failure
+and therefore a bounce. `postal-mime` is the one new runtime dependency in
+`worker/` and is imported only there; the pure rules — the authentication
+parser, the part sniff, the caption proposal — live in `src/shared/`.
+
 The Worker runs a daily cron task that:
 
 1. purges catalog records whose 30-day trash expiration has passed: deletes
@@ -383,7 +430,10 @@ The Worker runs a daily cron task that:
 2. deletes orphaned `photos/<id>/` prefixes absent from the catalog and older
    than the 24-hour grace period;
 3. prunes catalog snapshots: keep all snapshots newer than 30 days, thin
-   older ones to one per day.
+   older ones to one per day;
+4. deletes emailed submissions older than 30 days, parts and record alike,
+   claimed or not, auditing `submission-purged`. This is the only thing that
+   ever deletes from `inbox/` unattended (decisions.md #85).
 
 and then, wrapped separately so neither pass can take the other down with it,
 sends the notification digest: read Cloudflare's addresses, read the catalog
@@ -391,6 +441,15 @@ fresh, and send one plain-text message per verified, enabled address with
 photographs newer than its watermark. Maintenance runs first so the count
 describes the library after a purge. Each successful send advances only its
 own recipient's watermark; a failure leaves it alone (decisions.md #71, #75).
+
+Two additions to that message, both decided in `planDigests` rather than in the
+executor. A recipient with `canSubmit` gets a closing line naming the
+submission address; a recipient with `reviewsInbox` gets a line saying how much
+is waiting, and receives the digest **even on a quiet day** when something is —
+the one place the "only on a day something arrived" rule bends. A recipient
+with neither bit receives a message byte for byte identical to the one this
+feature found. The inbox count fails soft: a failed listing costs a reviewer
+one sentence, never the message about the photographs that actually arrived.
 
 ## UI implementation order
 

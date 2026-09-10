@@ -72,7 +72,9 @@ export function pendingPhoto(item: QueueItem): PublicPhoto {
   const timestamp = item.source?.timestamp;
   return {
     id: item.id,
-    caption: item.edit?.caption ?? null,
+    // The up-front caption is what an emailed file arrives with; anything
+    // typed for this file alone outranks it.
+    caption: item.edit?.caption ?? item.caption,
     captureDate: item.edit ? item.edit.date : (timestamp?.date ?? null),
     captureTime: item.edit ? item.edit.time : (timestamp?.time ?? null),
     // Never typed, and never displayed as a field: it is the camera's own

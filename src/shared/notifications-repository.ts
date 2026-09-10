@@ -16,6 +16,7 @@ import { R2_KEYS } from './constants.ts';
 import {
   NOTIFICATION_SCHEMA_VERSION,
   emptyNotificationState,
+  upgradeNotificationState,
 } from './notifications.ts';
 import type { NotificationState } from './notifications.ts';
 import { decodeJson, encodeJson } from './store.ts';
@@ -50,9 +51,15 @@ export class NotificationSchemaError extends Error {
 /**
  * Load the state, or an empty one when nothing has been written yet.
  *
- * A newer-than-expected schema version is a hard failure, as it is for the
- * catalog: writing back a record shaped for an older schema is how a rollback
- * quietly destroys data.
+ * An **older** version is upgraded in memory: version 1 predates `canSubmit`
+ * and `reviewsInbox`, and both are `false` for every recipient, which is what
+ * a file written before either switch existed means. The next mutation writes
+ * it back as the current version; nothing is written just to read it.
+ *
+ * A **newer** version is a hard failure, as it is for the catalog: writing
+ * back a record shaped for an older schema is how a rollback quietly destroys
+ * data, and it is the reason for a version bump rather than two optional
+ * fields.
  */
 export async function loadNotificationState(
   store: ObjectStore,
@@ -61,11 +68,11 @@ export async function loadNotificationState(
   if (!stored) return { state: emptyNotificationState(), etag: null };
 
   const state = decodeJson<NotificationState>(stored.body);
-  if (state.schemaVersion !== NOTIFICATION_SCHEMA_VERSION) {
+  if (state.schemaVersion > NOTIFICATION_SCHEMA_VERSION) {
     throw new NotificationSchemaError(state.schemaVersion);
   }
 
-  return { state, etag: stored.etag };
+  return { state: upgradeNotificationState(state), etag: stored.etag };
 }
 
 export interface MutateNotificationOptions {

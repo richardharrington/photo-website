@@ -18,11 +18,32 @@
 import { livePhotos } from './catalog.ts';
 import type { Catalog } from './catalog.ts';
 
-export const NOTIFICATION_SCHEMA_VERSION = 1;
+/**
+ * Bumped to 2 when `canSubmit` and `reviewsInbox` arrived.
+ *
+ * A bump rather than two optional fields, because a version *newer* than this
+ * stays a hard failure: a rolled-back build refuses the file outright instead
+ * of silently writing back a shape that drops the two bits. A version-1 object
+ * is upgraded on read (see `loadNotificationState`), so the bump costs nothing
+ * going forward.
+ */
+export const NOTIFICATION_SCHEMA_VERSION = 2;
 
 export interface RecipientState {
   /** Whether the nightly digest goes to this address. */
   enabled: boolean;
+  /**
+   * Mail from this address is accepted into the Inbox.
+   *
+   * Independent of `enabled` in both directions: a family member may submit
+   * without receiving the digest, and receive it without being able to submit.
+   * Inert until Cloudflare has the address's confirmation — verification
+   * proves someone controls the mailbox, DKIM proves the message came from it,
+   * and neither alone is enough.
+   */
+  canSubmit: boolean;
+  /** This administrator's digest reports a non-empty Inbox. */
+  reviewsInbox: boolean;
   /**
    * The upload instant this address has been told about: the newest
    * `createdAt` covered by its last digest, or the instant it was enabled.
@@ -41,6 +62,45 @@ export interface NotificationState {
 
 export function emptyNotificationState(): NotificationState {
   return { schemaVersion: NOTIFICATION_SCHEMA_VERSION, recipients: {} };
+}
+
+/** A recipient with the two new bits off, which is what a version-1 entry
+ *  means and what a brand-new one starts as. */
+export function newRecipient(seenThrough: string, enabled = true): RecipientState {
+  return {
+    enabled,
+    canSubmit: false,
+    reviewsInbox: false,
+    seenThrough,
+    lastSent: null,
+  };
+}
+
+/**
+ * A version-1 state object, read as version 2.
+ *
+ * Applied in memory on every read; the next mutation writes it back as
+ * version 2. Both new fields are `false` for every recipient, which is the
+ * honest reading of a file written before either switch existed.
+ */
+export function upgradeNotificationState(state: NotificationState): NotificationState {
+  if (state.schemaVersion === NOTIFICATION_SCHEMA_VERSION) return state;
+
+  const recipients: Record<string, RecipientState> = {};
+  for (const [email, stored] of Object.entries(state.recipients)) {
+    // Typed as the current shape but read from a file that predates it, so the
+    // two new fields are read defensively rather than spread over defaults.
+    const recipient = stored as Partial<RecipientState>;
+    recipients[email] = {
+      enabled: recipient.enabled ?? false,
+      canSubmit: recipient.canSubmit ?? false,
+      reviewsInbox: recipient.reviewsInbox ?? false,
+      seenThrough: recipient.seenThrough ?? '',
+      lastSent: recipient.lastSent ?? null,
+    };
+  }
+
+  return { schemaVersion: NOTIFICATION_SCHEMA_VERSION, recipients };
 }
 
 /**
@@ -104,6 +164,19 @@ export interface DigestPlan {
   seenThrough: string;
   /** Recorded as `lastSent.at` on success. The run's instant, for the page. */
   at: string;
+  /** This recipient may email photographs in, so the digest tells them how. */
+  canSubmit: boolean;
+  /**
+   * What is waiting in the Inbox, when this recipient reviews it and there is
+   * something to review. Null otherwise, and the message says nothing.
+   */
+  waiting: InboxWaiting | null;
+}
+
+/** How much is waiting to be looked at, for the reviewers' line. */
+export interface InboxWaiting {
+  parts: number;
+  messages: number;
 }
 
 /**
@@ -122,6 +195,7 @@ export function planDigests(
   state: NotificationState,
   addresses: readonly DestinationAddress[],
   nowIso: string,
+  inbox: InboxWaiting = { parts: 0, messages: 0 },
 ): DigestPlan[] {
   const live = livePhotos(catalog);
   const plans: DigestPlan[] = [];
@@ -131,8 +205,20 @@ export function planDigests(
     const recipient = state.recipients[address.email];
     if (!recipient?.enabled) continue;
 
-    const plan = digestFor(live, address.email, recipient.seenThrough, nowIso);
-    if (plan.count > 0) plans.push(plan);
+    const waiting = recipient.reviewsInbox && inbox.parts > 0 ? inbox : null;
+
+    const plan = {
+      ...digestFor(live, address.email, recipient.seenThrough, nowIso),
+      canSubmit: recipient.canSubmit,
+      waiting,
+    };
+
+    // The "only on a day something arrived" rule bends here, and only here: a
+    // reviewer with something waiting is told even on a quiet day, because the
+    // waiting is the news. A reviewer with an empty inbox still gets nothing,
+    // exactly as before. The bend is in the plan rather than in the executor
+    // so what is sent stays a pure function of the three inputs.
+    if (plan.count > 0 || waiting !== null) plans.push(plan);
   }
 
   return plans.sort((a, b) => (a.email < b.email ? -1 : 1));
@@ -150,6 +236,7 @@ export function digestFor(
   email: string,
   seenThrough: string,
   nowIso: string,
+  extras: { canSubmit?: boolean; waiting?: InboxWaiting | null } = {},
 ): DigestPlan {
   let count = 0;
   let newest = seenThrough;
@@ -160,7 +247,14 @@ export function digestFor(
     if (photo.createdAt > newest) newest = photo.createdAt;
   }
 
-  return { email, count, seenThrough: newest, at: nowIso };
+  return {
+    email,
+    count,
+    seenThrough: newest,
+    at: nowIso,
+    canSubmit: extras.canSubmit ?? false,
+    waiting: extras.waiting ?? null,
+  };
 }
 
 /**
@@ -222,8 +316,22 @@ function photos(count: number): string {
   return `${count} new photo${count === 1 ? '' : 's'}`;
 }
 
-export function digestSubject(count: number, siteTitle: string, test = false): string {
+/**
+ * The subject line.
+ *
+ * A digest sent only because something is waiting to be reviewed says so:
+ * "No new photos" would be true and would also bury the only reason the
+ * message exists.
+ */
+export function digestSubject(
+  count: number,
+  siteTitle: string,
+  test = false,
+  waiting = false,
+): string {
   const prefix = test ? '[Test] ' : '';
+  if (count === 0 && waiting)
+    return `${prefix}Photos waiting for review on ${siteTitle}`;
   const what = count === 0 ? 'No new photos' : photos(count);
   return `${prefix}${what} on ${siteTitle}`;
 }
@@ -237,10 +345,19 @@ export function digestSubject(count: number, siteTitle: string, test = false): s
  * because an unsubscribe endpoint would be a new unauthenticated write path;
  * the footer says what to do instead.
  */
+export interface DigestExtras {
+  /** What is waiting to be reviewed, for a recipient who reviews the Inbox. */
+  waiting?: InboxWaiting | null;
+  /** The submission address, for a recipient who may use it. Null otherwise,
+   *  so the address travels only to people already allowed to send there. */
+  submitAddress?: string | null;
+}
+
 export function digestBody(
   count: number,
   siteTitle: string,
   recentUrl: string,
+  extras: DigestExtras = {},
 ): string {
   const opening =
     count === 0
@@ -248,14 +365,36 @@ export function digestBody(
       : `${photos(count)} ${count === 1 ? 'was' : 'were'} added to ${siteTitle} ` +
         'since your last update.';
 
-  return [
-    opening,
-    '',
-    'See them here:',
-    recentUrl,
+  const lines = [opening];
+
+  const waiting = extras.waiting ?? null;
+  if (waiting && waiting.parts > 0) {
+    lines.push(
+      '',
+      `${waiting.parts} emailed photo${waiting.parts === 1 ? '' : 's'} from ` +
+        `${waiting.messages} message${waiting.messages === 1 ? '' : 's'} ` +
+        `${waiting.parts === 1 ? 'is' : 'are'} waiting to be looked at.`,
+    );
+  }
+
+  lines.push('', 'See them here:', recentUrl);
+
+  // Only for a recipient who may actually use it. A digest for anyone else is
+  // byte-for-byte what it was before this feature existed.
+  if (extras.submitAddress) {
+    lines.push(
+      '',
+      `To add photos of your own, email them to ${extras.submitAddress}. The subject`,
+      'line becomes the caption.',
+    );
+  }
+
+  lines.push(
     '',
     `This is a daily update from ${siteTitle}. To stop receiving it, ask`,
     'whoever runs the site.',
     '',
-  ].join('\n');
+  );
+
+  return lines.join('\n');
 }

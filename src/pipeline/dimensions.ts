@@ -10,6 +10,17 @@
  * touches no pixel data at all.
  */
 
+import { detectFormat, isHeif, isJpeg, isPng } from '../shared/image-signature.ts';
+import type { SourceFormat } from '../shared/image-signature.ts';
+
+/**
+ * The signature checks live in `src/shared/` because the Worker needs the same
+ * answer for an emailed MIME part. They are re-exported here so the pipeline's
+ * own callers keep one import for "what is this file, and how big is it".
+ */
+export { detectFormat, isHeif, isJpeg, isPng };
+export type { SourceFormat };
+
 export interface SourceDimensions {
   width: number;
   height: number;
@@ -21,12 +32,6 @@ export type DimensionResult =
 // ---------------------------------------------------------------------------
 // PNG
 // ---------------------------------------------------------------------------
-
-const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-
-export function isPng(bytes: Uint8Array): boolean {
-  return PNG_SIGNATURE.every((byte, index) => bytes[index] === byte);
-}
 
 /** IHDR is required to be the first chunk, so width/height sit at a fixed offset. */
 function readPngDimensions(view: DataView, bytes: Uint8Array): DimensionResult {
@@ -42,10 +47,6 @@ function readPngDimensions(view: DataView, bytes: Uint8Array): DimensionResult {
 // ---------------------------------------------------------------------------
 // JPEG
 // ---------------------------------------------------------------------------
-
-export function isJpeg(bytes: Uint8Array): boolean {
-  return bytes[0] === 0xff && bytes[1] === 0xd8;
-}
 
 /**
  * Frame markers that carry dimensions. SOF4 (0xC4, DHT), SOF8 (0xC8,
@@ -102,24 +103,6 @@ function readJpegDimensions(view: DataView, bytes: Uint8Array): DimensionResult 
 // ---------------------------------------------------------------------------
 // HEIF / HEIC (ISO base media file format)
 // ---------------------------------------------------------------------------
-
-export function isHeif(bytes: Uint8Array): boolean {
-  if (bytes.byteLength < 12) return false;
-  if (String.fromCharCode(...bytes.slice(4, 8)) !== 'ftyp') return false;
-  const brand = String.fromCharCode(...bytes.slice(8, 12));
-  return [
-    'heic',
-    'heix',
-    'hevc',
-    'hevx',
-    'heim',
-    'heis',
-    'hevm',
-    'hevs',
-    'mif1',
-    'msf1',
-  ].includes(brand);
-}
 
 /** Boxes that contain other boxes and must be descended into. */
 const CONTAINER_BOXES = new Set(['meta', 'iprp', 'ipco']);
@@ -200,15 +183,6 @@ function readHeifDimensions(view: DataView, bytes: Uint8Array): DimensionResult 
 }
 
 // ---------------------------------------------------------------------------
-
-export type SourceFormat = 'jpeg' | 'png' | 'heif';
-
-export function detectFormat(bytes: Uint8Array): SourceFormat | null {
-  if (isJpeg(bytes)) return 'jpeg';
-  if (isPng(bytes)) return 'png';
-  if (isHeif(bytes)) return 'heif';
-  return null;
-}
 
 /**
  * Read dimensions from a container header.

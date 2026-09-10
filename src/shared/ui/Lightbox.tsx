@@ -121,6 +121,36 @@ export function Lightbox({
    */
   const [infoFor, setInfoFor] = useState<string | null>(null);
   const showInfo = infoFor === photo.id;
+
+  /**
+   * Who emailed this photograph in, asked for only when the panel is open.
+   *
+   * Keyed by photo id rather than held as a bare string, so arrowing to the
+   * next photograph with the panel open never shows the previous one's sender
+   * while the new answer is in flight. The viewer never asks: it has no
+   * curation, and the fact is not in the projection it receives.
+   */
+  const [emailedBy, setEmailedBy] = useState<{ id: string; email: string } | null>(
+    null,
+  );
+
+  useEffect(() => {
+    if (!showInfo || !curation) return;
+    let live = true;
+    void curation
+      .attribution(photo.id)
+      .then((email) => {
+        if (live && email) setEmailedBy({ id: photo.id, email });
+      })
+      // A photograph with no answer simply has no line; there is nothing here
+      // worth interrupting the view for.
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [showInfo, photo.id, curation]);
+
+  const sender = emailedBy?.id === photo.id ? emailedBy.email : null;
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   /**
@@ -464,6 +494,15 @@ export function Lightbox({
           >
             <dt>Original filename</dt>
             <dd>{photo.originalFilename}</dd>
+            {sender ? (
+              <>
+                {/* Only for a photograph that arrived by email, and only in
+                    the admin. The address is resolved server-side against the
+                    account's list; nothing about a sender is stored here. */}
+                <dt>Emailed by</dt>
+                <dd>{sender}</dd>
+              </>
+            ) : null}
             <dt>Capture date</dt>
             <dd>{capture ?? 'No date recorded'}</dd>
             {photo.captureUtcOffset ? (
