@@ -14,22 +14,19 @@ import {
  * The header Cloudflare Email Routing prepends to a message it delivers to a
  * Worker.
  *
- * **Written to the RFC 8601 grammar, not captured from a real message.** No
- * account with a domain existed when this was written, so what is pinned here
- * is the *shape* the standard defines — `authserv-id; method=result props;
- * method=result props`, with parenthesised comments anywhere — plus the
- * `authserv-id` this code expects Cloudflare to use, which is the one part
- * that is a genuine guess.
+ * **Written to the RFC 8601 grammar, not captured verbatim.** What is pinned
+ * here is the shape the standard defines — `authserv-id; method=result props;
+ * method=result props`, with parenthesised comments anywhere — which every
+ * mail provider emits, and which the cases below (folding, comments
+ * containing punctuation, several methods) are what make the parser worth
+ * having.
  *
- * The grammar is safe to rely on: every mail provider emits it, and the cases
- * below (folding, comments containing punctuation, several methods) are what
- * makes the parser worth having. The authserv-id is not, and if it is wrong
- * every submission drops silently — see `CLOUDFLARE_AUTHSERV_ID` and the
- * mismatch log that names what actually arrived.
- *
- * Replacing this with a real capture during account setup is a step in
- * operations.md, "Adding email submissions". The parser is a pure function of
- * the string, so that costs nothing but the paste.
+ * The `authserv-id` in it is no longer a guess: a real Gmail message routed
+ * through Cloudflare authenticated on 2026-09-10, and the comparison is
+ * exact, so `CLOUDFLARE_AUTHSERV_ID` is right. Replacing the rest of this
+ * string with a verbatim capture is still worth doing if a real one is ever
+ * to hand — the parser is a pure function of it, so that costs nothing but
+ * the paste — but nothing now depends on it.
  */
 const CLOUDFLARE_GMAIL = `${CLOUDFLARE_AUTHSERV_ID}; dkim=pass header.d=gmail.com header.i=@gmail.com header.b="abc123"; spf=pass (${CLOUDFLARE_AUTHSERV_ID}: domain of aunt@gmail.com designates 209.85.128.0 as permitted sender) smtp.mailfrom=aunt@gmail.com; dmarc=pass (p=NONE sp=QUARANTINE dis=NONE) header.from=gmail.com`;
 
@@ -137,9 +134,9 @@ describe('authenticatesFor', () => {
     expect(authenticatesFor([header], 'aunt@example.com')).toEqual({
       ok: false,
       reason: 'foreign-authserv',
-      // Reported back so the Worker can log it. `CLOUDFLARE_AUTHSERV_ID` was
-      // expected rather than measured, and if it is wrong every submission
-      // drops silently — this is the one line that says what to change it to.
+      // Reported back so the Worker can log it. Should Cloudflare ever change
+      // the identity it stamps, every submission would drop silently — this is
+      // the one line that says what to change the constant to.
       sawAuthservId: 'mx.somewhere-else.test',
     });
   });

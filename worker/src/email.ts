@@ -245,10 +245,10 @@ export async function handleSubmission(
       reason: 'not-authenticated',
       detail: auth.reason,
       // Present only for `foreign-authserv`, and only ever Cloudflare's own
-      // hostname — never anything about the sender. `CLOUDFLARE_AUTHSERV_ID`
-      // was guessed rather than measured, and if it was guessed wrong this
-      // line is the whole diagnosis: every submission drops silently until the
-      // constant matches what is printed here.
+      // hostname — never anything about the sender. If Cloudflare ever changes
+      // the identity it stamps, this line is the whole diagnosis: every
+      // submission drops silently until `CLOUDFLARE_AUTHSERV_ID` matches what
+      // is printed here.
       ...(auth.sawAuthservId ? { sawAuthservId: auth.sawAuthservId } : {}),
       fromDomain,
     });

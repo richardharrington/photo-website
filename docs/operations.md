@@ -21,13 +21,12 @@ the digest runs on the nightly cron.
 procedure because it is worth re-reading after any change to the domain, the
 tokens, or the recipient list.
 
-**Email submissions, 2026-09-09. Shipped and deployed, not yet turned on.**
-The Worker carrying the `email()` handler is live, but `SUBMIT_ADDRESS` is not
-among its secrets, so the handler accepts nothing at all — unconfigured means
-inert, exactly as it does for the digest. Three things remain, and none of
-them is a code change: the Email Routing rule for the submission address, the
-secret itself, and widening the bucket's CORS policy.
-[Adding email submissions](#adding-email-submissions) is the whole procedure.
+**Email submissions, turned on and confirmed 2026-09-10.** A real photograph
+emailed from Gmail was routed to the Worker, passed both proofs, and landed in
+the Inbox: `Submission accepted` in `wrangler tail`, one card in the admin app.
+The Email Routing rule and `SUBMIT_ADDRESS` are in place.
+[Adding email submissions](#adding-email-submissions) stays written as a
+procedure for the next address, the next domain, or a rebuild.
 
 Both of these say what was true when they were written. `npx wrangler secret
 list` names the secrets actually set, and `npx wrangler deployments status`
@@ -947,36 +946,39 @@ printf '%s' "submit@<your-domain>" | npx wrangler secret put SUBMIT_ADDRESS
       design (decisions.md #80); confirm it in `npx wrangler tail`, which logs
       the drop with the sender's domain and never their address.
 
-- [ ] **If the first message never arrives, read the log before anything
-      else.** Watch `npx wrangler tail` and send again. A line like
+- [ ] **If a message never arrives, read the log before anything else.** Every
+      refusal here is silent by design (decisions.md #79), so the log is the
+      only evidence there is. Run `npx wrangler tail` and send again; the drop
+      line names the exact check that failed:
 
       ```text
-      Submission dropped {"reason":"not-authenticated",
-        "detail":"foreign-authserv","sawAuthservId":"…","fromDomain":"…"}
+      Submission dropped {"reason":"not-a-submitter","fromDomain":"gmail.com"}
       ```
 
-      means the one value in this feature that was never verified against a
-      real message is wrong: `CLOUDFLARE_AUTHSERV_ID` in
-      `src/shared/email-auth.ts`. Cloudflare does not document the identity it
-      stamps its `Authentication-Results` header with, so that constant is an
-      expectation, and it is checked strictly because a header written under
-      somebody else's identity is somebody else's claim. Set it to whatever
-      `sawAuthservId` printed, deploy, and send again.
+      `wrong-recipient` means `SUBMIT_ADDRESS` does not match what you sent to.
+      `unknown-sender` and `unverified-sender` are about Cloudflare's
+      destination-address list. `not-a-submitter` means **Can submit is off**
+      for that address, which is the likeliest of the lot — it defaults off and
+      only a click on the Emails page sets it. `not-authenticated` carries a
+      `detail` saying which half failed.
 
-      While it is wrong the feature fails closed: every submission is dropped
-      and no sender is told, which is the right direction to be wrong in and
-      also indistinguishable from nobody having sent anything. Hence this step.
+      One of those deserves its own note. `foreign-authserv` means Cloudflare
+      has changed the identity it stamps its `Authentication-Results` header
+      with, and the same line prints `sawAuthservId` — the value to put in
+      `CLOUDFLARE_AUTHSERV_ID` in `src/shared/email-auth.ts`. That constant was
+      an expectation until a real message confirmed it on 2026-09-10; it is
+      checked strictly, because a header written under somebody else's identity
+      is somebody else's claim.
 
-- [ ] **Capture the real header into the test fixture** while you are here. Add
-      one line to `handleSubmission` to log
-      `authenticationResultsHeaders(message.headers)[0]`, send a message from
-      each provider your family actually uses, and paste what arrives into
-      `CLOUDFLARE_GMAIL` in `tests/unit/email-auth.test.ts` — one fixture per
-      provider is better than one. The parser is a pure function of that
-      string, so the fixture *is* the test, and until it holds a real capture
-      what it pins is the RFC 8601 grammar rather than what Cloudflare emits.
-      Remove the log line afterwards: a full `Authentication-Results` header
-      names the sender's domain and their signing selector.
+- [ ] **Optional: capture a real header into the test fixture.** The fixture in
+      `tests/unit/email-auth.test.ts` is written to the RFC 8601 grammar rather
+      than copied from a delivered message. Nothing depends on that now, but a
+      verbatim capture — one per provider your family uses — would pin reality
+      rather than the standard. It takes a temporary line in `handleSubmission`
+      logging `headerValues(headerBlock, 'authentication-results')[0]`, a
+      deploy, and a send. Remove the line afterwards: a full
+      `Authentication-Results` header names the sender's domain and their
+      signing selector.
 - [ ] Send a message with a PDF and no image. Expect an ordinary
       delivery-failure message saying no photos were found.
 

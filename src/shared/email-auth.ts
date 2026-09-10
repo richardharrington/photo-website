@@ -27,19 +27,19 @@
 /**
  * The authserv-id Cloudflare Email Routing stamps its own results with.
  *
- * **Unverified against a real delivered message.** No account with a domain
- * existed when this was written and Cloudflare does not document the value, so
- * this is the expected one rather than a measured one. It is still checked
- * strictly, because a header written under somebody else's identity is
- * somebody else's claim.
+ * **Confirmed against a real delivered message on 2026-09-10**: a Gmail
+ * message routed through Cloudflare to this Worker authenticated, and the
+ * comparison below is exact, so the identity matched. It was an expectation
+ * before that — Cloudflare does not document the value — and it is checked
+ * strictly either way, because a header written under somebody else's
+ * identity is somebody else's claim.
  *
- * If it is wrong the feature fails **closed and silently**: every submission
- * drops as `foreign-authserv` and no sender is told anything. That is the
- * right direction to be wrong in, but it is indistinguishable from "nobody has
- * emailed anything" without reading the log — which is why a mismatch carries
- * the identity it actually saw, and the Worker logs it. Confirming this
- * against the first real message is a step in operations.md, "Adding email
- * submissions".
+ * Should Cloudflare ever change it, the feature fails **closed and
+ * silently**: every submission drops as `foreign-authserv` and no sender is
+ * told anything. That is the right direction to be wrong in, but it is
+ * indistinguishable from "nobody has emailed anything" without reading the
+ * log — which is why a mismatch carries the identity it actually saw, and the
+ * Worker logs it.
  */
 export const CLOUDFLARE_AUTHSERV_ID = 'mx.cloudflare.net';
 

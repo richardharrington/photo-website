@@ -1146,19 +1146,19 @@ its ordering, and its URLs are unchanged.
     identity is somebody else's claim. Scanning the header block for any
     `dkim=pass` would accept a forgery outright.
 
-    **One value here is expected rather than measured**, and it is worth naming
-    plainly: `CLOUDFLARE_AUTHSERV_ID`. No account with a domain existed when
-    this was built, and Cloudflare does not document the identity it stamps the
-    header with. The grammar around it is RFC 8601 and safe to rely on — every
-    provider emits it — but that one string is a guess, checked strictly.
+    `CLOUDFLARE_AUTHSERV_ID` was an expectation rather than a measurement when
+    this was built: no account with a domain existed to send to, and Cloudflare
+    does not document the identity it stamps the header with. **Confirmed on
+    2026-09-10** — a Gmail message routed through Cloudflare authenticated, and
+    the comparison is exact, so the value is right.
 
-    If it is wrong the feature fails **closed and silently**: every submission
-    drops and no sender is told, which is the right direction to be wrong in
-    and also indistinguishable from nobody having sent anything. So a mismatch
-    logs the identity it actually saw — Cloudflare's own hostname, never
-    anything about the sender — and that one line is the whole diagnosis.
-    Confirming it, and replacing the hand-written test fixture with a real
-    capture, are steps in operations.md.
+    The failure mode it had is still the failure mode it would have if
+    Cloudflare ever changed the value, so the handling stays: **closed and
+    silent**, every submission dropped and no sender told, which is the right
+    direction to be wrong in and also indistinguishable from nobody having sent
+    anything. A mismatch therefore logs the identity it actually saw —
+    Cloudflare's own hostname, never anything about the sender — and that one
+    line is the whole diagnosis.
 
 81. **A claim, not a lock and not a hash.** Adding is a browser-side job of
     seconds to minutes and two admin tabs can be open, so a tab writes a random
@@ -1282,3 +1282,42 @@ its ordering, and its URLs are unchanged.
     `src/shared/notifications.ts` and its repository are still about the digest
     — the two new switches are *carried* in that state, but the module's
     subject is what gets sent to whom.
+
+88. **The Headers API cannot read repeated headers, and finding out cost a
+    silent deploy.** The first real submission vanished. The Worker log said
+    `Inbound mail failed TypeError: getAll() can only be used with the header
+    name "Set-Cookie"`.
+
+    Cloudflare's `Headers` *defines* `getAll`, so a
+    `typeof headers.getAll === 'function'` guard passes, and then the call
+    throws for every name but `Set-Cookie`. The outer catch in the `email()`
+    handler swallowed it — correctly, since a throw becomes a bounce and #79's
+    silent-drop rule says an unproven sender must learn nothing — which turned
+    an ordinary defect into an invisible one. The whole feature was inert and
+    the only evidence was a line in `wrangler tail`.
+
+    The API cannot do this job at all, which is the part worth remembering.
+    `get` joins repeated headers with a comma; a comma inside a header value is
+    legal; so the join cannot be reliably undone. And "only the **first**
+    `Authentication-Results` counts" (#80) is the entire anti-forgery rule, so
+    a joined string is not merely awkward, it is unusable.
+
+    So the raw bytes are read once — the stream can only be consumed once, and
+    `postal-mime` needed them anyway — and the header block above the first
+    blank line is parsed directly, unfolding continuation lines. A body line
+    shaped like a header is never read as one, which is asserted rather than
+    assumed. `EmailMessageLike` no longer carries a `headers` member at all, so
+    nothing can reach for one again, and the test's fake message has none to
+    offer: that absence is what makes the regression test mean something.
+
+    Reading the raw block fixed a second thing the Headers path had wrong.
+    `message.from` is the **envelope** sender; DMARC aligns against
+    `header.from`. They differ for a forward or a mailing list, so the old code
+    would have authenticated the wrong domain. The From *header* is now what is
+    read, with the envelope as a fallback only for a message carrying no From
+    at all — and the display name is still discarded and never used.
+
+    The general lesson, recorded because it is not the first time on this
+    project: a runtime's convenience API is not a specification. `getAll`
+    existing is not `getAll` working, exactly as `verified` being a timestamp
+    is not `verified` being a boolean (#70).
