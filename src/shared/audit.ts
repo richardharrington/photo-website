@@ -16,6 +16,12 @@ import type { PhotoRecord } from './catalog.ts';
 export type AuditAction =
   | 'upload'
   | 'metadata-change'
+  /**
+   * One event per bulk caption request, however many photos it changed —
+   * one act, one `updatedAuditId`. Each photo's caption before and after is
+   * in `changes`; `note: 'undo'` marks the request that put them back.
+   */
+  | 'caption-change'
   | 'trash'
   | 'restore'
   | 'permanent-delete'
@@ -48,7 +54,15 @@ export interface AuditEvent {
   via: 'admin-api' | 'scheduled-maintenance' | 'email';
   before?: AuditMetadata;
   after?: AuditMetadata;
+  /** Per-photo captions, for an event that changed several at once. */
+  changes?: AuditCaptionChange[];
   note?: string;
+}
+
+export interface AuditCaptionChange {
+  photoId: string;
+  before: string | null;
+  after: string | null;
 }
 
 export function auditMetadataOf(photo: PhotoRecord): AuditMetadata {
@@ -67,6 +81,7 @@ export function makeAuditEvent(
     via?: AuditEvent['via'];
     before?: AuditMetadata;
     after?: AuditMetadata;
+    changes?: readonly AuditCaptionChange[];
     note?: string;
     id?: string;
   },
@@ -80,6 +95,7 @@ export function makeAuditEvent(
   };
   if (options.before) event.before = options.before;
   if (options.after) event.after = options.after;
+  if (options.changes) event.changes = options.changes.map((change) => ({ ...change }));
   if (options.note) event.note = options.note;
   return event;
 }

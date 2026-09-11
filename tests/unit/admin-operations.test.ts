@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  applyCaptions,
   beginBatch,
   commitPhoto,
   editPhotoMetadata,
@@ -10,7 +11,11 @@ import {
   restorePhotos,
   trashPhotos,
 } from '../../src/shared/admin-operations.ts';
-import type { CommitInput } from '../../src/shared/admin-operations.ts';
+import type {
+  CaptionsOutcome,
+  CommitInput,
+} from '../../src/shared/admin-operations.ts';
+import { MAX_CAPTION_LENGTH } from '../../src/shared/validation.ts';
 import { mutateCatalog } from '../../src/shared/catalog-repository.ts';
 import type { Mutation } from '../../src/shared/catalog-repository.ts';
 import { emptyCatalog, isTrashed } from '../../src/shared/catalog.ts';
@@ -258,6 +263,232 @@ describe('editPhotoMetadata', () => {
     expect(apply(editPhotoMetadata(trashed, photo.id, {}, NOW, AUDIT)).value).toEqual({
       status: 'not-found',
     });
+  });
+});
+
+describe('applyCaptions', () => {
+  const captioned = makePhoto({
+    id: testPhotoId('captioned'),
+    caption: 'Low tide',
+    captureDate: '2026-08-02',
+    captureTime: null,
+    timestampSource: 'manual',
+  });
+  const blank = makePhoto({ id: testPhotoId('blank'), caption: null });
+  const trashed = makePhoto({
+    id: testPhotoId('trashed'),
+    caption: null,
+    trashedAt: NOW,
+  });
+  const catalog = makeCatalog([captioned, blank, trashed]);
+
+  function applied(outcome: CaptionsOutcome) {
+    if (outcome.status !== 'applied') throw new Error(outcome.error);
+    return outcome;
+  }
+
+  it('replaces each caption that is still the one expected, and only the caption', () => {
+    const result = apply(
+      applyCaptions(
+        catalog,
+        [
+          { photoId: captioned.id, caption: 'Beach', expected: 'Low tide' },
+          { photoId: blank.id, caption: 'Beach', expected: null },
+        ],
+        NOW,
+        AUDIT,
+      ),
+    );
+
+    const outcome = applied(result.value);
+    expect(outcome.skipped).toEqual([]);
+    expect(outcome.updated.map((photo) => photo.id)).toEqual([captioned.id, blank.id]);
+    expect(outcome.previous).toEqual([captioned, blank]);
+
+    for (const id of [captioned.id, blank.id]) {
+      const stored = result.catalog!.photos[id]!;
+      expect(stored.caption).toBe('Beach');
+      expect(stored.updatedAt).toBe(NOW);
+      expect(stored.updatedAuditId).toBe(AUDIT);
+    }
+    // A caption is not a timestamp correction.
+    const stored = result.catalog!.photos[captioned.id]!;
+    expect(stored.captureDate).toBe(captioned.captureDate);
+    expect(stored.captureTime).toBe(captioned.captureTime);
+    expect(stored.timestampSource).toBe('manual');
+  });
+
+  it('skips a changed caption, a trashed photo, and an unknown ID', () => {
+    const unknown = testPhotoId('nope');
+    const result = apply(
+      applyCaptions(
+        catalog,
+        [
+          { photoId: captioned.id, caption: 'Beach', expected: 'Something else' },
+          { photoId: trashed.id, caption: 'Beach', expected: null },
+          { photoId: unknown, caption: 'Beach', expected: null },
+          { photoId: blank.id, caption: 'Beach', expected: null },
+        ],
+        NOW,
+        AUDIT,
+      ),
+    );
+
+    const outcome = applied(result.value);
+    expect(outcome.skipped).toEqual([captioned.id, trashed.id, unknown]);
+    expect(outcome.updated.map((photo) => photo.id)).toEqual([blank.id]);
+    expect(result.catalog!.photos[captioned.id]!.caption).toBe('Low tide');
+    expect(result.catalog!.photos[trashed.id]!.caption).toBeNull();
+  });
+
+  it('counts a caption that already matches as neither updated nor skipped', () => {
+    const result = apply(
+      applyCaptions(
+        catalog,
+        [
+          { photoId: captioned.id, caption: 'Low tide', expected: 'Low tide' },
+          { photoId: blank.id, caption: 'Beach', expected: null },
+        ],
+        NOW,
+        AUDIT,
+      ),
+    );
+
+    const outcome = applied(result.value);
+    expect(outcome.updated.map((photo) => photo.id)).toEqual([blank.id]);
+    expect(outcome.skipped).toEqual([]);
+    expect(result.catalog!.photos[captioned.id]).toEqual(captioned);
+  });
+
+  it('writes nothing when everything was skipped or already so', () => {
+    const result = apply(
+      applyCaptions(
+        catalog,
+        [
+          { photoId: captioned.id, caption: 'Low tide', expected: 'Low tide' },
+          { photoId: blank.id, caption: 'Beach', expected: 'Stale' },
+        ],
+        NOW,
+        AUDIT,
+      ),
+    );
+
+    expect(result.catalog).toBeNull();
+    expect(result.value).toEqual({
+      status: 'applied',
+      updated: [],
+      previous: [],
+      skipped: [blank.id],
+    });
+  });
+
+  it('accepts null, which clears — the caption Undo puts back', () => {
+    const result = apply(
+      applyCaptions(
+        catalog,
+        [{ photoId: captioned.id, caption: null, expected: 'Low tide' }],
+        NOW,
+        AUDIT,
+      ),
+    );
+    expect(result.catalog!.photos[captioned.id]!.caption).toBeNull();
+  });
+
+  it('stores captions normalised', () => {
+    const result = apply(
+      applyCaptions(
+        catalog,
+        [{ photoId: blank.id, caption: '  Beach\r\nat dusk  ', expected: null }],
+        NOW,
+        AUDIT,
+      ),
+    );
+    expect(result.catalog!.photos[blank.id]!.caption).toBe('Beach\nat dusk');
+  });
+
+  it('refuses a malformed request as a whole, and writes nothing', () => {
+    const good = { photoId: blank.id, caption: 'Beach', expected: null };
+    const cases: unknown[] = [
+      [],
+      'not a list',
+      [good, 'not an object'],
+      [good, { ...good }],
+      [{ ...good, photoId: 'not-an-id' }],
+      [{ ...good, caption: 'x'.repeat(MAX_CAPTION_LENGTH + 1) }],
+      [{ ...good, caption: 42 }],
+      [{ ...good, expected: 42 }],
+    ];
+
+    for (const input of cases) {
+      const result = apply(applyCaptions(catalog, input, NOW, AUDIT));
+      expect(result.value, JSON.stringify(input)).toMatchObject({ status: 'invalid' });
+      expect(result.catalog).toBeNull();
+    }
+  });
+
+  it('compares expected byte for byte, without normalising it', () => {
+    // The stored value is already normal, so a padded `expected` can only
+    // mean the page saw something else.
+    const result = apply(
+      applyCaptions(
+        catalog,
+        [{ photoId: captioned.id, caption: 'Beach', expected: ' Low tide ' }],
+        NOW,
+        AUDIT,
+      ),
+    );
+    expect(applied(result.value).skipped).toEqual([captioned.id]);
+  });
+
+  /**
+   * The point of the precondition: a caption changed in another tab between
+   * this request's read and its write is not overwritten on the retry.
+   */
+  it('re-checks after a conflict, and leaves a caption changed meanwhile', async () => {
+    const store = new InMemoryObjectStore();
+    store.seed(R2_KEYS.catalog, encodeJson(catalog));
+    let raced = false;
+
+    store.onBeforeConditionalWrite = () => {
+      if (raced) return;
+      raced = true;
+      const current = store.readJson<Catalog>(R2_KEYS.catalog)!;
+      const competing = editPhotoMetadata(
+        current,
+        blank.id,
+        {
+          date: blank.captureDate,
+          time: blank.captureTime,
+          caption: 'From another tab',
+        },
+        NOW,
+        'audit-other',
+      );
+      if (competing.kind === 'write') {
+        store.seed(R2_KEYS.catalog, encodeJson(competing.catalog));
+      }
+    };
+
+    const outcome = await mutateCatalog(store, { now: () => NOW }, (current) =>
+      applyCaptions(
+        current,
+        [
+          { photoId: captioned.id, caption: 'Beach', expected: 'Low tide' },
+          { photoId: blank.id, caption: 'Beach', expected: null },
+        ],
+        NOW,
+        AUDIT,
+      ),
+    );
+
+    expect(raced).toBe(true);
+    const result = applied(outcome);
+    expect(result.skipped).toEqual([blank.id]);
+    expect(result.updated.map((photo) => photo.id)).toEqual([captioned.id]);
+
+    const stored = store.readJson<Catalog>(R2_KEYS.catalog)!;
+    expect(stored.photos[captioned.id]!.caption).toBe('Beach');
+    expect(stored.photos[blank.id]!.caption).toBe('From another tab');
   });
 });
 

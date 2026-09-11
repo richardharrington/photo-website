@@ -9,6 +9,7 @@
 
 import { validateCaptureMoment, formatCaptureDate } from './datetime.ts';
 import type { CaptureDate, CaptureMoment, ValidationResult } from './datetime.ts';
+import { isValidPhotoId } from './ids.ts';
 
 export const MAX_CAPTION_LENGTH = 2000;
 
@@ -42,19 +43,94 @@ export function normalizeCaption(input: string | null | undefined): string | nul
   return normalized === '' ? null : normalized;
 }
 
-export function validatePhotoEdit(input: PhotoEditInput): ValidationResult<PhotoEdit> {
-  const moment = validateCaptureMoment({ date: input.date, time: input.time });
-  if (!moment.ok) return moment;
-
-  const caption = normalizeCaption(input.caption);
+/**
+ * A caption, normalised and within the length limit.
+ *
+ * The photo view's form, the bulk caption box, and both endpoints all come
+ * through here, so there is one limit and one way of saying it.
+ */
+export function validateCaption(
+  input: string | null | undefined,
+): ValidationResult<string | null> {
+  const caption = normalizeCaption(input);
   if (caption !== null && caption.length > MAX_CAPTION_LENGTH) {
     return {
       ok: false,
       error: `Caption must be ${MAX_CAPTION_LENGTH} characters or fewer.`,
     };
   }
+  return { ok: true, value: caption };
+}
 
-  return { ok: true, value: { moment: moment.value, caption } };
+export function validatePhotoEdit(input: PhotoEditInput): ValidationResult<PhotoEdit> {
+  const moment = validateCaptureMoment({ date: input.date, time: input.time });
+  if (!moment.ok) return moment;
+
+  const caption = validateCaption(input.caption);
+  if (!caption.ok) return caption;
+
+  return { ok: true, value: { moment: moment.value, caption: caption.value } };
+}
+
+/**
+ * One photo's part of a bulk caption request: the caption to store, and the
+ * caption the page last saw there.
+ */
+export interface CaptionChange {
+  photoId: string;
+  caption: string | null;
+  /**
+   * Compared byte for byte with the stored caption, which is already
+   * normalised, so it is deliberately not normalised here. A photo whose
+   * caption is no longer this is left alone (decisions.md #89).
+   */
+  expected: string | null;
+}
+
+/**
+ * The body of `POST /captions`, refused as a whole if any part is malformed.
+ *
+ * `null` is a valid caption even though the caption box can never send one:
+ * Undo has to be able to put back "no caption".
+ */
+export function validateCaptionChanges(
+  input: unknown,
+): ValidationResult<CaptionChange[]> {
+  if (!Array.isArray(input) || input.length === 0) {
+    return { ok: false, error: 'A list of caption changes is required.' };
+  }
+
+  const seen = new Set<string>();
+  const changes: CaptionChange[] = [];
+
+  for (const entry of input as unknown[]) {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+      return { ok: false, error: 'Each caption change must be an object.' };
+    }
+    const { photoId, caption, expected } = entry as Record<string, unknown>;
+
+    if (typeof photoId !== 'string' || !isValidPhotoId(photoId)) {
+      return { ok: false, error: 'A caption change has a malformed photo ID.' };
+    }
+    if (seen.has(photoId)) {
+      return { ok: false, error: 'A photo appears more than once in the changes.' };
+    }
+    seen.add(photoId);
+
+    if (caption !== null && typeof caption !== 'string') {
+      return { ok: false, error: 'A caption must be text or null.' };
+    }
+    const validated = validateCaption(caption);
+    if (!validated.ok) return validated;
+
+    if (expected !== null && typeof expected !== 'string') {
+      return { ok: false, error: 'An expected caption must be text or null.' };
+    }
+
+    changes.push({ photoId, caption: validated.value, expected });
+  }
+
+  return { ok: true, value: changes };
 }
 
 /**

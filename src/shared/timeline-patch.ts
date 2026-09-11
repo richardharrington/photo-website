@@ -209,6 +209,65 @@ export function upsertPhoto(
   };
 }
 
+/**
+ * Swap updated records in exactly where they already sit.
+ *
+ * For a change that cannot move a photo — a caption — where `upsertPhoto`
+ * would be wrong rather than merely approximate: it re-inserts, and a
+ * date-only photo re-inserted is appended after its day's timed photos, so a
+ * caption change would visibly shuffle it until the refetch landed.
+ *
+ * Positions, counts, and groups are unchanged, so there is nothing to
+ * recompute. `recent` holds IDs only and needs nothing. An ID the timeline
+ * does not hold is ignored, and when nothing matches the same object comes
+ * back, so a no-op patch is not a re-render.
+ */
+export function replacePhotosInPlace(
+  timeline: TimelineResponse,
+  photos: readonly PublicPhoto[],
+): TimelineResponse {
+  if (photos.length === 0) return timeline;
+  const byId = new Map(photos.map((photo) => [photo.id, photo]));
+
+  const swap = (list: PublicPhoto[]) =>
+    mapKeepingIdentity(list, (photo) => byId.get(photo.id) ?? photo);
+
+  const years = mapKeepingIdentity(timeline.years, (year) => {
+    const months = mapKeepingIdentity(year.months, (month) => {
+      const days = mapKeepingIdentity(month.days, (day) => {
+        const dayPhotos = swap(day.photos);
+        return dayPhotos === day.photos ? day : { ...day, photos: dayPhotos };
+      });
+      return days === month.days ? month : { ...month, days };
+    });
+    return months === year.months ? year : { ...year, months };
+  });
+  const undatedPhotos = swap(timeline.undated.photos);
+
+  if (years === timeline.years && undatedPhotos === timeline.undated.photos) {
+    return timeline;
+  }
+  return {
+    ...timeline,
+    years,
+    undated:
+      undatedPhotos === timeline.undated.photos
+        ? timeline.undated
+        : { ...timeline.undated, photos: undatedPhotos },
+  };
+}
+
+/** `map`, returning the input array itself when every element came back unchanged. */
+function mapKeepingIdentity<T>(items: T[], fn: (item: T) => T): T[] {
+  let changed = false;
+  const next = items.map((item) => {
+    const mapped = fn(item);
+    if (mapped !== item) changed = true;
+    return mapped;
+  });
+  return changed ? next : items;
+}
+
 /** Insert into an existing year, or create one in newest-first position. */
 function insertYear(
   years: readonly TimelineYear[],

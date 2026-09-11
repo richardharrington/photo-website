@@ -420,9 +420,21 @@ path, and everything below applies on top of the display site's rules.
   while one of its photos is unselected; it adds to the selection rather than
   replacing it, and there is no library-wide Select all. While anything is
   selected a bar pinned to the top of the page shows the count, **Delete
-  selected**, and **Deselect all**; it is absent otherwise. No selection
-  control is ever shown disabled. Bulk delete is the only bulk action; date,
-  time, and caption are per-photo.
+  selected**, **Deselect all**, and, at its right-hand end, a caption box; it
+  is absent otherwise. No selection control is ever shown disabled. Delete
+  and caption are the bulk actions; date and time are per-photo.
+- The caption box, labelled **Apply caption to selected**, is one line.
+  Typing brings up **Apply**, and Enter does the same. The caption *replaces*
+  every selected photograph's caption. Nothing can be applied from an empty
+  box, so captions are cleared one photograph at a time. When a photograph
+  would lose a different caption, a confirmation lists each such photograph
+  with its thumbnail and the caption it would lose; when none would, the
+  caption applies at once. A five-second Undo follows, as it does a delete,
+  and puts back each photograph's own caption, except one changed again in
+  the meantime. After applying, **Applied** stands in place of the button
+  for as long as every selected photograph carries the text in the box. The
+  text stays while the selection changes and goes when the bar does. The
+  trash has no caption box.
 - The photo view never touches the selection: open a photograph, arrow to
   another, close, and the selection and its anchor are what they were. The
   files still on their way up are the one exception to the click rule — they

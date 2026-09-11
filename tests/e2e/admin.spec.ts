@@ -431,7 +431,9 @@ test.describe('the admin photo view', () => {
     await expect(page.locator('.lightbox__caption')).toHaveCount(0);
     await expect(page.getByLabel('Capture date')).toHaveValue(scratch().day);
     await expect(page.getByLabel('Capture time')).toHaveValue('21:03:11');
-    await expect(page.getByLabel('Caption')).toHaveValue('First rocket up.');
+    await expect(
+      page.getByRole('textbox', { name: 'Caption', exact: true }),
+    ).toHaveValue('First rocket up.');
 
     // And the actions beneath it.
     for (const name of ['Download', 'Delete', 'Photo info']) {
@@ -445,19 +447,25 @@ test.describe('the admin photo view', () => {
 
     await page.getByRole('button', { name: 'Next photo' }).click();
     await expect(page.locator('.lightbox__filename')).toHaveText(files[1]!);
-    await expect(page.getByLabel('Caption')).toHaveValue('');
+    await expect(
+      page.getByRole('textbox', { name: 'Caption', exact: true }),
+    ).toHaveValue('');
     await expect(page.getByLabel('Capture time')).toHaveValue('21:07:45');
 
     await page.keyboard.press('ArrowLeft');
     await expect(page.locator('.lightbox__filename')).toHaveText(files[0]!);
-    await expect(page.getByLabel('Caption')).toHaveValue('First rocket up.');
+    await expect(
+      page.getByRole('textbox', { name: 'Caption', exact: true }),
+    ).toHaveValue('First rocket up.');
   });
 
   test('will not step away from an edit that has not been saved', async ({ page }) => {
     await openFirst(page);
     const { files } = scratch();
 
-    await page.getByLabel('Caption').fill('Never saved');
+    await page
+      .getByRole('textbox', { name: 'Caption', exact: true })
+      .fill('Never saved');
     await expect(page.getByText('Unsaved changes')).toBeVisible();
 
     // Stepping is what would discard it, so both ways of stepping stop.
@@ -469,7 +477,9 @@ test.describe('the admin photo view', () => {
 
     // Put back what was there, and the view moves again — no flag to get
     // stuck on, just a comparison against what is stored.
-    await page.getByLabel('Caption').fill('First rocket up.');
+    await page
+      .getByRole('textbox', { name: 'Caption', exact: true })
+      .fill('First rocket up.');
     await expect(page.getByText('Unsaved changes')).toBeHidden();
     await page.getByRole('button', { name: 'Next photo' }).click();
     await expect(page.locator('.lightbox__filename')).toHaveText(files[1]!);
@@ -478,14 +488,18 @@ test.describe('the admin photo view', () => {
   test('still lets an unsaved edit be abandoned deliberately', async ({ page }) => {
     // Escape and the way back are asking to leave, and always have been.
     await openFirst(page);
-    await page.getByLabel('Caption').fill('Never saved');
+    await page
+      .getByRole('textbox', { name: 'Caption', exact: true })
+      .fill('Never saved');
 
     await page.locator('.lightbox').click();
     await page.keyboard.press('Escape');
     await expect(page.locator('.lightbox')).toBeHidden();
 
     await openFirst(page);
-    await expect(page.getByLabel('Caption')).toHaveValue('First rocket up.');
+    await expect(
+      page.getByRole('textbox', { name: 'Caption', exact: true }),
+    ).toHaveValue('First rocket up.');
   });
 
   test('disables the time field when there is no date', async ({ page }) => {
@@ -518,7 +532,9 @@ test.describe('the admin photo view', () => {
     const moved = `${day.slice(0, 7)}-20`;
 
     await openFirst(page);
-    await page.getByLabel('Caption').fill('Edited by a test');
+    await page
+      .getByRole('textbox', { name: 'Caption', exact: true })
+      .fill('Edited by a test');
     await page.getByLabel('Capture date').fill(moved);
     await page.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText('Saved')).toBeVisible();
@@ -537,7 +553,9 @@ test.describe('the admin photo view', () => {
     await tiles(page, `#d-${moved}`).first().dblclick();
     await page.getByLabel('Capture date').fill(day);
     await page.getByLabel('Capture time').fill('21:03:11');
-    await page.getByLabel('Caption').fill('First rocket up.');
+    await page
+      .getByRole('textbox', { name: 'Caption', exact: true })
+      .fill('First rocket up.');
     await page.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText('Saved')).toBeVisible();
     await page.goto(path);
@@ -547,7 +565,7 @@ test.describe('the admin photo view', () => {
   test('a field owns the keyboard while it has focus', async ({ page }) => {
     await openFirst(page);
     const { files } = scratch();
-    const caption = page.getByLabel('Caption');
+    const caption = page.getByRole('textbox', { name: 'Caption', exact: true });
 
     await caption.fill('abcd');
     // Arrows move the caret and Backspace deletes a character: neither
@@ -698,7 +716,9 @@ test.describe('adding photographs', () => {
     );
 
     await page.getByLabel('Capture date').fill(uploadDay);
-    await page.getByLabel('Caption').fill('Typed on the way up.');
+    await page
+      .getByRole('textbox', { name: 'Caption', exact: true })
+      .fill('Typed on the way up.');
     await page.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText('Saved')).toBeVisible();
 
@@ -716,7 +736,9 @@ test.describe('adding photographs', () => {
     await expect(landed).toHaveCount(1);
 
     await landed.locator('.photo-grid__link').dblclick();
-    await expect(page.getByLabel('Caption')).toHaveValue('Typed on the way up.');
+    await expect(
+      page.getByRole('textbox', { name: 'Caption', exact: true }),
+    ).toHaveValue('Typed on the way up.');
 
     // Put the fixture back the way it was found: out of the library, and out
     // of the trash behind it.
@@ -776,7 +798,9 @@ test.describe('the trash', () => {
     await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(
       0,
     );
-    await expect(page.getByLabel('Caption')).toHaveCount(0);
+    await expect(
+      page.getByRole('textbox', { name: 'Caption', exact: true }),
+    ).toHaveCount(0);
 
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
@@ -884,7 +908,7 @@ test.describe('the recent view in the admin', () => {
     await page.goto(`${BASE}/recent/photo/${ids[0]}`);
     await expect(page.getByRole('dialog')).toBeVisible();
 
-    const caption = page.getByLabel('Caption');
+    const caption = page.getByRole('textbox', { name: 'Caption', exact: true });
     const original = await caption.inputValue();
     await caption.fill('Edited from the recent view.');
     await page.getByRole('button', { name: 'Save' }).click();
@@ -897,8 +921,232 @@ test.describe('the recent view in the admin', () => {
     await expect(page.locator(`#photo-${ids[0]}`)).toHaveCount(1);
 
     await page.goto(`${BASE}/recent/photo/${ids[0]}`);
-    await page.getByLabel('Caption').fill(original);
+    await page.getByRole('textbox', { name: 'Caption', exact: true }).fill(original);
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByText('Saved')).toBeVisible();
+  });
+});
+
+/**
+ * One caption applied to a whole selection (decisions.md #89), on this
+ * project's scratch day.
+ *
+ * The day starts with its first photo captioned "First rocket up." and the
+ * other two uncaptioned. Tests about Undo put that back through Undo; after
+ * every test, whatever happened, the fixture's own `/captions` route restores
+ * anything still different, so one failed assertion cannot strand a caption
+ * for every test after it.
+ */
+test.describe('applying a caption to a selection', () => {
+  const ORIGINAL: readonly (string | null)[] = ['First rocket up.', null, null];
+
+  const bar = (page: Page) => page.getByRole('toolbar', { name: 'Selection' });
+  const box = (page: Page) => page.getByLabel('Apply caption to selected');
+  const slot = (page: Page) => page.locator('.caption-apply__slot');
+  const applyButton = (page: Page) =>
+    slot(page).getByRole('button', { name: 'Apply', exact: true });
+
+  /** The caption the fixture holds right now, not the page's copy of it. */
+  async function storedCaption(page: Page, id: string): Promise<string | null> {
+    const response = await page.request.get(`${BASE}/api/photo/${id}`);
+    const body = (await response.json()) as { photo: { caption: string | null } };
+    return body.photo.caption;
+  }
+
+  test.afterEach(async ({ page }) => {
+    const { ids } = scratch();
+    const changes: {
+      photoId: string;
+      caption: string | null;
+      expected: string | null;
+    }[] = [];
+    for (const [index, id] of ids.entries()) {
+      const expected = await storedCaption(page, id);
+      if (expected !== ORIGINAL[index]) {
+        changes.push({ photoId: id, caption: ORIGINAL[index]!, expected });
+      }
+    }
+    if (changes.length === 0) return;
+    const response = await page.request.post(`${BASE}/api/captions`, {
+      data: { changes },
+    });
+    expect(response.ok()).toBe(true);
+  });
+
+  test('is in the library bar, not the trash bar, and offers Apply only for text', async ({
+    page,
+  }) => {
+    const { anchor, path, trashedFile } = scratch();
+    await page.goto(path);
+    await tiles(page, anchor)
+      .nth(1)
+      .click({ modifiers: ['ControlOrMeta'] });
+
+    await expect(box(page)).toBeVisible();
+    await expect(applyButton(page)).toHaveCount(0);
+    await box(page).fill('   ');
+    await expect(applyButton(page)).toHaveCount(0);
+
+    // The slot's width is reserved, so the button arriving moves nothing.
+    await box(page).fill('');
+    const before = (await box(page).boundingBox())!;
+    await box(page).pressSequentially('B');
+    await expect(applyButton(page)).toBeVisible();
+    expect((await box(page).boundingBox())!.x).toBe(before.x);
+
+    // The trash has a bar of its own, with no caption box in it.
+    await page.goto(`${BASE}/trash`);
+    await page
+      .locator('.photo-grid__item')
+      .filter({ hasText: trashedFile })
+      .locator('.photo-grid__link')
+      .click({ modifiers: ['ControlOrMeta'] });
+    await expect(page.getByRole('button', { name: 'Restore' })).toBeVisible();
+    await expect(box(page)).toHaveCount(0);
+  });
+
+  test('applies at once when no caption is lost, and Undo puts them back', async ({
+    page,
+  }) => {
+    const { anchor, ids, path } = scratch();
+    await page.goto(path);
+    const grid = tiles(page, anchor);
+    await grid.nth(1).click({ modifiers: ['ControlOrMeta'] });
+    await grid.nth(2).click({ modifiers: ['ControlOrMeta'] });
+
+    const before = (await box(page).boundingBox())!;
+    await box(page).fill('Launch night');
+    await box(page).press('Enter');
+
+    await expect(slot(page)).toHaveText('Applied');
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(page.getByRole('status')).toContainText(
+      'Caption applied to 2 photos.',
+    );
+    expect((await box(page).boundingBox())!.x).toBe(before.x);
+    expect(await storedCaption(page, ids[1]!)).toBe('Launch night');
+
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(page.getByRole('status')).toHaveCount(0);
+    // Nothing selected carries the text any more, so it is an offer again.
+    await expect(applyButton(page)).toBeVisible();
+
+    await grid.nth(1).dblclick();
+    await expect(
+      page.getByRole('textbox', { name: 'Caption', exact: true }),
+    ).toHaveValue('');
+  });
+
+  test('lists every caption it would replace, and Cancel changes nothing', async ({
+    page,
+  }) => {
+    const { anchor, ids, path } = scratch();
+    await page.goto(path);
+    await page.locator(`${anchor} .timeline__select-all`).click();
+    await expect(bar(page)).toContainText('3 selected');
+
+    await box(page).fill('Beach');
+    await box(page).press('Enter');
+
+    const dialog = page.getByRole('alertdialog');
+    await expect(dialog).toContainText('3 photos');
+    await expect(dialog).toContainText('1 of them');
+    const rows = dialog.getByRole('listitem');
+    await expect(rows).toHaveCount(1);
+    await expect(rows.first()).toContainText('First rocket up.');
+    await expect(rows.first().locator('img')).toHaveCount(1);
+
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(box(page)).toBeFocused();
+    await expect(box(page)).toHaveValue('Beach');
+    expect(await storedCaption(page, ids[0]!)).toBe('First rocket up.');
+    expect(await storedCaption(page, ids[1]!)).toBeNull();
+
+    await box(page).press('Enter');
+    await confirmDelete(page, 'Replace captions');
+    await expect(slot(page)).toHaveText('Applied');
+    await expect(page.getByRole('status')).toContainText(
+      'Caption applied to 3 photos.',
+    );
+
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(page.getByRole('status')).toHaveCount(0);
+    expect(await storedCaption(page, ids[0]!)).toBe('First rocket up.');
+    expect(await storedCaption(page, ids[1]!)).toBeNull();
+    expect(await storedCaption(page, ids[2]!)).toBeNull();
+  });
+
+  test('keeps its text while the selection grows, and goes with the bar', async ({
+    page,
+  }) => {
+    const { anchor, path } = scratch();
+    await page.goto(path);
+    const grid = tiles(page, anchor);
+    await grid.nth(1).click();
+    await box(page).fill('Launch night');
+    await box(page).press('Enter');
+    await expect(slot(page)).toHaveText('Applied');
+
+    // The one that was missed: the text is still there to apply to it.
+    await grid.nth(2).click({ modifiers: ['ControlOrMeta'] });
+    await expect(bar(page)).toContainText('2 selected');
+    await expect(box(page)).toHaveValue('Launch night');
+    await expect(applyButton(page)).toBeVisible();
+
+    // The first Escape belongs to the box; only the second reaches the
+    // selection.
+    await box(page).focus();
+    await page.keyboard.press('Escape');
+    await expect(box(page)).not.toBeFocused();
+    await expect(bar(page)).toContainText('2 selected');
+    await page.keyboard.press('Escape');
+    await expect(bar(page)).toHaveCount(0);
+
+    await grid.nth(0).click();
+    await expect(box(page)).toHaveValue('');
+  });
+
+  test('sends nothing for a caption every selected photo already has', async ({
+    page,
+  }) => {
+    const { anchor, path } = scratch();
+    const sent: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().endsWith('/api/captions')) sent.push(request.url());
+    });
+
+    await page.goto(path);
+    await tiles(page, anchor).nth(0).click();
+    await box(page).fill('First rocket up.');
+    // Nobody applied it here, so it is an offer rather than a confirmation.
+    await expect(applyButton(page)).toBeVisible();
+
+    await box(page).press('Enter');
+    await expect(slot(page)).toHaveText('Applied');
+    await expect(page.getByRole('status')).toHaveCount(0);
+    expect(sent).toEqual([]);
+  });
+
+  test('an Undo under the photo view moves its form, with nothing unsaved', async ({
+    page,
+  }) => {
+    const { anchor, path } = scratch();
+    await page.goto(path);
+    const grid = tiles(page, anchor);
+    await grid.nth(1).click();
+    await box(page).fill('Launch night');
+    await box(page).press('Enter');
+    await expect(slot(page)).toHaveText('Applied');
+
+    await grid.nth(1).dblclick();
+    const caption = page.getByRole('textbox', { name: 'Caption', exact: true });
+    await expect(caption).toHaveValue('Launch night');
+
+    // The banner is above the photo view, so this is reachable from here.
+    await page.getByRole('button', { name: 'Undo' }).click();
+    await expect(caption).toHaveValue('');
+    await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Next photo' })).toBeEnabled();
   });
 });

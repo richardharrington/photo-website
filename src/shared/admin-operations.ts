@@ -16,7 +16,7 @@ import type { TimestampSource } from './catalog.ts';
 import { abortMutation, writeMutation } from './catalog-repository.ts';
 import type { Mutation } from './catalog-repository.ts';
 import { buildHierarchy } from './ordering.ts';
-import { validatePhotoEdit } from './validation.ts';
+import { validateCaptionChanges, validatePhotoEdit } from './validation.ts';
 import type { PhotoEditInput } from './validation.ts';
 
 // ---------------------------------------------------------------------------
@@ -188,6 +188,73 @@ export function editPhotoMetadata(
     { ...catalog, photos: { ...catalog.photos, [photoId]: photo } },
     { status: 'updated', photo, previous: existing },
   );
+}
+
+export type CaptionsOutcome =
+  | {
+      status: 'applied';
+      /** The records as written, in request order. */
+      updated: PhotoRecord[];
+      /** The same photos as they were, index for index with `updated`. */
+      previous: PhotoRecord[];
+      /** Missing, trashed, or no longer carrying the caption `expected`. */
+      skipped: string[];
+    }
+  | { status: 'invalid'; error: string };
+
+/**
+ * Replace several captions in one write, each only where the stored caption
+ * is still the one the page showed.
+ *
+ * The `expected` check is what makes the bulk caption dialog honest: it lists
+ * every caption that will be lost, and a caption changed in another tab since
+ * cannot be lost without having been listed. It is also what lets Undo leave a
+ * newer edit alone. Because `mutateCatalog` re-runs this against the fresh
+ * catalog after a conflict, the checks are made again against whatever won.
+ *
+ * Captions only. The capture date, time, and `timestampSource` are untouched,
+ * which is why this is not N calls to `editPhotoMetadata`.
+ */
+export function applyCaptions(
+  catalog: Catalog,
+  input: unknown,
+  now: string,
+  auditId: string,
+): Mutation<CaptionsOutcome> {
+  // Validated inside the mutation, as edits are, so no caller can skip it.
+  const validated = validateCaptionChanges(input);
+  if (!validated.ok) {
+    return abortMutation({ status: 'invalid', error: validated.error });
+  }
+
+  const photos = { ...catalog.photos };
+  const updated: PhotoRecord[] = [];
+  const previous: PhotoRecord[] = [];
+  const skipped: string[] = [];
+
+  for (const { photoId, caption, expected } of validated.value) {
+    const existing = photos[photoId];
+    if (!existing || isTrashed(existing) || existing.caption !== expected) {
+      skipped.push(photoId);
+      continue;
+    }
+    // Already what was asked for: nothing to write, and nothing to report.
+    if (existing.caption === caption) continue;
+
+    const photo: PhotoRecord = {
+      ...existing,
+      caption,
+      updatedAt: now,
+      updatedAuditId: auditId,
+    };
+    photos[photoId] = photo;
+    updated.push(photo);
+    previous.push(existing);
+  }
+
+  const outcome: CaptionsOutcome = { status: 'applied', updated, previous, skipped };
+  if (updated.length === 0) return abortMutation(outcome);
+  return writeMutation({ ...catalog, photos }, outcome);
 }
 
 // ---------------------------------------------------------------------------

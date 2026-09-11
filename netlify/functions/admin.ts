@@ -23,6 +23,7 @@ import {
 import type { DerivativeDescriptor } from '../../src/shared/catalog.ts';
 import { loadCatalog, mutateCatalog } from '../../src/shared/catalog-repository.ts';
 import {
+  applyCaptions,
   beginBatch,
   commitPhoto,
   editPhotoMetadata,
@@ -170,6 +171,8 @@ export default async function handler(request: Request): Promise<Response> {
         return await handleCommit(request);
       case '/edit':
         return await handleEdit(request);
+      case '/captions':
+        return await handleCaptions(request);
       case '/trash/preview':
         return await handlePreview(request, 'trash');
       case '/trash/confirm':
@@ -453,6 +456,60 @@ async function handleEdit(request: Request): Promise<Response> {
   );
 
   return json({ photo: toPublicPhoto(outcome.photo) });
+}
+
+interface CaptionsBody {
+  changes?: unknown;
+  undo?: unknown;
+}
+
+/**
+ * Several captions in one catalog write, each applied only where the stored
+ * caption is still the one the page showed (decisions.md #89). A photo that
+ * fails that check is reported back rather than overwritten.
+ *
+ * One audit event for the request however many photos it touched, written
+ * after the catalog write for the same reason `handleEdit`'s is: an event for
+ * a write that lost its race would record something that never happened.
+ */
+async function handleCaptions(request: Request): Promise<Response> {
+  const body = await readJson<CaptionsBody>(request);
+  if (!body) return badRequest('A list of caption changes is required.');
+
+  const objectStore = store();
+  const auditId = generateAuditId();
+  const at = nowIso();
+
+  const outcome = await mutateCatalog(objectStore, { now: nowIso }, (catalog) =>
+    applyCaptions(catalog, body.changes, at, auditId),
+  );
+
+  if (outcome.status === 'invalid') return badRequest(outcome.error);
+
+  if (outcome.updated.length > 0) {
+    await writeAuditEvent(
+      objectStore,
+      makeAuditEvent(
+        'caption-change',
+        outcome.updated.map((photo) => photo.id),
+        {
+          at,
+          id: auditId,
+          changes: outcome.updated.map((photo, index) => ({
+            photoId: photo.id,
+            before: outcome.previous[index]!.caption,
+            after: photo.caption,
+          })),
+          note: body.undo === true ? 'undo' : undefined,
+        },
+      ),
+    );
+  }
+
+  return json({
+    updated: outcome.updated.map(toPublicPhoto),
+    skipped: outcome.skipped,
+  });
 }
 
 // ---------------------------------------------------------------------------

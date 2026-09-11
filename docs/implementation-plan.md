@@ -342,6 +342,8 @@ open. Signed download URLs last about five minutes.
 
 - begin-batch, prepare, and commit (upload flow above);
 - per-photo date/time/caption update;
+- bulk caption replacement (`POST /captions`), each change conditional on the
+  caption the page last saw;
 - trash, restore, manual permanent delete, and bulk deletion;
 - current catalog JSON export;
 - trash listing (returns signed thumbnail and preview URLs, since the Worker

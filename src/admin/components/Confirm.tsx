@@ -6,6 +6,12 @@ interface ConfirmDialogProps {
   title: string;
   /** What will happen, in the words of this specific action. */
   children: ReactNode;
+  /**
+   * Anything more than a sentence — a list — shown between the sentence and
+   * the buttons. Its own slot because `children` is a paragraph, and a list
+   * inside a `<p>` is invalid HTML that the browser re-parents.
+   */
+  details?: ReactNode;
   confirmLabel: string;
   destructive?: boolean;
   /** True when there is nothing to act on, e.g. a preview that resolved to 0. */
@@ -24,6 +30,7 @@ interface ConfirmDialogProps {
 export function ConfirmDialog({
   title,
   children,
+  details,
   confirmLabel,
   destructive = false,
   nothingToDo = false,
@@ -55,6 +62,7 @@ export function ConfirmDialog({
       >
         <h2 id="confirm-title">{title}</h2>
         <p>{children}</p>
+        {details}
 
         <div className="confirm__actions">
           <button type="button" onClick={onCancel}>

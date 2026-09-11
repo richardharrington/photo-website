@@ -15,6 +15,7 @@ import { NotFoundError } from '../shared/ui/useResource.ts';
 import type { PublicPhoto } from '../shared/display-api.ts';
 import type { PhotoEdit } from '../shared/ui/curation.ts';
 import type { SelectionQuery } from '../shared/admin-operations.ts';
+import type { CaptionChange } from '../shared/validation.ts';
 import type { Rendition } from '../shared/constants.ts';
 import type { DerivativeDescriptor } from '../shared/catalog.ts';
 
@@ -256,6 +257,17 @@ export const adminApi = {
 
   edit: (photoId: string, edit: PhotoEdit) =>
     post<{ photo: PublicPhoto }>('/edit', { photoId, ...edit }),
+
+  /**
+   * Several captions in one catalog write, each applied only where the stored
+   * caption is still `expected`. The rest come back in `skipped`. `undo` only
+   * labels the audit event; the server treats the changes the same either way.
+   */
+  captions: (changes: CaptionChange[], options: { undo?: boolean } = {}) =>
+    post<{ updated: PublicPhoto[]; skipped: string[] }>('/captions', {
+      changes,
+      ...(options.undo ? { undo: true } : {}),
+    }),
 
   /**
    * Both halves of a destructive action. The preview resolves a selection to

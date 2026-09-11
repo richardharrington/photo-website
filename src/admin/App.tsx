@@ -16,12 +16,22 @@ import { useUnseenRecent } from '../shared/ui/unseen.ts';
 import { indexTimeline, recentOrderedIds } from '../shared/ui/timeline-index.ts';
 import { CurationContext } from '../shared/ui/curation.ts';
 import type { Curation, PhotoEdit } from '../shared/ui/curation.ts';
-import { removePhotos, upsertPhoto } from '../shared/timeline-patch.ts';
+import {
+  removePhotos,
+  replacePhotosInPlace,
+  upsertPhoto,
+} from '../shared/timeline-patch.ts';
+import { validateCaption } from '../shared/validation.ts';
 import { nextAfterDeleting } from './advance.ts';
+import { reverseCaptionChanges } from './caption-apply.ts';
+import type { CaptionPlan } from './caption-apply.ts';
 import { useDeselectGestures } from './deselect.ts';
 import { adminApi, routes } from './api.ts';
 import type { PreviewResult } from './api.ts';
 import { Confirm, UndoBanner } from './components/Confirm.tsx';
+import { CaptionApply } from './components/CaptionApply.tsx';
+import type { CaptionApplyResult } from './components/CaptionApply.tsx';
+import { ReplaceCaptions } from './components/ReplaceCaptions.tsx';
 import { SelectionBar } from './components/SelectionBar.tsx';
 import { TrashPage } from './components/TrashPage.tsx';
 import { EmailsPage } from './components/EmailsPage.tsx';
@@ -72,6 +82,19 @@ function targetOf(
 function photoCount(count: number): string {
   return `${count} photo${count === 1 ? '' : 's'}`;
 }
+
+/**
+ * What the undo banner would put back: photos sent to the trash, or the
+ * captions a bulk apply replaced.
+ */
+type UndoOffer =
+  | { kind: 'trash'; ids: string[]; message: string }
+  | {
+      kind: 'caption';
+      /** Reversed changes: caption = what the photo had, expected = what was applied. */
+      changes: { photoId: string; caption: string | null; expected: string }[];
+      message: string;
+    };
 
 /**
  * The admin site: the viewer, plus curation.
@@ -140,9 +163,29 @@ export function App() {
     /** The photo the view was on, when the delete came from the photo view. */
     from: string | null;
   } | null>(null);
-  const [undo, setUndo] = useState<{ ids: string[]; message: string } | null>(null);
+  /**
+   * The one standing undo offer, for a delete or a caption apply alike, and a
+   * serial number that is new every time an offer is raised — the banner's key,
+   * and so its clock.
+   */
+  const [undo, setUndo] = useState<(UndoOffer & { serial: number }) | null>(null);
+  const undoSerial = useRef(0);
+  const undoing = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const dismissUndo = useCallback(() => setUndo(null), []);
+
+  function offerUndo(offer: UndoOffer) {
+    undoSerial.current += 1;
+    setUndo({ ...offer, serial: undoSerial.current });
+  }
+
+  /** The replace-captions dialog, and how to answer the apply waiting on it. */
+  const [replacing, setReplacing] = useState<{
+    caption: string;
+    selected: number;
+    replaced: CaptionPlan['replaced'];
+    decide: (confirmed: boolean) => void;
+  } | null>(null);
 
   // Escape, and a click on the page margins, are the two ways out of a
   // selection now that a plain click makes one rather than clearing it.
@@ -164,16 +207,27 @@ export function App() {
    * order would quietly select photographs scattered across years and look as
    * though it had worked.
    */
+  const index = useMemo(() => (data ? indexTimeline(data) : null), [data]);
   const orderedIds = useMemo(() => {
-    if (!data) return [];
-    return onRecent ? recentOrderedIds(data) : indexTimeline(data).orderedIds;
-  }, [data, onRecent]);
+    if (!data || !index) return [];
+    return onRecent ? recentOrderedIds(data) : index.orderedIds;
+  }, [data, index, onRecent]);
 
   // Pruned on every render, never the raw state: a delete takes photos off the
   // page without touching the selection, and a bulk action must never reach a
   // photo the administrator can no longer see.
   const visible = pruneToVisible(selection, orderedIds);
   const chosen = selectedIds(visible);
+
+  // The same photos in the order the page shows them, which is not `chosen`'s
+  // order: that is the order they were clicked. The replace dialog lists them.
+  const selectedPhotos: PublicPhoto[] = [];
+  if (chosen.length > 0 && index) {
+    for (const id of orderedIds) {
+      const photo = visible.ids.has(id) ? index.photos.get(id) : undefined;
+      if (photo) selectedPhotos.push(photo);
+    }
+  }
 
   const [trashKey, setTrashKey] = useState(0);
   const trash = useResource<{ count: number }>(
@@ -213,7 +267,8 @@ export function App() {
       const next = from ? nextAfterDeleting(orderedIds, outcome.trashed, from) : null;
 
       setPatched(removePhotos(data, outcome.trashed));
-      setUndo({
+      offerUndo({
+        kind: 'trash',
         ids: outcome.trashed,
         message: `${photoCount(outcome.count)} deleted.`,
       });
@@ -235,17 +290,129 @@ export function App() {
   }
 
   async function performUndo() {
-    if (!undo) return;
+    // Once per offer: a second click on a caption Undo would find every photo
+    // already put back and report them all as changed since.
+    if (!undo || undoing.current) return;
+    const offer = undo;
+    // Only this offer. One raised while the request was out is still standing.
+    const withdraw = () =>
+      setUndo((current) => (current?.serial === offer.serial ? null : current));
+
+    undoing.current = true;
     try {
-      await adminApi.restore(undo.ids);
-      setUndo(null);
-      // No patch: the restored photos are not in the response this page holds,
-      // so a refetch is the honest answer, and the undo path is rare.
-      countTrashAgain();
+      if (offer.kind === 'trash') {
+        try {
+          await adminApi.restore(offer.ids);
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : 'Restore failed.');
+          return;
+        }
+        withdraw();
+        // No patch: the restored photos are not in the response this page
+        // holds, so a refetch is the honest answer, and the undo path is rare.
+        countTrashAgain();
+        refetch();
+        return;
+      }
+
+      setError(null);
+      let reply: { updated: PublicPhoto[]; skipped: string[] };
+      try {
+        reply = await adminApi.captions(offer.changes, { undo: true });
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : 'Undo failed.');
+        return;
+      }
+      patchInPlace(reply.updated);
+      withdraw();
+      const kept = reply.skipped.length;
+      if (kept > 0) {
+        setError(
+          `${photoCount(kept)} had ${kept === 1 ? 'a newer caption' : 'newer captions'}` +
+            ', which Undo left in place.',
+        );
+      }
       refetch();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Restore failed.');
+    } finally {
+      undoing.current = false;
     }
+  }
+
+  /** Captions change nothing about where a photo sits, so swap them in place. */
+  function patchInPlace(photos: PublicPhoto[]) {
+    if (photos.length === 0) return;
+    // From the latest copy, not this render's: a dialog and a request stand
+    // between the render that started an apply and its reply.
+    setPatched((current) => {
+      const base = current ?? data;
+      return base ? replacePhotosInPlace(base, photos) : current;
+    });
+  }
+
+  /**
+   * Apply one caption to the selection (docs/specs/bulk-captions.md 6.3).
+   *
+   * Confirms only when a photo would lose a different caption. The request
+   * carries the caption each photo was showing, and the server skips any photo
+   * that no longer has it, so the dialog's list is everything that can be lost.
+   */
+  async function applyCaption(
+    plan: CaptionPlan,
+    sending: () => void,
+  ): Promise<CaptionApplyResult> {
+    const { caption, changes, replaced } = plan;
+    if (caption === null) return 'cancelled';
+    setError(null);
+
+    const valid = validateCaption(caption);
+    if (!valid.ok) {
+      setError(valid.error);
+      return 'failed';
+    }
+
+    // Every selected photo already says this. Nothing to send, and so nothing
+    // to undo — but it is still what was asked for.
+    if (changes.length === 0) return 'applied';
+
+    if (replaced.length > 0) {
+      const confirmed = await new Promise<boolean>((decide) =>
+        setReplacing({ caption, selected: plan.selected, replaced, decide }),
+      );
+      if (!confirmed) return 'cancelled';
+    }
+
+    let reply: { updated: PublicPhoto[]; skipped: string[] };
+    try {
+      sending();
+      reply = await adminApi.captions(changes);
+    } catch (cause) {
+      setError(
+        cause instanceof Error ? cause.message : 'That caption could not be applied.',
+      );
+      return 'failed';
+    }
+
+    const { updated, skipped } = reply;
+    patchInPlace(updated);
+    if (updated.length > 0) {
+      offerUndo({
+        kind: 'caption',
+        changes: reverseCaptionChanges(
+          changes,
+          updated.map((photo) => photo.id),
+        ),
+        message: `Caption applied to ${photoCount(updated.length)}.`,
+      });
+    }
+    if (skipped.length > 0) {
+      const one = skipped.length === 1;
+      setError(
+        `${photoCount(skipped.length)} had changed since this page loaded and ` +
+          `${one ? 'was' : 'were'} left alone. Apply again to include ${one ? 'it' : 'them'}.`,
+      );
+    }
+    refetch();
+    return 'applied';
   }
 
   async function saveEdit(photoId: string, edit: PhotoEdit): Promise<PublicPhoto> {
@@ -387,6 +554,12 @@ export function App() {
           <SelectionBar
             count={chosen.length}
             onDeselectAll={() => setSelection(EMPTY_SELECTION)}
+            trailing={
+              <CaptionApply
+                selected={selectedPhotos}
+                onApply={(plan, sending) => applyCaption(plan, sending)}
+              />
+            }
           >
             <button
               type="button"
@@ -424,6 +597,25 @@ export function App() {
         />
       ) : null}
 
+      {/* Here and not inside the bar: the bar is `position: fixed` with a
+          z-index, so a dialog rendered in it would be trapped beneath the
+          error line and the undo offer. */}
+      {replacing ? (
+        <ReplaceCaptions
+          caption={replacing.caption}
+          selected={replacing.selected}
+          replaced={replacing.replaced}
+          onConfirm={() => {
+            setReplacing(null);
+            replacing.decide(true);
+          }}
+          onCancel={() => {
+            setReplacing(null);
+            replacing.decide(false);
+          }}
+        />
+      ) : null}
+
       {undo ? (
         /*
          * Five seconds from the moment it appears, and nothing else retires
@@ -432,12 +624,14 @@ export function App() {
          * that retired the offer on navigation would withdraw it before it
          * could be read.
          *
-         * Keyed by what it would put back, so a second deletion inside those
-         * five seconds raises a fresh banner for its own photos rather than
-         * inheriting the old one's clock.
+         * The offer is a delete's or a caption apply's, and a later one of
+         * either kind replaces it. Keyed by a serial number raised with each
+         * offer, so a second offer inside those five seconds gets a fresh
+         * clock — even a second apply to the very same photos, which a key
+         * built from the photo IDs would not tell apart.
          */
         <UndoBanner
-          key={undo.ids.join(',')}
+          key={undo.serial}
           message={undo.message}
           onUndo={() => void performUndo()}
           onDismiss={dismissUndo}

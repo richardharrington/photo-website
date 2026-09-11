@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { removePhotos, upsertPhoto } from '../../src/shared/timeline-patch.ts';
-import { timelineResponse } from '../../src/shared/display-api.ts';
+import {
+  removePhotos,
+  replacePhotosInPlace,
+  upsertPhoto,
+} from '../../src/shared/timeline-patch.ts';
+import { timelineResponse, toPublicPhoto } from '../../src/shared/display-api.ts';
 import type { PublicPhoto, TimelineResponse } from '../../src/shared/display-api.ts';
 import { fixtureCatalog, FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
+import { makeCatalog, makePhoto, testPhotoId } from '../../fixtures/photos.ts';
 
 /**
  * The admin's in-memory patches to the library.
@@ -237,6 +242,79 @@ describe('upsertPhoto', () => {
     upsertPhoto(base, { ...photo('market'), captureDate: '2026-03-01' });
     expect(daysOf(base, 2026, 8)).toEqual([15, 2]);
     expect(base.total).toBe(18);
+  });
+});
+
+describe('replacePhotosInPlace', () => {
+  it('keeps a date-only photo exactly where it was, which upsertPhoto cannot', () => {
+    // Two date-only photos on one day, ordered by batch and selection index —
+    // which a public photo does not carry, so a re-insert cannot know it.
+    const first = makePhoto({
+      id: testPhotoId('first'),
+      captureDate: '2026-05-01',
+      captureTime: null,
+      batchSeq: 1,
+      selectionIndex: 0,
+    });
+    const second = makePhoto({
+      id: testPhotoId('second'),
+      captureDate: '2026-05-01',
+      captureTime: null,
+      batchSeq: 1,
+      selectionIndex: 1,
+    });
+    const timeline = timelineResponse(makeCatalog([second, first]), 'Photos', NOW_MS);
+    const ids = (t: TimelineResponse) =>
+      photosOn(t, 2026, 5, 1).map((entry) => entry.id);
+    expect(ids(timeline)).toEqual([first.id, second.id]);
+
+    const recaptioned = { ...toPublicPhoto(first), caption: 'Beach' };
+
+    const inPlace = replacePhotosInPlace(timeline, [recaptioned]);
+    expect(ids(inPlace)).toEqual([first.id, second.id]);
+    expect(photosOn(inPlace, 2026, 5, 1)[0]!.caption).toBe('Beach');
+
+    // What using `upsertPhoto` for a caption would have shown until the
+    // refetch: the photo jumps to the end of its day.
+    expect(ids(upsertPhoto(timeline, recaptioned))).toEqual([second.id, first.id]);
+  });
+
+  it('replaces an undated photo in place', () => {
+    const at = base.undated.photos.findIndex(
+      (entry) => entry.id === photo('undated-a').id,
+    );
+    const patched = replacePhotosInPlace(base, [
+      { ...photo('undated-a'), caption: 'Found' },
+    ]);
+
+    expect(patched.undated.photos[at]!.caption).toBe('Found');
+    expect(patched.undated.photos.map((entry) => entry.id)).toEqual(
+      base.undated.photos.map((entry) => entry.id),
+    );
+  });
+
+  it('changes no count, group, or order, and leaves the original alone', () => {
+    const patched = replacePhotosInPlace(base, [
+      { ...photo('market'), caption: 'Recaptioned' },
+      { ...photo('beach-early'), caption: null },
+    ]);
+
+    expect(flatten(patched).map((entry) => entry.id)).toEqual(
+      flatten(base).map((entry) => entry.id),
+    );
+    expect(patched.total).toBe(base.total);
+    expect(patched.recent).toBe(base.recent);
+    expectCountsAgree(patched);
+    // Untouched branches are the same objects, so nothing else re-renders.
+    expect(patched.years[1]).toBe(base.years[1]);
+    expect(photo('market').caption).not.toBe('Recaptioned');
+  });
+
+  it('ignores an ID the timeline does not hold, returning the same object', () => {
+    expect(replacePhotosInPlace(base, [])).toBe(base);
+    expect(
+      replacePhotosInPlace(base, [{ ...photo('market'), id: 'f'.repeat(32) }]),
+    ).toBe(base);
   });
 });
 

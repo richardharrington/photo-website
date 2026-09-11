@@ -38,14 +38,40 @@ interface EditFormProps {
  * Keyed on the ID alone, and deliberately not on the metadata as well — a
  * save comes back with the updated record, and remounting on that would wipe
  * the "Saved" confirmation the user was meant to see.
+ *
+ * So the stored record can change under a mounted form without a save: the
+ * undo banner sits above the photo view, and undoing a bulk caption changes
+ * the caption of the photo on screen. A field still showing what was stored
+ * follows the new value; a field the administrator has typed in keeps what
+ * they typed. Without that an untouched form would read as "Unsaved changes"
+ * and lock the arrows over an edit nobody made (decisions.md #89).
  */
 export function EditForm({ photo, onSave, onDirtyChange, ref }: EditFormProps) {
-  const [date, setDate] = useState(photo.captureDate ?? '');
-  const [time, setTime] = useState(photo.captureTime ?? '');
-  const [caption, setCaption] = useState(photo.caption ?? '');
+  const record = {
+    date: photo.captureDate ?? '',
+    time: photo.captureTime ?? '',
+    caption: photo.caption ?? '',
+  };
+  const [date, setDate] = useState(record.date);
+  const [time, setTime] = useState(record.time);
+  const [caption, setCaption] = useState(record.caption);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  // The record as this form last saw it, adjusted during render rather than
+  // in an effect, so there is never a painted frame reporting a stale edit.
+  const [seen, setSeen] = useState(record);
+  if (
+    seen.date !== record.date ||
+    seen.time !== record.time ||
+    seen.caption !== record.caption
+  ) {
+    if (date === seen.date) setDate(record.date);
+    if (time === seen.time) setTime(record.time);
+    if (caption === seen.caption) setCaption(record.caption);
+    setSeen(record);
+  }
 
   /**
    * Compared against the record rather than tracked as a flag, so typing a
@@ -53,9 +79,7 @@ export function EditForm({ photo, onSave, onDirtyChange, ref }: EditFormProps) {
    * clears it by arithmetic, as soon as the stored photo comes back.
    */
   const dirty =
-    date !== (photo.captureDate ?? '') ||
-    time !== (photo.captureTime ?? '') ||
-    caption !== (photo.caption ?? '');
+    date !== record.date || time !== record.time || caption !== record.caption;
 
   useEffect(() => {
     onDirtyChange?.(dirty);

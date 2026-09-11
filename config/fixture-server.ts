@@ -24,6 +24,7 @@ import { getLivePhoto, livePhotos, trashedPhotos } from '../src/shared/catalog.t
 import type { Catalog } from '../src/shared/catalog.ts';
 import { loadCatalog, mutateCatalog } from '../src/shared/catalog-repository.ts';
 import {
+  applyCaptions,
   beginBatch,
   commitPhoto,
   editPhotoMetadata,
@@ -865,6 +866,24 @@ async function handleAdmin(
       if (outcome.status === 'not-found') sendNotFound(res);
       else if (outcome.status === 'invalid') sendBadRequest(res, outcome.error);
       else sendJson(res, 200, { photo: toPublicPhoto(outcome.photo) });
+      return true;
+    }
+
+    case '/captions': {
+      // Hoisted out of the mutation, as production does: a retry after a
+      // conflict must write the same instant and audit id.
+      const at = now();
+      const auditId = generateAuditId();
+      const outcome = await mutateCatalog(store, context, (catalog) =>
+        applyCaptions(catalog, body['changes'], at, auditId),
+      );
+      if (outcome.status === 'invalid') sendBadRequest(res, outcome.error);
+      else {
+        sendJson(res, 200, {
+          updated: outcome.updated.map(toPublicPhoto),
+          skipped: outcome.skipped,
+        });
+      }
       return true;
     }
 

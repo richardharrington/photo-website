@@ -6,6 +6,13 @@ interface SelectionBarProps {
   /** The actions for this page: Delete selected, or Restore and Delete permanently. */
   children: ReactNode;
   onDeselectAll: () => void;
+  /**
+   * Pushed to the bar's right-hand end, after Deselect all: the library's
+   * caption box. Out there so nothing it does can move the buttons beside the
+   * count, and it wraps onto a line of its own on a narrow window. The trash
+   * passes nothing.
+   */
+  trailing?: ReactNode;
 }
 
 /**
@@ -21,7 +28,12 @@ interface SelectionBarProps {
  * the bar wraps on a narrow window, and a number written twice is a number
  * that disagrees with itself.
  */
-export function SelectionBar({ count, children, onDeselectAll }: SelectionBarProps) {
+export function SelectionBar({
+  count,
+  children,
+  onDeselectAll,
+  trailing,
+}: SelectionBarProps) {
   const barRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -49,6 +61,7 @@ export function SelectionBar({ count, children, onDeselectAll }: SelectionBarPro
       <button type="button" onClick={onDeselectAll}>
         Deselect all
       </button>
+      {trailing ? <div className="selection-bar__trailing">{trailing}</div> : null}
     </div>
   );
 }

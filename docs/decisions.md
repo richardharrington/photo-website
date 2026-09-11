@@ -1321,3 +1321,82 @@ its ordering, and its URLs are unchanged.
     project: a runtime's convenience API is not a specification. `getAll`
     existing is not `getAll` working, exactly as `verified` being a timestamp
     is not `verified` being a boolean (#70).
+
+## Captioning a selection — 2026-09-11
+
+89. **One caption, applied to a whole selection.** Delete was the only bulk
+    action, and captioning a sitting of forty beach photographs was forty
+    trips through the photo view. The selection bar now ends in a one-line
+    box, **Apply caption to selected**. The spec is
+    `docs/specs/bulk-captions.md`; what follows is why it is shaped the way it
+    is.
+
+    It *replaces*. Appending runs a caption past the 2000-character limit and
+    then needs a rule for what to do about that, and filling only blank
+    captions quietly skips photographs somebody selected on purpose. Offering
+    both each time is a question before every apply.
+
+    Nothing can be applied from an empty box. An empty box meaning "clear
+    them all" would put a library-wide wipe one Enter away, and clearing is
+    rare and already served one photograph at a time. The server still takes
+    `null` as a caption, because Undo has to be able to put back "no caption".
+
+    One line, and Enter applies. The photo view's caption uses the opposite
+    convention — Enter is a line break, Cmd+Enter saves — so a box that grew
+    on Shift+Enter would have applied a half-typed caption to every selected
+    photograph the first time photo-view habit pressed Enter. Line breaks are
+    added per photograph afterwards. If the photo view ever changes to
+    Enter-saves, this is worth revisiting.
+
+    It confirms only when a caption would be lost, and then it shows every
+    one: a row per photograph, its thumbnail beside the caption it is about
+    to lose, scrolling when long. A count says how much and not what, and a
+    list cut to the first few hides the rest of it. Accepted knowingly: a
+    selection that caught too many *uncaptioned* photographs raises no dialog
+    at all, and Undo is the net for that.
+
+    Undo is #46's banner and #46's clock, and a later offer of either kind
+    replaces it. It puts back each photograph's own previous caption — but
+    only where the caption is still the one applied, so a photograph captioned
+    again in the meantime keeps the newer caption. The banner is keyed by a
+    serial number rather than by photo IDs, because a second apply to the same
+    photographs inside five seconds must get a fresh clock and must undo the
+    *second* apply.
+
+    After an apply, **Applied** stands where the button was, as **Saved**
+    does in the photo view — tiles show no captions, so without it nothing on
+    the page would change. It is a flag *and* a live comparison. The flag
+    alone would still say Applied after Undo, a photo-view edit, or a refetch;
+    the comparison alone would say Applied to a caption nobody applied, the
+    moment four photographs that already said `Beach` were selected and
+    `Beach` typed. The text in the box is component state in a bar that
+    unmounts when the selection empties, so it survives Cmd-clicking the
+    photographs that were missed and dies with the bar; remembered any longer,
+    it would sit ready to apply to unrelated, uncaptioned photographs with no
+    dialog to catch it.
+
+    The box is at the bar's right-hand end, and the space after it is as wide
+    as the widest thing it can hold whatever it holds now. Between the count
+    and the buttons, every change of the slot moved Delete selected and
+    Deselect all sideways, and put Apply beside the red button.
+
+    Each change carries the caption the page last saw, and the server applies
+    it only where that is still the stored caption. That is what makes the
+    dialog honest — nothing can be lost that was not listed — and what lets
+    Undo leave a newer edit alone. #12's token path was not reused: it exists
+    so that a re-run *query* cannot sweep in photographs nobody saw, whereas
+    these IDs are explicit and the precondition checks content, not just
+    membership. Last-write-wins, `/edit`'s rule, would have overwritten a
+    caption changed in another tab without it ever being shown. It is one
+    request, one catalog write, and one `caption-change` audit event with a
+    before and after per photograph, rather than N edits: N writes, N
+    snapshots, a partial failure halfway, and N audit IDs for one act.
+
+    Two consequences on the page. A caption result is swapped into the
+    timeline where each photograph already sits, not re-inserted with
+    `upsertPhoto`, which would visibly shuffle date-only photographs until the
+    refetch landed. And the photo view's form now follows the stored record
+    for any field the administrator has not touched: the undo banner sits
+    above the photo view, so Undo can change the caption of the photograph on
+    screen, and a form initialised once would have reported "Unsaved changes"
+    and locked the arrows over an edit nobody made.
