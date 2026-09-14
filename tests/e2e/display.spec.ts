@@ -147,20 +147,27 @@ test.describe('the timeline', () => {
     await page.goto(`${BASE}/2025/12/25`);
 
     /*
-     * Directly under the header, which pins above them at this width so the
-     * toggle between the two views stays reachable in a page years long. Its
-     * height is a declared constant, and the same constant is what moves the
-     * headings down and gives the anchored section its scroll-margin — so the
-     * heading landing at exactly that offset is the whole arrangement agreeing.
+     * Directly under the header and the add bar, which both pin above them at
+     * this width: the header so the toggle between the two views stays
+     * reachable in a page years long, and the add bar because the family can
+     * add photographs (family-tier.md 5.1). The header's height is a declared
+     * constant and the add bar publishes its own, and the same two numbers move
+     * the headings down and give the anchored section its scroll-margin — so
+     * the heading landing at exactly that offset is the whole arrangement
+     * agreeing.
      */
     const header = await page
       .locator('.layout__header')
       .evaluate((node) => node.getBoundingClientRect().height);
     expect(header).toBeGreaterThan(0);
+    const addBar = await page
+      .locator('.drop-target')
+      .evaluate((node) => node.getBoundingClientRect().height);
+    expect(addBar).toBeGreaterThan(0);
 
     const year = page.locator('#y-2025 .timeline__year-heading');
     const top = await year.evaluate((node) => node.getBoundingClientRect().top);
-    expect(Math.abs(top - header)).toBeLessThan(4);
+    expect(Math.abs(top - (header + addBar))).toBeLessThan(4);
 
     // The header is above both of them, not the other way round.
     const headerTop = await page
@@ -189,10 +196,12 @@ test.describe('the photo view', () => {
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    await expect(page.locator('.lightbox__date')).toHaveText('August 15, 2026');
+    // The family's photo view is the editing view (family-tier.md 5.3), so the
+    // date is the value of its field.
+    await expect(page.getByLabel('Capture date')).toHaveValue('2026-08-15');
 
     await page.getByRole('button', { name: 'Next photo' }).click();
-    await expect(page.locator('.lightbox__date')).toHaveText('August 2, 2026');
+    await expect(page.getByLabel('Capture date')).toHaveValue('2026-08-02');
   });
 
   test('closes the info panel on the way to the next photo', async ({ page }) => {
@@ -319,8 +328,13 @@ test.describe('the photo view', () => {
   }) => {
     await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['market']}`);
 
-    await expect(page.locator('.lightbox__caption')).toHaveText('Saturday market.');
+    // In its field, which is where the family reads and corrects it; the
+    // filename stays out of the view until Photo info (family-tier.md #7).
+    await expect(
+      page.getByRole('textbox', { name: 'Caption', exact: true }),
+    ).toHaveValue('Saturday market.');
     await expect(page.getByText('IMG_20260815_100500.HEIC')).toHaveCount(0);
+    await expect(page.locator('.lightbox__filename')).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Photo info' }).click();
     const info = page.locator('#photo-information');
@@ -344,8 +358,7 @@ test.describe('the photo view', () => {
 
     const back = (await page.locator('.lightbox__back').boundingBox())!;
     const image = (await page.locator('.lightbox__image').boundingBox())!;
-    const caption = (await page.locator('.lightbox__caption').boundingBox())!;
-    const date = (await page.locator('.lightbox__date').boundingBox())!;
+    const form = (await page.locator('.edit-form').boundingBox())!;
     const download = (await page
       .getByRole('button', { name: 'Download', exact: true })
       .boundingBox())!;
@@ -353,27 +366,21 @@ test.describe('the photo view', () => {
       .getByRole('button', { name: 'Photo info' })
       .boundingBox())!;
 
-    // The photo's box runs from the back link's top edge to the bottom of the
-    // Photo info button.
-    expect(Math.abs(image.y - back.y)).toBeLessThan(2);
-    expect(Math.abs(image.y + image.height - (info.y + info.height))).toBeLessThan(2);
+    // The picture starts below the way back rather than beside it: in the
+    // editing view the stage clears a fixed gutter for the form, exactly as
+    // the admin's photo view does, and nothing overlaps the picture.
+    expect(image.y).toBeGreaterThanOrEqual(back.y + back.height);
 
-    // Caption, date, Download, Photo info: one stack, in that order.
-    const right = (box: { x: number; width: number }) => box.x + box.width;
-    expect(caption.y + caption.height).toBeLessThanOrEqual(date.y + 1);
-    expect(date.y + date.height).toBeLessThanOrEqual(download.y + 1);
-    expect(download.y + download.height).toBeLessThanOrEqual(info.y + 1);
+    // The family's photo view is the editing view (family-tier.md 5.3): the
+    // form, then Download, Delete, and Photo info across one row beneath it.
+    expect(form.y + form.height).toBeLessThanOrEqual(download.y + 1);
+    expect(Math.abs(download.y - info.y)).toBeLessThan(2);
+    expect(info.x).toBeGreaterThan(download.x);
 
-    // Sharing one right edge is the whole point of the stack.
-    for (const box of [caption, date, download]) {
-      expect(Math.abs(right(box) - right(info))).toBeLessThan(2);
-    }
-    expect(download.x).toBeLessThan(image.x + image.width / 2);
-
-    // And that edge sits just short of the picture. `object-fit: contain`
+    // And the whole stack sits clear of the picture. `object-fit: contain`
     // centres the picture inside the img element's box, so the visible left
-    // edge is derived here the same way the component derives it — from the
-    // element's box and its aspect ratio, not from the element's box alone.
+    // edge is derived from the element's box and its aspect ratio.
+    const right = (box: { x: number; width: number }) => box.x + box.width;
     const pictureLeft = await page.locator('.lightbox__image').evaluate((node) => {
       const img = node as HTMLImageElement;
       const box = img.getBoundingClientRect();
@@ -381,8 +388,7 @@ test.describe('the photo view', () => {
         Number(img.getAttribute('width')) / Number(img.getAttribute('height'));
       return box.left + (box.width - Math.min(box.width, box.height * ratio)) / 2;
     });
-    expect(pictureLeft - right(info)).toBeGreaterThan(16);
-    expect(pictureLeft - right(info)).toBeLessThan(24);
+    expect(pictureLeft - Math.max(right(form), right(info))).toBeGreaterThanOrEqual(15);
   });
 
   test('preserves line breaks in a caption without interpreting markup', async ({
@@ -390,9 +396,11 @@ test.describe('the photo view', () => {
   }) => {
     await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['beach-scan']}`);
 
-    const caption = page.locator('.lightbox__caption');
-    await expect(caption).toContainText('Scanned from a print.');
-    await expect(caption).toContainText('Nobody remembers who took it.');
+    // A field's value is text by construction, line breaks and all.
+    const caption = page.getByRole('textbox', { name: 'Caption', exact: true });
+    await expect(caption).toHaveValue(
+      /Scanned from a print\.[\s\S]*\n[\s\S]*Nobody remembers who took it\./,
+    );
   });
 });
 
@@ -421,8 +429,11 @@ test.describe('trashed and unknown resources', () => {
     await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['deleted-0']}`);
 
     await expect(page.getByRole('heading', { name: 'Not found' })).toBeVisible();
-    // Nothing hints that this ID ever existed.
-    await expect(page.getByText(/deleted|trash|removed/i)).toHaveCount(0);
+    // Nothing on the page hints that this ID ever existed. The header's Trash
+    // link is the family's, on every page, and says nothing about this one.
+    await expect(
+      page.getByRole('main').getByText(/deleted|trash|removed/i),
+    ).toHaveCount(0);
   });
 
   test('an unknown photo ID looks exactly the same', async ({ page }) => {

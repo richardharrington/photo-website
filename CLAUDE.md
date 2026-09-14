@@ -61,12 +61,12 @@ landed, and updates the catalog.
 
 Four runtimes share one `src/shared/` model layer:
 
-| Runtime           | Entry                                                              | Reaches R2 via                |
-| ----------------- | ------------------------------------------------------------------ | ----------------------------- |
-| Viewer app        | `src/display/` + `src/shared/ui/` (own Vite build)                 | —                             |
-| Admin app         | `src/admin/` + `src/pipeline/` + `src/shared/ui/` (own Vite build) | presigned S3 PUTs             |
-| Netlify Functions | `netlify/functions/{display,admin}.ts`                             | S3 API (`@aws-sdk/client-s3`) |
-| Cloudflare Worker | `worker/src/index.ts`                                              | native R2 binding             |
+| Runtime           | Entry                                                                | Reaches R2 via                |
+| ----------------- | -------------------------------------------------------------------- | ----------------------------- |
+| Viewer app        | `src/display/` + `src/pipeline/` + `src/shared/ui/` (own Vite build) | presigned S3 PUTs             |
+| Admin app         | `src/admin/` + `src/pipeline/` + `src/shared/ui/` (own Vite build)   | presigned S3 PUTs             |
+| Netlify Functions | `netlify/functions/{display,admin}.ts`                               | S3 API (`@aws-sdk/client-s3`) |
+| Cloudflare Worker | `worker/src/index.ts`                                                | native R2 binding             |
 
 There is no database. `catalog/current.json` in the private R2 bucket is the
 whole model; every mutation is an ETag-guarded conditional write with

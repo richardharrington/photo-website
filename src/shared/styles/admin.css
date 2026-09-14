@@ -1,38 +1,22 @@
 /*
- * Admin styles: what the admin adds to the viewer's own stylesheet, and
- * nothing else.
+ * Admin styles: what the admin adds to the family's site, and nothing else.
  *
- * display.css is the base for both apps, because the admin *is* the viewer
- * with curation on top — the same header, the same timeline, the same grid,
- * the same photo view. Everything here either fills the two slots the shared
- * layout leaves open, or marks and edits what the shared components render.
+ * display.css is the base for both apps and curation.css is what both render
+ * to change the library (family-tier.md #11). Everything here is what only the
+ * administrator has: the crowded header, selection and its bar, caption apply
+ * and its replace dialog, the Emails page, and the Inbox.
  *
  * Laptop-oriented: selecting takes a modifier key and a pointer. Mobile
  * viewing is responsive; touch-specific bulk selection is out of scope.
  */
 
-button {
-  font: inherit;
-  font-size: 0.9375rem;
-  padding: 0.4rem 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg-raised);
-  color: var(--fg);
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
 /*
  * The admin's nav row is the crowded one: All photos, the recency notice,
- * Recently added, Trash, Notifications, and Export catalog, in a header whose
+ * Recently added, Trash, Emails, Inbox, and Export catalog, in a header whose
  * height is a declared constant and which therefore may not wrap at 40rem and
- * up. A tighter gap here is the admin paying for its own three extra links;
- * the viewer's three-item row keeps the shared spacing.
+ * up. A tighter gap here is the admin paying for its own three extra links —
+ * Emails, Inbox, and Export catalog; the family's row, the toggle and Trash,
+ * keeps the shared spacing.
  */
 @media (min-width: 40rem) {
   .layout__nav {
@@ -65,186 +49,13 @@ button:disabled {
   display: none;
 }
 
-/* The one colour in the interface that is not a photograph: everything that
-   destroys something wears it, and nothing else does. */
-.admin-danger {
-  border-color: #b91c1c;
-  color: #b91c1c;
-}
-
-.admin-error {
-  color: #b91c1c;
-  font-size: 0.875rem;
-  margin: 0;
-}
-
-@media (prefers-color-scheme: dark) {
-  .admin-danger,
-  .admin-error {
-    color: #fca5a5;
-  }
-}
-
-/* An app-level failure can happen while the photo view is covering the page,
-   so it is fixed above everything the page itself draws. */
-.admin-banner {
-  position: fixed;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 30;
-  padding: 0.5rem var(--space);
-  border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 6px 6px;
-  background: var(--bg-raised);
-}
-
 /* Header ----------------------------------------------------------------- */
 
-/* The nav slot itself is styled in display.css: the viewer fills it too now,
-   with the toggle between the two views. What the admin adds is Trash and
-   Export catalog beside it, which need no rules of their own. */
+/* The nav slot itself is styled in display.css: both apps fill it with the
+   toggle between the two views and Trash. What the admin adds is Emails,
+   Inbox, and Export catalog beside them, which need no rules of their own. */
 
-/* Upload ---------------------------------------------------------------- */
-
-/*
- * The drop target is pinned to the top of the page.
- *
- * The library is one scrolling page years long, so a target at the head of it
- * is a target you have to scroll back to — and the gesture it exists for
- * starts outside the window, with a file already held over it. Sticky rather
- * than fixed, and a direct child of the main column, so it pins for the whole
- * scroll and still takes its own space at the top.
- *
- * It publishes its height to the root, which is what moves the pinned year and
- * month headings down out from under it. Measured rather than declared: the
- * hint wraps on a narrow window, and a number written twice is a number that
- * disagrees with itself.
- */
-.drop-target {
-  position: sticky;
-  /* Beneath the header and the selection bar, in that order: covering the
-     view toggle exactly while a selection exists is the one arrangement
-     worth ruling out. */
-  top: calc(var(--layout-header-height, 0px) + var(--selection-bar-height, 0px));
-  /* Above the year heading, which slides under it. */
-  z-index: 3;
-  margin-bottom: calc(var(--space) * 1.5);
-  min-height: 3.25rem;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: center;
-  gap: 0.5rem;
-  padding: 0.625rem var(--space);
-  border: 2px dashed var(--border);
-  border-radius: 8px;
-  background: var(--bg-raised);
-  cursor: pointer;
-  text-align: center;
-}
-
-/* With nothing in the library there is nothing to scroll past and nothing to
-   compete with, so it takes the room it deserves (design.md, "Admin site"). */
-.drop-target--empty-library {
-  min-height: 16rem;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
-}
-
-.drop-target--active {
-  border-color: var(--focus);
-}
-
-.drop-target__headline {
-  margin: 0;
-  font-size: 1.0625rem;
-  font-weight: 600;
-}
-
-.drop-target__hint {
-  margin: 0;
-  color: var(--fg-muted);
-  font-size: 0.875rem;
-}
-
-.drop-target__input {
-  display: none;
-}
-
-/* What is on its way in: the library's own grid, above the library. */
-.upload__pending {
-  margin-bottom: calc(var(--space) * 2);
-}
-
-/*
- * Its heading is the library's, one size down and not pinned.
- *
- * The grid and the tiles are deliberately the library's own — these are
- * photographs, not rows in a transfer dialog — but the heading is not a year
- * and must not read as one, and a second thing pinned to the top under the
- * drop target would be a third band of chrome across a page whose subject is
- * the photographs.
- */
-.upload__pending .timeline__year-heading {
-  position: static;
-  height: auto;
-  padding-bottom: 0.35rem;
-  font-size: 1.25rem;
-  border-bottom-width: 1px;
-}
-
-/* A tile's note here is a stack of controls, not two lines of text, so it
-   does not stretch them across the column. */
-.upload__pending .photo-grid__note {
-  align-items: flex-start;
-  gap: 0.25rem;
-}
-
-.upload__state {
-  color: var(--fg-muted);
-}
-
-.upload__progress {
-  width: 100%;
-}
-
-/* Tiles ------------------------------------------------------------------ */
-
-/* Room beneath every thumbnail for its filename, which only the admin shows. */
-.photo-grid__item {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.photo-grid__filename {
-  font-size: 0.75rem;
-  color: var(--fg-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The trash's dates. Two short lines rather than one long one, because a
-   filename above them is already as wide as the tile. */
-.photo-grid__note {
-  display: flex;
-  flex-direction: column;
-  font-size: 0.75rem;
-  color: var(--fg-muted);
-}
-
-/* The trash's tiles open in place, so they are buttons rather than links;
-   the viewer's tile styling is on the shared class either way. */
-button.photo-grid__link {
-  width: 100%;
-  padding: 0;
-  text-align: left;
-}
+/* Selection ---------------------------------------------------------------- */
 
 /* Selected for a bulk delete: a wash over the thumbnail as well as a border,
    because a selection has to be readable at a glance across many tiles. The
@@ -282,32 +93,7 @@ button.photo-grid__link {
   font-size: 0.9375rem;
 }
 
-/* Select all, and the sticky bar ------------------------------------------ */
-
-/* Each heading gains its own Select all at the right end. The anchor keeps
-   the rest of the line, so the heading is still one wide click target. */
-.timeline__day-heading {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-}
-
-.timeline__anchor {
-  flex: 1;
-  width: auto;
-}
-
-.timeline__select-all {
-  flex: none;
-  font-size: 0.75rem;
-  font-weight: 400;
-  padding: 0.15rem 0.5rem;
-  color: var(--fg-muted);
-}
-
-.timeline__select-all:hover {
-  color: var(--fg);
-}
+/* The sticky bar ----------------------------------------------------------- */
 
 .selection-bar {
   position: fixed;
@@ -384,237 +170,6 @@ button.photo-grid__link {
   color: var(--fg-muted);
 }
 
-/*
- * The pinned headings sit below the bar while it is shown.
- *
- * Three things can be pinned above them: the header, the selection bar, and
- * the drop target. The two admin bands measure themselves and publish their
- * own heights to the root, because both wrap on a narrow window and a number
- * written twice is a number that disagrees with itself; when one is not on
- * the page its variable is absent and the offset falls back to what is left.
- * The header's height is a declared constant, and 0px below 40rem where it is
- * in normal flow. These override display.css, which is imported first.
- */
-:root {
-  --admin-pinned: calc(
-    var(--layout-header-height, 0px) + var(--selection-bar-height, 0px) +
-      var(--drop-target-height, 0px)
-  );
-}
-
-.timeline__year-heading {
-  top: var(--admin-pinned);
-}
-
-.timeline__month-heading {
-  top: calc(var(--timeline-year-height) + var(--admin-pinned));
-}
-
-.timeline__year {
-  scroll-margin-top: var(--admin-pinned);
-}
-
-.timeline__month {
-  scroll-margin-top: calc(var(--timeline-year-height) + var(--admin-pinned));
-}
-
-.timeline__day,
-.photo-grid__item {
-  scroll-margin-top: calc(var(--timeline-stack-height) + var(--admin-pinned));
-}
-
-/*
- * The Recently Uploaded view pins its own two lines, not the library's year
- * and month, so its offsets are built from those instead. Below 40rem those
- * two are in normal flow — the subtitle is prose and has to be free to wrap —
- * and only the admin's own bands sit above a tile.
- */
-.recent .photo-grid__item {
-  scroll-margin-top: var(--admin-pinned);
-}
-
-@media (min-width: 40rem) {
-  .recent__heading {
-    top: var(--admin-pinned);
-  }
-
-  .recent__subtitle {
-    top: calc(var(--admin-pinned) + var(--recent-heading-height));
-  }
-
-  .recent .photo-grid__item {
-    scroll-margin-top: calc(var(--admin-pinned) + var(--recent-heading-height));
-  }
-
-  .recent__group--titled .photo-grid__item {
-    scroll-margin-top: calc(
-      var(--admin-pinned) + var(--recent-heading-height) + var(--recent-subtitle-height)
-    );
-  }
-}
-
-/* The edit form, in the photo view ---------------------------------------- */
-
-/*
- * Where the viewer shows a caption and a date, the admin shows the fields
- * that produce them, in the same corner of the same view. It shares the
- * stack's right edge on a wide screen, and takes the full width of the footer
- * row below the shared 40rem breakpoint.
- *
- * Capped and scrollable rather than allowed to grow: the stack hangs off the
- * bottom of the picture, and a form tall enough to climb over a landscape
- * photograph on a short window would push the photo out of its own box. The
- * cap leaves room for the action row beneath it and the back link above.
- */
-.edit-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  width: 100%;
-  max-height: calc(100vh - 14rem);
-  overflow-y: auto;
-}
-
-.edit-form__field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-  font-size: 0.8125rem;
-}
-
-.edit-form__field span {
-  color: var(--fg-muted);
-}
-
-.edit-form__field input,
-.edit-form__field textarea {
-  font: inherit;
-  font-size: 0.9375rem;
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: var(--fg);
-}
-
-.edit-form__field input:disabled {
-  opacity: 0.5;
-}
-
-.edit-form__actions {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.edit-form__saved,
-.edit-form__unsaved {
-  color: var(--fg-muted);
-  font-size: 0.875rem;
-}
-
-/* Which file is on screen, without opening Photo info. Muted, and in the
-   corner the back link does not use. */
-.lightbox__filename {
-  color: var(--fg-muted);
-  font-size: 0.875rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-@media (min-width: 40rem) {
-  .lightbox__filename {
-    position: absolute;
-    top: var(--space);
-    right: var(--space);
-    z-index: 2;
-    max-width: 40%;
-  }
-
-  /*
-   * The picture makes room for the form.
-   *
-   * In the viewer the bottom-left stack lives in whatever margin a centred
-   * photograph happens to leave, which for a caption is enough and for a
-   * landscape photograph on a wide window is about a hundred pixels. A form
-   * cannot wrap into that. So the stage starts clear of a fixed gutter and the
-   * picture centres in what is left.
-   *
-   * The stack takes that gutter outright rather than hanging off
-   * `--photo-left` as it does in the viewer: the previous-photo button lives
-   * at the stage's own left edge, which is exactly where a stack measured from
-   * the picture would end. A fixed line is also the better edge for a column
-   * of fields, which have one of their own already.
-   */
-  .lightbox--editing .lightbox__stage {
-    left: 21rem;
-  }
-
-  .lightbox--editing .lightbox__foot {
-    right: calc(100% - 20rem);
-  }
-
-  /* Three buttons across rather than down: the form has already made the
-     column wide enough, and the stack is tall enough without them stacked. */
-  .lightbox--editing .lightbox__actions {
-    flex-direction: row;
-  }
-
-  /* Closer than the viewer's caption-to-buttons gap: the form is already tall,
-     and the picture's bottom edge is aligned to the action row either way. */
-  .lightbox--editing .lightbox__bottom {
-    gap: 0.75rem;
-  }
-}
-
-/* Confirmation and undo -------------------------------------------------- */
-
-.confirm-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space);
-  background: rgb(0 0 0 / 45%);
-}
-
-.confirm {
-  max-width: 26rem;
-  padding: calc(var(--space) * 1.25);
-  border-radius: 8px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-}
-
-.confirm h2 {
-  margin: 0 0 0.5rem;
-  font-size: 1.125rem;
-}
-
-.confirm p {
-  margin: 0 0 var(--space);
-}
-
-.confirm__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 0.5rem;
-}
-
-.confirm__destructive {
-  border-color: #b91c1c;
-  color: #b91c1c;
-}
-
-@media (prefers-color-scheme: dark) {
-  .confirm__destructive {
-    color: #fca5a5;
-  }
-}
-
 /* A caption can be 2000 characters; the sentence asking about it cannot. */
 .caption-replace__quote {
   display: -webkit-inline-box;
@@ -661,32 +216,6 @@ button.photo-grid__link {
   min-width: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 0.9375rem;
-}
-
-/* Above everything, the photo view included: the offer outlives whatever
-   navigation follows the delete that raised it. */
-.undo {
-  position: fixed;
-  left: 50%;
-  bottom: var(--space);
-  transform: translateX(-50%);
-  z-index: 25;
-  display: flex;
-  align-items: center;
-  gap: var(--space);
-  padding: 0.625rem var(--space);
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-raised);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
-}
-
-/* Trash ------------------------------------------------------------------ */
-
-.trash__intro {
-  margin-top: 0;
-  color: var(--fg-muted);
   font-size: 0.9375rem;
 }
 
