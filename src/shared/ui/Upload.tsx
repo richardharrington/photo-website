@@ -205,7 +205,18 @@ export function UploadPanel({
       },
       // A file on its way in has no catalog record to have arrived by email.
       attribution: () => Promise.resolve(null),
-      can: { edit: true, download: false, trash: false, select: false },
+      // Nothing here is in the trash to put back.
+      restore: () => {},
+      can: {
+        edit: true,
+        download: false,
+        trash: false,
+        select: false,
+        restore: false,
+        // Before a thumbnail exists the filename is the only way to tell one
+        // queued file from another, in either app (family-tier.md #12).
+        filename: true,
+      },
     }),
     [queue, onLibraryChanged],
   );

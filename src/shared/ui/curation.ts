@@ -1,22 +1,23 @@
 /**
- * The one seam between the shared UI and the admin app.
+ * The one seam between the shared UI and what a listing may do.
  *
- * The viewer and the admin render the same pages, the same grid, and the same
- * lightbox; the admin's difference is curation — selecting, editing, deleting.
- * Rather than thread a dozen callbacks through every component, the admin
- * provides this context and the shared components check for its presence.
+ * Both apps render the same pages, the same grid, and the same lightbox, and
+ * both curate: the family link adds, edits, trashes, and restores
+ * (family-tier.md #3), and the admin adds selection on top. Rather than thread
+ * a dozen callbacks through every component, each listing provides this
+ * context and the shared components read what they need from it — deciding by
+ * `can`, never by whether a context is present.
  *
  * The direction of the dependency is what matters: nothing in this shared
- * tree imports from either app, so the viewer compiles and ships without a
- * line of admin code, carrying only the branches that test this context for
- * `null`. Everything here is therefore expressed in types the viewer already
- * has — no admin types, no admin imports.
+ * tree imports from either app, so neither bundle carries a line of the
+ * other's code. Everything here is therefore expressed in types both apps
+ * already have — no admin types, no admin imports.
  */
 
 import { createContext, useContext } from 'react';
 import type { PublicPhoto } from '../display-api.ts';
 
-/** The fields the edit form sends, exactly as `adminApi.edit` takes them. */
+/** The fields the edit form sends, exactly as `curationApi.edit` takes them. */
 export interface PhotoEdit {
   date: string | null;
   time: string | null;
@@ -46,16 +47,22 @@ export interface Curation {
    * Who emailed this photograph in, or null when nobody did.
    *
    * A separate request rather than a field on `PublicPhoto`, because that
-   * projection is a whitelist the viewer receives and who sent a photograph is
-   * none of a viewer's business. It is asked for only when the info panel is
-   * opened, and the address is resolved on the server — the browser never
-   * holds an address id either.
+   * projection is a whitelist every page receives and who sent a photograph
+   * is the administrator's business alone. It is asked for only when the info
+   * panel is opened, and the address is resolved on the server — the browser
+   * never holds an address id either.
    *
    * Required, like every other member here, so a new listing has to decide
-   * rather than inherit: the trash, the upload panel, and the tests all answer
-   * null, and only the library ever asks.
+   * rather than inherit: the trash, the upload panel, the family's library,
+   * and the tests all answer null without a request, and only the admin's
+   * library ever asks.
    */
   attribution(id: string): Promise<string | null>;
+  /**
+   * Put a trashed photo back. Reachable only where `can.restore`; every other
+   * listing implements it as an unreachable no-op.
+   */
+  restore(id: string): void;
   /** What the photo view offers for these photographs; see `Capabilities`. */
   can: Capabilities;
 }
@@ -63,34 +70,53 @@ export interface Curation {
 /**
  * What a context may do with the photographs it covers.
  *
- * Four of them rather than one `readOnly` flag, because the three listings
- * that provide a context do not agree along a single axis. The library allows
- * all four. The trash allows only `select`: a trashed photo has no download of
- * any kind and no edit, and its own bar owns Restore and Delete permanently,
- * both of which act on a selection. A photograph still being uploaded allows
- * editing and nothing else — it is exactly the point of showing it early that
- * its date and caption can be typed before it lands — but it has no stored
- * bytes to download, no catalog record to trash, and no bulk action to be
- * selected for.
+ * Six flags rather than one `readOnly` or `isAdmin`, because the six listings
+ * that provide a context do not agree along any single axis:
+ *
+ *   | Listing               | edit | download | trash | select | restore | filename |
+ *   | --------------------- | ---- | -------- | ----- | ------ | ------- | -------- |
+ *   | Family library/recent | yes  | yes      | yes   | no     | no      | no       |
+ *   | Family uploading      | yes  | no       | no    | no     | no      | yes      |
+ *   | Family trash          | no   | no       | no    | no     | yes     | no       |
+ *   | Admin library/recent  | yes  | yes      | yes   | yes    | no      | yes      |
+ *   | Admin uploading       | yes  | no       | no    | no     | no      | yes      |
+ *   | Admin trash           | no   | no       | no    | yes    | yes     | yes      |
+ *
+ * Both libraries edit, download, and trash; only the admin's selects, because
+ * selection and its bulk actions are the administrator's (family-tier.md #5). A
+ * photograph still being uploaded allows editing and nothing else — it is
+ * exactly the point of showing it early that its date and caption can be typed
+ * before it lands — but it has no stored bytes to download, no catalog record
+ * to trash, and no bulk action to be selected for. A trashed photo has no
+ * download of any kind and no edit, and can be restored from the photo view in
+ * either app; the admin's trash also selects, because its bar's Restore and
+ * Delete permanently act on a selection.
  *
  * `select` is what decides a tile's gestures: where it is true a plain click
  * selects and a double-click opens, and where it is false a plain click opens,
- * as it always did. None of the four is optional, so adding one visits every
+ * as it always did. None of the six is optional, so adding one visits every
  * call site and no listing inherits a default.
- *
- * The viewer provides no context at all, and gets the download it has always
- * had; only `edit`, `trash` and `select` are admin-only by nature.
  */
 export interface Capabilities {
   edit: boolean;
   download: boolean;
   trash: boolean;
   select: boolean;
+  /** Restore from the trash. Only a trash listing says yes. */
+  restore: boolean;
+  /**
+   * The filename on a tile and at the lightbox's top right. Admin only, and
+   * the files still uploading. Photo info shows it regardless.
+   */
+  filename: boolean;
 }
 
 export const CurationContext = createContext<Curation | null>(null);
 
-/** `null` in the viewer, which is how every shared component tells them apart. */
+/**
+ * `null` only in tests and in a listing that deliberately provides nothing.
+ * Both apps provide one, and components decide by `can`, never by presence.
+ */
 export function useCuration(): Curation | null {
   return useContext(CurationContext);
 }

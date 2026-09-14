@@ -1,0 +1,185 @@
+/** @vitest-environment happy-dom */
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { Lightbox } from '../../src/shared/ui/Lightbox.tsx';
+import { PhotoGrid } from '../../src/shared/ui/PhotoGrid.tsx';
+import { CurationContext } from '../../src/shared/ui/curation.ts';
+import type { Capabilities, Curation } from '../../src/shared/ui/curation.ts';
+import { toPublicPhoto } from '../../src/shared/display-api.ts';
+import { appRoutes } from '../../src/shared/urls.ts';
+import { makePhoto, testPhotoId } from '../../fixtures/photos.ts';
+
+/**
+ * What each listing's context shows (family-tier.md 7.2, 7.8).
+ *
+ * Both apps provide a context now, so no shared component may decide anything
+ * by whether one is present — only by `can`. These pin the four lightboxes the
+ * table in `curation.ts` describes and the family's grid, so a branch that
+ * still tests presence shows up as an admin control in the family's view.
+ */
+
+const routes = appRoutes('/test-base');
+const photo = toPublicPhoto(
+  makePhoto({ id: testPhotoId('shown'), originalFilename: 'IMG_0001.HEIC' }),
+);
+
+const FAMILY_LIBRARY: Capabilities = {
+  edit: true,
+  download: true,
+  trash: true,
+  select: false,
+  restore: false,
+  filename: false,
+};
+const FAMILY_TRASH: Capabilities = {
+  edit: false,
+  download: false,
+  trash: false,
+  select: false,
+  restore: true,
+  filename: false,
+};
+const ADMIN_LIBRARY: Capabilities = {
+  edit: true,
+  download: true,
+  trash: true,
+  select: true,
+  restore: false,
+  filename: true,
+};
+const ADMIN_TRASH: Capabilities = {
+  edit: false,
+  download: false,
+  trash: false,
+  select: true,
+  restore: true,
+  filename: true,
+};
+
+function curationWith(can: Capabilities): Curation {
+  return {
+    selectedIds: new Set(),
+    selectOnly: vi.fn(),
+    toggle: vi.fn(),
+    extendTo: vi.fn(),
+    selectAll: vi.fn(),
+    trash: vi.fn(),
+    edit: vi.fn(() => Promise.reject(new Error('not in this test'))),
+    attribution: vi.fn(() => Promise.resolve(null)),
+    restore: vi.fn(),
+    can,
+  };
+}
+
+function provided(curation: Curation, children: ReactNode) {
+  return render(
+    <CurationContext.Provider value={curation}>{children}</CurationContext.Provider>,
+  );
+}
+
+function lightboxUnder(can: Capabilities) {
+  const curation = curationWith(can);
+  provided(
+    curation,
+    <Lightbox
+      photo={photo}
+      orderedIds={[photo.id]}
+      backHref={routes.home()}
+      onClose={() => {}}
+    />,
+  );
+  return curation;
+}
+
+const button = (name: string) => screen.queryByRole('button', { name });
+const filenameCorner = () => document.querySelector('.lightbox__filename');
+const form = () => document.querySelector('form');
+
+afterEach(() => {
+  cleanup();
+});
+
+describe('the lightbox', () => {
+  it("under the family's library: the form and every action but Restore, no filename", () => {
+    lightboxUnder(FAMILY_LIBRARY);
+
+    expect(form()).not.toBeNull();
+    expect(button('Save changes') ?? button('Save')).not.toBeNull();
+    expect(button('Download')).not.toBeNull();
+    expect(button('Delete')).not.toBeNull();
+    expect(button('Photo info')).not.toBeNull();
+    expect(button('Restore')).toBeNull();
+    expect(filenameCorner()).toBeNull();
+  });
+
+  it("under the family's trash: Restore, and no form, download, delete, or filename", () => {
+    lightboxUnder(FAMILY_TRASH);
+
+    expect(button('Restore')).not.toBeNull();
+    expect(form()).toBeNull();
+    expect(button('Download')).toBeNull();
+    expect(button('Delete')).toBeNull();
+    expect(filenameCorner()).toBeNull();
+  });
+
+  it("under the admin's library: unchanged, and no Restore", () => {
+    lightboxUnder(ADMIN_LIBRARY);
+
+    expect(form()).not.toBeNull();
+    expect(button('Download')).not.toBeNull();
+    expect(button('Delete')).not.toBeNull();
+    expect(filenameCorner()?.textContent).toBe('IMG_0001.HEIC');
+    expect(button('Restore')).toBeNull();
+  });
+
+  it("under the admin's trash: Restore, which restores this photograph", () => {
+    const curation = lightboxUnder(ADMIN_TRASH);
+
+    fireEvent.click(button('Restore')!);
+    expect(curation.restore).toHaveBeenCalledWith(photo.id);
+    expect(button('Delete')).toBeNull();
+  });
+
+  it('shows the family the filename in Photo info, and never who emailed it in', async () => {
+    const curation = lightboxUnder(FAMILY_LIBRARY);
+
+    fireEvent.pointerDown(button('Photo info')!);
+    fireEvent.click(button('Photo info')!);
+
+    const panel = document.getElementById('photo-information')!;
+    expect(panel.textContent).toContain('IMG_0001.HEIC');
+    // It may ask; the family's context answers null without a request.
+    await waitFor(() => expect(curation.attribution).toHaveBeenCalled());
+    await expect(
+      (curation.attribution as ReturnType<typeof vi.fn>).mock.results[0]!.value,
+    ).resolves.toBeNull();
+    expect(panel.textContent).not.toContain('Emailed by');
+  });
+
+  it("sends Delete and Backspace to the family's trash flow", () => {
+    const curation = lightboxUnder(FAMILY_LIBRARY);
+
+    fireEvent.keyDown(window, { key: 'Delete' });
+    fireEvent.keyDown(window, { key: 'Backspace' });
+    expect(curation.trash).toHaveBeenCalledTimes(2);
+    expect(curation.trash).toHaveBeenCalledWith(photo.id);
+  });
+});
+
+describe("the family's grid", () => {
+  it('shows no filename, marks no selection, and opens on a plain click', () => {
+    window.history.replaceState(null, '', '/test-base/');
+    const curation = curationWith(FAMILY_LIBRARY);
+    provided(curation, <PhotoGrid photos={[photo]} />);
+
+    expect(document.querySelector('.photo-grid__filename')).toBeNull();
+    expect(document.querySelector('[data-selected]')).toBeNull();
+    expect(document.querySelector('[data-photo-id]')).toBeNull();
+
+    fireEvent.click(screen.getByRole('link'));
+    expect(curation.selectOnly).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe(routes.photo(photo.id));
+  });
+});

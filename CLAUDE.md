@@ -103,12 +103,13 @@ export.
 shared chunk can put admin code under the display path. Nothing in the display
 module graph may import from `src/admin/`.
 
-Nothing under `src/shared/` may import from either app. The admin augments the
-shared UI through `CurationContext`; the viewer provides `null`, so the viewer
-bundle carries the branches and never the admin modules. Three listings
-provide one — the library, the trash, and the files still uploading — and they
-differ only in `Curation.can`, so the photo view is one component rather than
-three.
+Nothing under `src/shared/` may import from either app. Both apps curate
+through `CurationContext`: both apps provide one, and components decide by
+`Curation.can`, never by presence, so neither bundle carries the other's
+modules. Six listings provide one — each app's library, trash, and files still
+uploading — and they differ only in the flags tabled in
+`src/shared/ui/curation.ts`, so the photo view is one component rather than
+six.
 
 Only the three values in `clientDefines()` (`config/build-env.ts`) are inlined
 into a bundle — no `VITE_` prefix auto-inlining, so a secret cannot reach a

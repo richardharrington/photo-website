@@ -24,7 +24,7 @@ import { CaptionApply } from './components/CaptionApply.tsx';
 import type { CaptionApplyResult } from './components/CaptionApply.tsx';
 import { ReplaceCaptions } from './components/ReplaceCaptions.tsx';
 import { SelectionBar } from './components/SelectionBar.tsx';
-import { TrashPage } from './components/TrashPage.tsx';
+import { AdminTrashPage } from './components/AdminTrashPage.tsx';
 import { EmailsPage } from './components/EmailsPage.tsx';
 import { InboxPage } from './components/InboxPage.tsx';
 import {
@@ -232,7 +232,16 @@ export function App() {
       // the answer is a fact about how a photograph arrived, not part of the
       // page.
       attribution: (id) => adminApi.attribution(id),
-      can: { edit: true, download: true, trash: true, select: true },
+      // The library holds no trashed photos; the trash page restores.
+      restore: () => {},
+      can: {
+        edit: true,
+        download: true,
+        trash: true,
+        select: true,
+        restore: false,
+        filename: true,
+      },
     }),
     // startTrash and saveEdit read the current render's `data` and
     // `orderedIds`, which is what these dependencies stand for.
@@ -298,7 +307,7 @@ export function App() {
       ) : route.name === 'inbox' ? (
         <InboxPage nav={nav} onChanged={countInboxAgain} />
       ) : (
-        <TrashPage nav={nav} onChanged={countTrashAgain} />
+        <AdminTrashPage nav={nav} onChanged={countTrashAgain} />
       )
     ) : route.kind === 'not-found' ? (
       <CurationContext.Provider value={curation}>

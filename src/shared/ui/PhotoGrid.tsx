@@ -237,16 +237,19 @@ function useLongPress(enabled: boolean) {
  * attributes on the element give the browser the ratio up front, so the
  * layout does not reflow as thumbnails load.
  *
- * Under a curation context the same tile also shows its original filename and
- * carries the selection's marking. The viewer's tiles never do — a filename
- * says nothing to the family, and there is nothing to select.
+ * Where the context's `can.filename` says so — the admin's listings, and the
+ * files still uploading in either app — the tile also shows its original
+ * filename; the family's library and trash never do, because a filename says
+ * nothing to the family (family-tier.md #7). Where the context selects, the
+ * tile carries the selection's marking.
  *
  * Which gestures a tile has is `can.select`, not the presence of a context
  * (decisions.md #78). Where it is true — the library, Recently added, the
  * trash — a click selects and a double-click, a long-press, or Enter opens.
- * Where it is false, and in the viewer, a single click opens exactly as it
- * always has: the files still uploading have nothing to select, so their tiles
- * keep the old rule on the same screen as the library's new one.
+ * Where it is false a single click opens exactly as it always has: the
+ * family's listings never select, and the files still uploading have nothing
+ * to select, so their tiles keep the old rule on the same screen as the
+ * admin library's new one.
  */
 export function PhotoGrid({
   photos,
@@ -267,7 +270,7 @@ export function PhotoGrid({
         const tileClass = selected
           ? 'photo-grid__link photo-grid__link--selected'
           : 'photo-grid__link';
-        const marks = curation
+        const marks = selects
           ? {
               'data-photo-id': photo.id,
               'data-selected': selected ? 'true' : undefined,
@@ -281,7 +284,7 @@ export function PhotoGrid({
 
         /**
          * The gestures a selecting tile adds. Absent entirely without
-         * `can.select`, so the viewer's and the upload panel's tiles carry no
+         * `can.select`, so the family's and the upload panel's tiles carry no
          * handler at all rather than one that checks a flag and returns.
          */
         const gestures =
@@ -373,8 +376,9 @@ export function PhotoGrid({
               </Link>
             )}
 
-            {/* Shown on every admin thumbnail, unlike the viewer's. */}
-            {curation ? (
+            {/* The admin's tiles and the files still uploading; never the
+                family's library or trash. */}
+            {curation?.can.filename ? (
               <span className="photo-grid__filename" title={photo.originalFilename}>
                 {photo.originalFilename}
               </span>

@@ -86,11 +86,13 @@ function captureLine(photo: PublicPhoto): string | null {
  * between them. The filename and the capture *time* live one click away, in
  * the info panel.
  *
- * This is also the admin's editing view, and the whole of it: under a curation
- * context the bottom-left stack holds the date, time, and caption as fields
- * with a Save button, the action row gains Delete, and the filename shows at
- * the top right. There is no side panel and no separate enlarged preview,
- * because this is the enlarged preview.
+ * This is also the editing view, and the whole of it, under any context with
+ * `edit`: the bottom-left stack holds the date, time, and caption as fields
+ * with a Save button, and the action row gains Delete where the context can
+ * trash and Restore where it can restore. Where the context shows filenames —
+ * the admin's listings and the files still uploading — the filename is at the
+ * top right. There is no side panel and no separate enlarged preview, because
+ * this is the enlarged preview.
  */
 export function Lightbox({
   photo,
@@ -127,8 +129,9 @@ export function Lightbox({
    *
    * Keyed by photo id rather than held as a bare string, so arrowing to the
    * next photograph with the panel open never shows the previous one's sender
-   * while the new answer is in flight. The viewer never asks: it has no
-   * curation, and the fact is not in the projection it receives.
+   * while the new answer is in flight. Only the admin's library asks the
+   * server; every other context answers null without a request, and the fact
+   * is not in the projection the page receives.
    */
   const [emailedBy, setEmailedBy] = useState<{ id: string; email: string } | null>(
     null,
@@ -431,8 +434,9 @@ export function Lightbox({
       </a>
 
       {/* Which file this is, without opening Photo info: an administrator
-          working through a batch needs it at a glance. */}
-      {curation ? (
+          working through a batch needs it at a glance. Never the family's
+          library or trash (family-tier.md #7). */}
+      {curation?.can.filename ? (
         <span className="lightbox__filename" title={photo.originalFilename}>
           {photo.originalFilename}
         </span>
@@ -521,8 +525,8 @@ export function Lightbox({
         {/* Caption, date, and the actions are one stack, ordered by how much
             they say about the photograph. On a wide screen they share a right
             edge, which is the only alignment in the view that the photo's own
-            box does not provide. In the admin the caption and date are the
-            edit form's own fields, in the same place. */}
+            box does not provide. Where the context edits, the caption and
+            date are the edit form's own fields, in the same place. */}
         <div className="lightbox__bottom">
           {editable && curation ? (
             <EditForm
@@ -552,8 +556,9 @@ export function Lightbox({
 
           <div className="lightbox__actions">
             {/* A trashed photo shows enough to be identified and nothing
-                more: no download of any kind, and no second delete here — the
-                trash's own bar owns Restore and Delete permanently. */}
+                more: no download of any kind and no delete — only Restore,
+                which puts it back. Permanent deletion stays on the admin's
+                bar, for a selection. */}
             {curation && !curation.can.download ? null : (
               <button type="button" onClick={onDownload} disabled={downloading}>
                 {downloading ? 'Preparing download…' : 'Download'}
@@ -566,6 +571,11 @@ export function Lightbox({
                 onClick={() => curation.trash(photo.id)}
               >
                 Delete
+              </button>
+            ) : null}
+            {curation?.can.restore ? (
+              <button type="button" onClick={() => curation.restore(photo.id)}>
+                Restore
               </button>
             ) : null}
             <button
