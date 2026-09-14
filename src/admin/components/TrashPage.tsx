@@ -13,7 +13,7 @@ import { TRASH_RETENTION_DAYS } from '../../shared/constants.ts';
 import { adminApi, routes } from '../api.ts';
 import type { PreviewResult, TrashItem, TrashListing } from '../api.ts';
 import { useDeselectGestures } from '../deselect.ts';
-import { Confirm } from './Confirm.tsx';
+import { Confirm } from '../../shared/ui/Confirm.tsx';
 import { SelectionBar } from './SelectionBar.tsx';
 import {
   addAll,

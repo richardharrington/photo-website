@@ -1,90 +1,31 @@
 /**
  * Admin API client.
  *
- * The reads are the shared read client, unchanged: the admin renders the same
- * timeline and the same photo view the viewer does, so it asks for exactly
- * what the viewer asks for. What this module adds is the mutations, and the
- * error parsing they need — an admin acts on the library and has to be told
- * why something was refused, where a viewer only ever reads.
- *
- * Both halves live below this build's own opaque base.
+ * Three layers, each below this build's own opaque base. The reads are the
+ * shared read client, unchanged: the admin renders the same timeline and the
+ * same photo view the family does. The curation — uploading, editing, moving
+ * to the trash, restoring — is the shared curation client, also unchanged,
+ * because the family link does all of that through the same routes
+ * (family-tier.md #3). What this module adds is only what the administrator
+ * alone may do: bulk captions, permanent deletion, the export, attribution,
+ * the Emails page, and the Inbox.
  */
 
 import { readApi, routes } from '../shared/ui/api.ts';
-import { NotFoundError } from '../shared/ui/useResource.ts';
+import { curationApi, post, request } from '../shared/ui/curation-api.ts';
+import type { PreviewResult } from '../shared/ui/curation-api.ts';
 import type { PublicPhoto } from '../shared/display-api.ts';
-import type { PhotoEdit } from '../shared/ui/curation.ts';
-import type { SelectionQuery } from '../shared/admin-operations.ts';
 import type { CaptionChange } from '../shared/validation.ts';
-import type { Rendition } from '../shared/constants.ts';
-import type { DerivativeDescriptor } from '../shared/catalog.ts';
 
 export { routes };
-
-/** A rejection the API explains, as opposed to a bare failure. */
-export class ApiError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
-
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(routes.api(path), {
-    ...init,
-    headers: { accept: 'application/json', ...init?.headers },
-    credentials: 'omit',
-  });
-
-  if (response.status === 404) throw new NotFoundError();
-  if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new ApiError(body?.error ?? `Request failed (${response.status}).`);
-  }
-  return (await response.json()) as T;
-}
-
-function post<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  return request<T>(path, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: signal ?? null,
-  });
-}
-
-export interface PrepareResult {
-  status: 'duplicate' | 'ready';
-  existingId?: string;
-  /** Set with `existingId`: the duplicate is in the trash, not the library. */
-  existingTrashed?: boolean;
-  photoId?: string;
-  downloadFilename?: string;
-  uploads?: Record<Rendition, string>;
-}
-
-export interface CommitResult {
-  status: 'created' | 'duplicate';
-  existingId?: string;
-  /** Set with `existingId`: the duplicate is in the trash, not the library. */
-  existingTrashed?: boolean;
-  photo?: PublicPhoto;
-}
-
-export interface PreviewResult {
-  photoIds: string[];
-  count: number;
-  expiresAt: number;
-  token: string;
-}
-
-export interface TrashItem {
-  photo: PublicPhoto;
-  trashedAt: string;
-  /** Short-lived signed URLs: a trashed photo has no capability URL. */
-  thumbnailUrl: string;
-  previewUrl: string;
-}
+export { ApiError } from '../shared/ui/curation-api.ts';
+export type {
+  CommitResult,
+  PrepareResult,
+  PreviewResult,
+  TrashItem,
+  TrashListing,
+} from '../shared/ui/curation-api.ts';
 
 /**
  * One row of the Notifications page: Cloudflare's address merged with the R2
@@ -144,22 +85,14 @@ export interface InboxPartUrl {
   expiresAt: string;
 }
 
-export interface TrashListing {
-  items: TrashItem[];
-  /** When the signed URLs above stop working. */
-  expiresAt: string;
-}
-
 export const adminApi = {
   // ---- Reads ------------------------------------------------------------
   // The viewer's own projections, verbatim.
   ...readApi,
 
-  trash: (signal?: AbortSignal) =>
-    request<TrashListing>('/trash', { signal: signal ?? null }),
-
-  trashCount: (signal?: AbortSignal) =>
-    request<{ count: number }>('/trash/count', { signal: signal ?? null }),
+  // ---- Curation ---------------------------------------------------------
+  // Everything the family link may do too, through the same client.
+  ...curationApi,
 
   // ---- Emails -----------------------------------------------------------
   // Every action refetches the whole list rather than patching a row: the
@@ -218,32 +151,7 @@ export const adminApi = {
   /** Tonight's digest for one address, sent now and marked as a test. */
   sendTest: (email: string) => post<{ count: number }>('/emails/test', { email }),
 
-  // ---- Upload flow ------------------------------------------------------
-  beginBatch: () => post<{ batchSeq: number }>('/begin-batch', {}),
-
-  prepare: (contentHash: string, originalFilename: string) =>
-    post<PrepareResult>('/prepare', { contentHash, originalFilename }),
-
-  commit: (body: {
-    photoId: string;
-    contentHash: string;
-    originalFilename: string;
-    sourceMimeType: string;
-    captureDate: string | null;
-    captureTime: string | null;
-    captureUtcOffset: string | null;
-    timestampSource: string;
-    caption: string | null;
-    batchSeq: number;
-    selectionIndex: number;
-    derivatives: Record<Rendition, DerivativeDescriptor>;
-    /** Set for a photograph coming out of the Inbox. The server resolves the
-     *  sender from the record; the browser never supplies one. */
-    submissionId?: string;
-    claimToken?: string;
-  }) => post<CommitResult>('/commit', body),
-
-  // ---- Curation ---------------------------------------------------------
+  // ---- Administrator-only curation --------------------------------------
 
   /**
    * The address that emailed a photograph in, or null.
@@ -254,9 +162,6 @@ export const adminApi = {
    */
   attribution: async (photoId: string) =>
     (await request<{ email: string | null }>(`/attribution/${photoId}`)).email,
-
-  edit: (photoId: string, edit: PhotoEdit) =>
-    post<{ photo: PublicPhoto }>('/edit', { photoId, ...edit }),
 
   /**
    * Several captions in one catalog write, each applied only where the stored
@@ -270,21 +175,10 @@ export const adminApi = {
     }),
 
   /**
-   * Both halves of a destructive action. The preview resolves a selection to
-   * an explicit ID list and returns a token bound to it; the confirm sends
-   * that same list back. A photo committed in between is not in the list the
-   * token covers (decisions.md #12).
+   * Both halves of a permanent delete, on the same preview/confirm token path
+   * as the trash (decisions.md #12). The token is bound to its kind, so a
+   * trash preview cannot confirm this.
    */
-  previewTrash: (selection: SelectionQuery) =>
-    post<PreviewResult>('/trash/preview', { selection }),
-
-  confirmTrash: (preview: PreviewResult) =>
-    post<{ trashed: string[]; count: number }>('/trash/confirm', {
-      photoIds: preview.photoIds,
-      expiresAt: preview.expiresAt,
-      token: preview.token,
-    }),
-
   previewPermanentDelete: (photoIds: string[]) =>
     post<PreviewResult>('/permanent-delete/preview', {
       selection: { kind: 'ids', photoIds },
@@ -296,10 +190,6 @@ export const adminApi = {
       expiresAt: preview.expiresAt,
       token: preview.token,
     }),
-
-  /** The Undo behind a just-completed trash action. */
-  restore: (photoIds: string[]) =>
-    post<{ restored: string[]; count: number }>('/restore', { photoIds }),
 
   exportUrl: () => routes.api('/export'),
 };

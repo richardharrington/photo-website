@@ -13,10 +13,10 @@
  * attributes the photograph to its sender.
  */
 
-import { processFile, readSourceMetadata } from '../../pipeline/index.ts';
+import { processFile, readSourceMetadata } from '../../../pipeline/index.ts';
 import { UploadQueue } from './queue.ts';
 import type { QueueDependencies } from './queue.ts';
-import { adminApi } from '../api.ts';
+import { curationApi } from '../curation-api.ts';
 
 /**
  * PUT one artifact straight to R2 with its presigned URL.
@@ -50,11 +50,11 @@ export function createQueue(overrides: Partial<QueueDependencies> = {}): UploadQ
         metadata: options.metadata,
       }),
     readMetadata: (file) => readSourceMetadata(file, file.name),
-    editPhoto: async (photoId, edit) => (await adminApi.edit(photoId, edit)).photo,
-    beginBatch: () => adminApi.beginBatch(),
-    prepare: (hash, filename) => adminApi.prepare(hash, filename),
+    editPhoto: async (photoId, edit) => (await curationApi.edit(photoId, edit)).photo,
+    beginBatch: () => curationApi.beginBatch(),
+    prepare: (hash, filename) => curationApi.prepare(hash, filename),
     uploadArtifact,
-    commit: (body) => adminApi.commit(body),
+    commit: (body) => curationApi.commit(body),
     ...overrides,
   });
 }

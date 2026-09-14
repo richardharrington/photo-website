@@ -18,10 +18,10 @@
  * place the way the trash's do.
  */
 
-import { RENDITIONS, RENDITION_SPECS } from '../../shared/constants.ts';
-import type { Rendition } from '../../shared/constants.ts';
-import type { DerivativeDescriptor } from '../../shared/catalog.ts';
-import type { PublicPhoto } from '../../shared/display-api.ts';
+import { RENDITIONS, RENDITION_SPECS } from '../../constants.ts';
+import type { Rendition } from '../../constants.ts';
+import type { DerivativeDescriptor } from '../../catalog.ts';
+import type { PublicPhoto } from '../../display-api.ts';
 import type { QueueItem } from './queue.ts';
 
 /**

@@ -6,18 +6,18 @@ import {
   useRef,
   useState,
 } from 'react';
-import { ACCEPTED_EXTENSIONS } from '../../shared/constants.ts';
+import { ACCEPTED_EXTENSIONS } from '../constants.ts';
 import { hasAcceptedExtension } from '../../pipeline/validate.ts';
-import { isInFlight, summarize } from '../upload/queue.ts';
-import type { QueueItem, QueueSnapshot } from '../upload/queue.ts';
-import { createQueue } from '../upload/create.ts';
-import { PENDING_IMAGE, pendingPhoto } from '../upload/pending.ts';
-import { routes } from '../api.ts';
-import { Link } from '../../shared/ui/Link.tsx';
-import { PhotoGrid } from '../../shared/ui/PhotoGrid.tsx';
-import { Lightbox } from '../../shared/ui/Lightbox.tsx';
-import { CurationContext } from '../../shared/ui/curation.ts';
-import type { Curation } from '../../shared/ui/curation.ts';
+import { isInFlight, summarize } from './upload/queue.ts';
+import type { QueueItem, QueueSnapshot } from './upload/queue.ts';
+import { createQueue } from './upload/create.ts';
+import { PENDING_IMAGE, pendingPhoto } from './upload/pending.ts';
+import { routes } from './api.ts';
+import { Link } from './Link.tsx';
+import { PhotoGrid } from './PhotoGrid.tsx';
+import { Lightbox } from './Lightbox.tsx';
+import { CurationContext } from './curation.ts';
+import type { Curation } from './curation.ts';
 
 const STATE_LABELS: Record<QueueItem['state'], string> = {
   queued: 'Waiting',

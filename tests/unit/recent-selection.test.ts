@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { recentGroups, timelineResponse } from '../../src/shared/display-api.ts';
 import { indexTimeline, recentOrderedIds } from '../../src/shared/ui/timeline-index.ts';
 import { extendTo, pruneToVisible } from '../../src/admin/selection.ts';
-import { nextAfterDeleting } from '../../src/admin/advance.ts';
+import { nextAfterDeleting } from '../../src/shared/ui/advance.ts';
 import { makeCatalog, makePhoto } from '../../fixtures/photos.ts';
 
 /**

@@ -1,6 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { UploadQueue, summarize } from '../../src/admin/upload/queue.ts';
-import type { QueueDependencies, QueueSnapshot } from '../../src/admin/upload/queue.ts';
+import { UploadQueue, summarize } from '../../src/shared/ui/upload/queue.ts';
+import type {
+  QueueDependencies,
+  QueueSnapshot,
+} from '../../src/shared/ui/upload/queue.ts';
 import type { ProcessOutcome } from '../../src/pipeline/index.ts';
 import { RENDITIONS } from '../../src/shared/constants.ts';
 import type { Rendition } from '../../src/shared/constants.ts';

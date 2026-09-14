@@ -7,8 +7,9 @@
  * the other's endpoints even by mistake. That is also why the shared UI needs
  * nothing injected to talk to its own API.
  *
- * Mutations are not here. The admin app's own client wraps this one and adds
- * them; the viewer has no writes at all.
+ * Mutations are not here. The ones both apps make — uploading, editing, the
+ * trash — are the shared curation client in `curation-api.ts`; the admin's own
+ * client wraps both and adds what only the administrator does.
  */
 
 import { appRoutes } from '../urls.ts';

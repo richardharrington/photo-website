@@ -18,6 +18,15 @@ export default defineConfig({
     outDir: `../../dist${env.appBase}`,
     emptyOutDir: true,
     sourcemap: false,
+    // libheif-js and the jSquash codecs inline their WebAssembly, and the family
+    // app uploads too (family-tier.md), so this bundle is legitimately large.
+    // Raise the warning threshold rather than splitting the pipeline out of the
+    // graph that needs it. The codecs load lazily, on first use.
+    chunkSizeWarningLimit: 8000,
+  },
+  worker: { format: 'es' },
+  optimizeDeps: {
+    exclude: ['libheif-js'],
   },
   server: { port: 5173 },
 });

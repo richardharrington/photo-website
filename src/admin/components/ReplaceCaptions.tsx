@@ -1,5 +1,5 @@
 import { derivativeUrl } from '../../shared/urls.ts';
-import { ConfirmDialog } from './Confirm.tsx';
+import { ConfirmDialog } from '../../shared/ui/Confirm.tsx';
 import type { CaptionPlan } from '../caption-apply.ts';
 
 interface ReplaceCaptionsProps {

@@ -9,13 +9,17 @@ import { MAX_CAPTION_LENGTH, normalizeCaption } from '../../shared/validation.ts
 import { generateConfirmationToken } from '../../shared/ids.ts';
 import { adminApi, routes } from '../api.ts';
 import type { InboxListing, InboxPart, InboxSubmission } from '../api.ts';
-import { createQueue } from '../upload/create.ts';
-import { isInFlight } from '../upload/queue.ts';
-import type { QueueItem, QueueSnapshot, UploadQueue } from '../upload/queue.ts';
+import { createQueue } from '../../shared/ui/upload/create.ts';
+import { isInFlight } from '../../shared/ui/upload/queue.ts';
+import type {
+  QueueItem,
+  QueueSnapshot,
+  UploadQueue,
+} from '../../shared/ui/upload/queue.ts';
 import { orientationTransform, readEmbeddedThumbnail } from '../inbox/thumbnail.ts';
 import type { PartPreview } from '../inbox/thumbnail.ts';
 import { decodePreview } from '../../pipeline/preview.ts';
-import { ConfirmDialog } from './Confirm.tsx';
+import { ConfirmDialog } from '../../shared/ui/Confirm.tsx';
 
 /** A stable empty listing, so a render with no data is not a new array. */
 const NO_SUBMISSIONS: readonly InboxSubmission[] = [];

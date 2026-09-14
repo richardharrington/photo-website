@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { PENDING_IMAGE, pendingPhoto } from '../../src/admin/upload/pending.ts';
-import type { QueueItem } from '../../src/admin/upload/queue.ts';
+import { PENDING_IMAGE, pendingPhoto } from '../../src/shared/ui/upload/pending.ts';
+import type { QueueItem } from '../../src/shared/ui/upload/queue.ts';
 import { RENDITIONS } from '../../src/shared/constants.ts';
 import type { Rendition } from '../../src/shared/constants.ts';
 import type { DerivativeDescriptor } from '../../src/shared/catalog.ts';

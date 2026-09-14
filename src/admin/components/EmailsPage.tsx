@@ -5,7 +5,7 @@ import { Layout } from '../../shared/ui/Layout.tsx';
 import { ErrorState, Loading } from '../../shared/ui/States.tsx';
 import { adminApi } from '../api.ts';
 import type { Recipient } from '../api.ts';
-import { ConfirmDialog } from './Confirm.tsx';
+import { ConfirmDialog } from '../../shared/ui/Confirm.tsx';
 
 /** A stable empty list, so a render with no data is not a new array. */
 const NO_RECIPIENTS: readonly Recipient[] = [];

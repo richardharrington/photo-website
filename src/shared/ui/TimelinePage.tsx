@@ -15,6 +15,7 @@
  */
 
 import { useLayoutEffect, useRef } from 'react';
+import type { Route } from './routes.ts';
 import type { ReactNode } from 'react';
 import type { Resource } from './useResource.ts';
 import { monthName } from '../datetime.ts';
@@ -296,4 +297,28 @@ export function TimelinePage({ resource, target, nav, above }: TimelinePageProps
       </div>
     </Layout>
   );
+}
+
+/**
+ * Which section of the one page a route is asking for. Both apps use it; the
+ * routes it excludes are the ones that do not scroll the timeline.
+ */
+export function targetOf(
+  route: Exclude<
+    Route,
+    { kind: 'not-found' | 'photo' | 'page' | 'recent' | 'recent-photo' }
+  >,
+): TimelineTarget {
+  switch (route.kind) {
+    case 'home':
+      return { kind: 'top' };
+    case 'year':
+      return { kind: 'year', year: route.year };
+    case 'month':
+      return { kind: 'month', year: route.year, month: route.month };
+    case 'day':
+      return { kind: 'day', year: route.year, month: route.month, day: route.day };
+    case 'undated':
+      return { kind: 'undated' };
+  }
 }

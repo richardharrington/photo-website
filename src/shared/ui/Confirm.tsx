@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import type { PreviewResult } from '../api.ts';
+import type { PreviewResult } from './curation-api.ts';
 
 interface ConfirmDialogProps {
   title: string;

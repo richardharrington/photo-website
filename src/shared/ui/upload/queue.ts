@@ -23,14 +23,14 @@
  * for the projection the grid renders.
  */
 
-import { UPLOAD_CONCURRENCY } from '../../shared/constants.ts';
-import type { Rendition } from '../../shared/constants.ts';
-import type { DerivativeDescriptor } from '../../shared/catalog.ts';
-import type { EncodedArtifact, SourceMetadata } from '../../pipeline/index.ts';
-import type { ProcessOutcome, ProcessedPhoto } from '../../pipeline/index.ts';
-import type { PhotoEdit } from '../../shared/ui/curation.ts';
-import type { PublicPhoto } from '../../shared/display-api.ts';
-import type { PrepareResult, CommitResult } from '../api.ts';
+import { UPLOAD_CONCURRENCY } from '../../constants.ts';
+import type { Rendition } from '../../constants.ts';
+import type { DerivativeDescriptor } from '../../catalog.ts';
+import type { EncodedArtifact, SourceMetadata } from '../../../pipeline/index.ts';
+import type { ProcessOutcome, ProcessedPhoto } from '../../../pipeline/index.ts';
+import type { PhotoEdit } from '../curation.ts';
+import type { PublicPhoto } from '../../display-api.ts';
+import type { PrepareResult, CommitResult } from '../curation-api.ts';
 
 export type ItemState =
   | 'queued'

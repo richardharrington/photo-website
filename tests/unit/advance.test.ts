@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nextAfterDeleting } from '../../src/admin/advance.ts';
+import { nextAfterDeleting } from '../../src/shared/ui/advance.ts';
 
 /**
  * Where the photo view lands after a delete.
