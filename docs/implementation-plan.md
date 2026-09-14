@@ -78,8 +78,11 @@ src/
 netlify/
   edge-functions/gate.ts     opaque-path gate and rewrite
   functions/
-    display.ts               read-only catalog/photo API
-    admin.ts                 batch/commit, edit, trash, restore, export API
+    display.ts               reads, downloads, and the curation routes
+    admin.ts                 the same, plus captions, permanent delete,
+                             export, Emails, and the Inbox
+    lib/read-routes.ts       the read projections both Functions answer
+    lib/curation-routes.ts   upload, edit, trash, restore: both Functions
 worker/
   src/index.ts               R2 asset gateway and scheduled maintenance
 scripts/
@@ -314,10 +317,26 @@ Functions return generic 404 for an unavailable/unauthorized resource.
 
 ### Display API
 
+The display link is the family link (family-tier.md #1), and display mode
+answers:
+
 - the whole timeline in one response, which is all either app reads
   (decisions.md #25–26);
 - photo detail and sibling navigation;
-- short-lived signed download URL for a photo's full-resolution JPEG.
+- short-lived signed download URL for a photo's full-resolution JPEG;
+- the curation routes: the trash listing and count, begin-batch, prepare,
+  commit, edit, the trash preview and confirm, and restore.
+
+The reads live in `netlify/functions/lib/read-routes.ts` and the curation
+routes in `netlify/functions/lib/curation-routes.ts`, beside it; both
+Functions dispatch to both, and `display.ts` imports nothing else that
+mutates. Everything else the admin Function answers — bulk captions,
+permanent deletion, the export, attribution, Emails, and the Inbox — is
+refused to display mode with the plain 404, and
+`tests/unit/curation-routes.test.ts` asserts both directions against the
+module's `CURATION_ROUTES` list. Each audit event a curation route writes
+records `via: 'display-api'` or `'admin-api'` from the mode `checkAccess`
+established.
 
 `/timeline` and `/photo` are the only projections. Both apps are one scrolling
 page, so the level-by-level hierarchy, day, and Undated queries have nothing

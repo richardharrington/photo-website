@@ -25,6 +25,7 @@ import type {
   WriteCondition,
 } from '../../../src/shared/store.ts';
 import type { ConditionalWriteResult } from '../../../src/shared/store.ts';
+import { requiredEnv } from './http.ts';
 
 export interface S3StoreConfig {
   endpoint: string;
@@ -33,6 +34,19 @@ export interface S3StoreConfig {
   secretAccessKey: string;
   /** R2 ignores the region but the SDK requires one. */
   region?: string;
+}
+
+/**
+ * The bucket's connection details, from the environment. Shared by both
+ * Functions and by the upload presigner, which signs against the same bucket.
+ */
+export function s3Config(): S3StoreConfig {
+  return {
+    endpoint: requiredEnv('R2_S3_ENDPOINT'),
+    bucket: requiredEnv('R2_BUCKET'),
+    accessKeyId: requiredEnv('R2_ACCESS_KEY_ID'),
+    secretAccessKey: requiredEnv('R2_SECRET_ACCESS_KEY'),
+  };
 }
 
 /** True for the "someone else wrote first" outcome, and nothing else. */

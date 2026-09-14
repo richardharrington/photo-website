@@ -672,37 +672,24 @@ async function handleInbox(
 }
 
 // ---------------------------------------------------------------------------
-// Admin API
+// Curation routes: what both bases answer
 // ---------------------------------------------------------------------------
 
-interface Body {
-  [key: string]: unknown;
-}
-
-async function handleAdmin(
+/**
+ * The fixture's stand-in for `netlify/functions/lib/curation-routes.ts`.
+ *
+ * It must answer exactly `CURATION_ROUTES` — no more, since the display base
+ * dispatches here and a wider list would let the family app work locally
+ * against a route production refuses, and no fewer, which is the bug
+ * `read-routes.ts` records. `tests/unit/fixture-server.test.ts` holds it to
+ * that list in both directions.
+ */
+async function handleCuration(
   route: string,
   method: string,
   body: Body,
-  url: URL,
   res: ServerResponse,
 ): Promise<boolean> {
-  // Answered here and nowhere else. This handler is otherwise more permissive
-  // than production — an unrecognized GET falls through to handleDisplay,
-  // which once hid the admin API missing the viewer's read routes entirely
-  // (CLAUDE.md) — so an unknown /emails or /inbox path is a 404 here,
-  // as it is in the real function.
-  if (route === '/emails' || route.startsWith('/emails/')) {
-    if (await handleEmails(route, method, body, res)) return true;
-    sendNotFound(res);
-    return true;
-  }
-
-  if (route === '/inbox' || route.startsWith('/inbox/')) {
-    if (await handleInbox(route, method, body, url, res)) return true;
-    sendNotFound(res);
-    return true;
-  }
-
   if (method === 'GET') {
     if (route === '/trash') {
       const catalog = await currentCatalog();
@@ -729,28 +716,7 @@ async function handleAdmin(
       return true;
     }
 
-    if (route === '/export') {
-      const catalog = await currentCatalog();
-      res.writeHead(200, {
-        'content-type': 'application/json; charset=utf-8',
-        'content-disposition': 'attachment; filename="photo-catalog.json"',
-      });
-      res.end(JSON.stringify(catalog, null, 2));
-      return true;
-    }
-
-    const attribution = /^\/attribution\/([0-9a-f]{32})$/.exec(route);
-    if (attribution) {
-      const photo = (await currentCatalog()).photos[attribution[1]!];
-      const id = photo?.submittedBy ?? null;
-      const address = id
-        ? listFakeAddresses().find((candidate) => candidate.id === id)
-        : undefined;
-      sendJson(res, 200, { email: address?.email ?? null });
-      return true;
-    }
-
-    return handleDisplay(route, res);
+    return false;
   }
 
   if (method !== 'POST') return false;
@@ -869,24 +835,6 @@ async function handleAdmin(
       return true;
     }
 
-    case '/captions': {
-      // Hoisted out of the mutation, as production does: a retry after a
-      // conflict must write the same instant and audit id.
-      const at = now();
-      const auditId = generateAuditId();
-      const outcome = await mutateCatalog(store, context, (catalog) =>
-        applyCaptions(catalog, body['changes'], at, auditId),
-      );
-      if (outcome.status === 'invalid') sendBadRequest(res, outcome.error);
-      else {
-        sendJson(res, 200, {
-          updated: outcome.updated.map(toPublicPhoto),
-          skipped: outcome.skipped,
-        });
-      }
-      return true;
-    }
-
     case '/trash/preview': {
       const catalog = await currentCatalog();
       const photoIds = resolveSelection(catalog, body['selection'] as SelectionQuery);
@@ -922,38 +870,130 @@ async function handleAdmin(
       return true;
     }
 
-    case '/permanent-delete/preview': {
-      const selection = body['selection'] as SelectionQuery;
-      const ids =
-        selection.kind === 'ids'
-          ? resolveTrashedSelection(await currentCatalog(), selection.photoIds)
-          : [];
-      sendJson(res, 200, {
-        photoIds: ids,
-        count: ids.length,
-        expiresAt: Math.floor(Date.now() / 1000) + 600,
-        token: 'development-token',
-      });
-      return true;
-    }
-
-    case '/permanent-delete/confirm': {
-      const ids = (body['photoIds'] as string[]) ?? [];
-      const outcome = await mutateCatalog(store, context, (catalog) =>
-        permanentlyDeletePhotos(catalog, ids),
-      );
-      for (const id of outcome.affected) {
-        for (const rendition of Object.keys(RENDITION_SPECS)) {
-          uploadedObjects.delete(`${id}/${rendition}`);
-        }
-      }
-      sendJson(res, 200, { deleted: outcome.affected, count: outcome.affected.length });
-      return true;
-    }
-
     default:
       return false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Admin API
+// ---------------------------------------------------------------------------
+
+export interface Body {
+  [key: string]: unknown;
+}
+
+async function handleAdmin(
+  route: string,
+  method: string,
+  body: Body,
+  url: URL,
+  res: ServerResponse,
+): Promise<boolean> {
+  // Answered here and nowhere else. This handler is otherwise more permissive
+  // than production — an unrecognized GET falls through to handleDisplay,
+  // which once hid the admin API missing the viewer's read routes entirely
+  // (CLAUDE.md) — so an unknown /emails or /inbox path is a 404 here,
+  // as it is in the real function. The display base never reaches this
+  // handler at all.
+  if (route === '/emails' || route.startsWith('/emails/')) {
+    if (await handleEmails(route, method, body, res)) return true;
+    sendNotFound(res);
+    return true;
+  }
+
+  if (route === '/inbox' || route.startsWith('/inbox/')) {
+    if (await handleInbox(route, method, body, url, res)) return true;
+    sendNotFound(res);
+    return true;
+  }
+
+  if (method === 'GET') {
+    if (route === '/export') {
+      const catalog = await currentCatalog();
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8',
+        'content-disposition': 'attachment; filename="photo-catalog.json"',
+      });
+      res.end(JSON.stringify(catalog, null, 2));
+      return true;
+    }
+
+    const attribution = /^\/attribution\/([0-9a-f]{32})$/.exec(route);
+    if (attribution) {
+      const photo = (await currentCatalog()).photos[attribution[1]!];
+      const id = photo?.submittedBy ?? null;
+      const address = id
+        ? listFakeAddresses().find((candidate) => candidate.id === id)
+        : undefined;
+      sendJson(res, 200, { email: address?.email ?? null });
+      return true;
+    }
+  }
+
+  if (method === 'POST') {
+    switch (route) {
+      case '/captions': {
+        // Hoisted out of the mutation, as production does: a retry after a
+        // conflict must write the same instant and audit id.
+        const at = now();
+        const auditId = generateAuditId();
+        const outcome = await mutateCatalog(store, context, (catalog) =>
+          applyCaptions(catalog, body['changes'], at, auditId),
+        );
+        if (outcome.status === 'invalid') sendBadRequest(res, outcome.error);
+        else {
+          sendJson(res, 200, {
+            updated: outcome.updated.map(toPublicPhoto),
+            skipped: outcome.skipped,
+          });
+        }
+        return true;
+      }
+
+      case '/permanent-delete/preview': {
+        const selection = body['selection'] as SelectionQuery;
+        const ids =
+          selection.kind === 'ids'
+            ? resolveTrashedSelection(await currentCatalog(), selection.photoIds)
+            : [];
+        sendJson(res, 200, {
+          photoIds: ids,
+          count: ids.length,
+          expiresAt: Math.floor(Date.now() / 1000) + 600,
+          token: 'development-token',
+        });
+        return true;
+      }
+
+      case '/permanent-delete/confirm': {
+        const ids = (body['photoIds'] as string[]) ?? [];
+        const outcome = await mutateCatalog(store, context, (catalog) =>
+          permanentlyDeletePhotos(catalog, ids),
+        );
+        for (const id of outcome.affected) {
+          for (const rendition of Object.keys(RENDITION_SPECS)) {
+            uploadedObjects.delete(`${id}/${rendition}`);
+          }
+        }
+        sendJson(res, 200, {
+          deleted: outcome.affected,
+          count: outcome.affected.length,
+        });
+        return true;
+      }
+
+      default:
+        break;
+    }
+  }
+
+  if (await handleCuration(route, method, body, res)) return true;
+
+  // More permissive than production, deliberately and only for the admin: an
+  // unrecognized admin GET falls through to the display projections.
+  if (method === 'GET') return handleDisplay(route, res);
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -999,20 +1039,44 @@ async function handle(
   const api = /^\/([^/]+)\/api(\/.*)?$/.exec(path);
   if (!api) return false;
 
-  const base = api[1]!;
-  const route = api[2] ?? '/';
-  // Which app is asking is decided by the base path, exactly as the Edge
-  // Function decides access mode in production.
+  return dispatchApi(
+    api[1]!,
+    api[2] ?? '/',
+    method,
+    (await readBody(req)) as Body,
+    url,
+    res,
+  );
+}
+
+/**
+ * One API request, once the base and the route are split apart. Exported so
+ * the tier can be tested without a running dev server.
+ *
+ * Which app is asking is decided by the base path, exactly as the Edge
+ * Function decides access mode in production. The display base is the family
+ * link (family-tier.md #1): it answers the curation routes and the reads, and
+ * never calls `handleAdmin` for anything, so an admin-only route under it is
+ * the plain 404 here as it is in production.
+ */
+export async function dispatchApi(
+  base: string,
+  route: string,
+  method: string,
+  body: Body,
+  url: URL,
+  res: ServerResponse,
+): Promise<boolean> {
   const isAdmin = base === (process.env.ADMIN_PATH || 'dev-admin-path');
 
   if (isAdmin) {
-    return handleAdmin(route, method, (await readBody(req)) as Body, url, res);
-  }
-  if (method !== 'GET') {
+    if (await handleAdmin(route, method, body, url, res)) return true;
     sendNotFound(res);
     return true;
   }
-  if (await handleDisplay(route, res)) return true;
+
+  if (await handleCuration(route, method, body, res)) return true;
+  if (method === 'GET' && (await handleDisplay(route, res))) return true;
 
   sendNotFound(res);
   return true;

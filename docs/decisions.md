@@ -1400,3 +1400,49 @@ its ordering, and its URLs are unchanged.
     above the photo view, so Undo can change the caption of the photograph on
     screen, and a form initialised once would have reported "Unsaved changes"
     and locked the arrows over an edit nobody made.
+
+## Letting the family add photos — 2026-09-14
+
+90. **The display link is the family link.** Anyone holding it can add
+    photographs, correct any date, time, or caption, move any photograph to
+    the trash, and restore from the trash. Permanent deletion, the Inbox, the
+    Emails page, the catalog export, and all selection stay with the admin
+    link (docs/specs/family-tier.md).
+
+    The reasons, in the order the owner ranked them: family members kept
+    asking why they could not add photographs; the admin site's selection
+    bar, Inbox, Emails, and export are clutter for someone who wants to add a
+    few; a mis-click that trashes a photograph is cheap to undo because the
+    trash is reversible; and the Emails page lists the family's addresses,
+    which is nobody's business but the administrator's.
+
+    Rejected: a per-person contributor token, because the owner does not want
+    to manage links and family members should be able to forward theirs; a
+    browser-remembered notion of "my uploads", which vanishes on a new phone
+    and is defeated by a shared laptop; and handing out the admin link with a
+    trimmed mode, which would need everyone to get a new link and would be
+    decoration, since that URL still reaches every route. So there is still
+    no third path, mode, or build, and no ownership: every family member acts
+    with the same rights, and the audit log records which link an act came
+    through (`display-api` or `admin-api`) and nothing about who.
+
+    The server enforces the tier, not the page. The curation routes moved out
+    of `admin.ts` into `netlify/functions/lib/curation-routes.ts`, which both
+    Functions dispatch to, unchanged in behaviour; `display.ts` dispatches to
+    it and to nothing admin-only, so a display-mode request for an admin-only
+    route is the same plain 404 as an unknown path. A test drives both real
+    handlers over an in-memory store and asserts the whitelist in both
+    directions, and a second holds the fixture server to the same list — its
+    display branch used to refuse every non-GET, and a display branch that
+    reached `handleAdmin` would have been more permissive than production in
+    exactly the way that has hidden bugs before. The preview/confirm token
+    helpers moved to `lib/confirmation.ts`; a trash token still cannot
+    confirm a permanent delete.
+
+    **The display CSP blocked uploading, and had to be unified.** The gate
+    gave display mode a policy with no `'wasm-unsafe-eval'`, no R2 origin in
+    `connect-src`, and no `blob:` or `data:` images, so the pipeline could not
+    decode, could not preview, and could not PUT. Nothing sets a CSP locally,
+    so a family app that uploaded fine in development would have failed in
+    production with a console error and no upload. Both modes now get the
+    admin's policy, and the gate test asserts the two are identical.

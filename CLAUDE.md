@@ -78,6 +78,10 @@ There is no authentication. Two independent high-entropy path segments
 (`DISPLAY_PATH`, `ADMIN_PATH`) are the access control, and photo capability
 URLs work the same way.
 
+Display mode may mutate: it reaches the curation routes in
+`netlify/functions/lib/curation-routes.ts` and nothing admin-only. The route
+lists in that module and in `admin.ts` are the tier; a test asserts them.
+
 `netlify/edge-functions/gate.ts` runs before everything and is the only thing
 that assigns an access mode. It forwards `x-photo-access-mode` plus
 `x-photo-gate-secret` (`INTERNAL_GATE_SECRET`); the Functions re-verify both in
@@ -157,6 +161,10 @@ fixture server.
   and Workers globals** — it is compiled into all three targets. `ui/` is the
   only place under `src/shared/` where DOM globals are allowed;
   `src/shared/timeline-patch.ts` is not in it and must stay runtime-neutral.
+- **Display mode is a tier, not a read-only mode.** The display Function
+  answers the curation routes; the fixture server's display branch must answer
+  exactly the same list, and both must refuse every admin-only route with the
+  plain 404.
 - **`full` is excluded from `DISPLAY_RENDITIONS`.** The full-resolution JPEG is
   reachable only through a short-lived HMAC-signed URL, never from a photo ID.
 - Objects never move. Trash is a catalog field; only permanent deletion or the
@@ -185,6 +193,12 @@ fixture server.
 
 Unit tests are Vitest, Node environment by default; component tests opt in
 per file with a `@vitest-environment happy-dom` docblock.
+
+`tests/unit/curation-routes.test.ts` is the whitelist test: it drives both
+real Functions through `createHandler` over an in-memory store and asserts
+that display mode reaches every `CURATION_ROUTES` entry and gets the plain 404
+for every admin-only route. `fixture-server.test.ts` holds the dev fixture to
+the same list.
 
 Conditional-write semantics are tested against `fixtures/in-memory-store.ts`
 with explicitly asserted behavior, deliberately **not** Miniflare's emulated R2

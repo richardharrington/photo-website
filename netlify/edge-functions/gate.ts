@@ -15,7 +15,7 @@ import {
   withHeaders,
 } from '../../src/shared/headers.ts';
 import { routeRequest, secureEquals } from '../lib/routing.ts';
-import type { AccessMode, GateConfig } from '../lib/routing.ts';
+import type { GateConfig } from '../lib/routing.ts';
 
 /**
  * Header carrying the access mode from the gate to the function. The function
@@ -66,17 +66,22 @@ function robotsResponse(): Response {
   });
 }
 
-function htmlHeaders(mode: AccessMode): Record<string, string> {
+/**
+ * The headers for either app's HTML shell. One policy for both modes: the
+ * family app uploads too (family-tier.md #10), so both run the WebAssembly
+ * codecs, PUT to R2, and show blob: previews. The display policy once omitted
+ * all three, which let uploading work in development — where nothing sets a
+ * CSP — and fail silently in production.
+ */
+function htmlHeaders(): Record<string, string> {
   const workerOrigin = originOf(env('WORKER_BASE_URL')) ?? "'none'";
-  const isAdmin = mode === 'admin';
   return {
     ...baseSecurityHeaders(),
     'Content-Security-Policy': contentSecurityPolicy({
       workerOrigin,
-      // Only the admin app uploads, previews local files, or runs WASM codecs.
-      r2UploadOrigin: isAdmin ? originOf(env('R2_S3_ENDPOINT')) : null,
-      allowWasm: isAdmin,
-      allowLocalImageSources: isAdmin,
+      r2UploadOrigin: originOf(env('R2_S3_ENDPOINT')),
+      allowWasm: true,
+      allowLocalImageSources: true,
     }),
     // The HTML shell is tiny and must never be stale after a deploy; the
     // fingerprinted assets it references carry the long cache lifetimes.
@@ -127,7 +132,7 @@ export default async function gate(
       target.pathname = decision.indexPath;
       const response = await context.rewrite(target);
       if (response.status === 404) return plainNotFound();
-      return withHeaders(response, htmlHeaders(decision.mode));
+      return withHeaders(response, htmlHeaders());
     }
 
     case 'api': {

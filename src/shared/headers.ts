@@ -26,18 +26,18 @@ export interface CspOptions {
   /** Origin of the Cloudflare asset Worker, e.g. `https://x.workers.dev`. */
   workerOrigin: string;
   /**
-   * Origin the admin browser PUTs artifacts to. Admin app only: the display
-   * app has no upload path and must not be allowed to reach R2 at all.
+   * Origin the browser PUTs artifacts to. Both apps upload (family-tier.md
+   * #10), so both pass it.
    */
   r2UploadOrigin?: string | null;
   /**
-   * Admin only. The image pipeline compiles WebAssembly codecs, which needs
+   * Both apps. The image pipeline compiles WebAssembly codecs, which needs
    * `'wasm-unsafe-eval'`. libheif-js and the jSquash codecs inline their
    * WebAssembly into the JS bundle, so no extra origin is needed alongside it
    * (implementation-plan.md, "Opaque route handling").
    */
   allowWasm?: boolean;
-  /** Admin only: local file previews and pipeline output use blob:/data: URLs. */
+  /** Both apps: local file previews and pipeline output use blob:/data: URLs. */
   allowLocalImageSources?: boolean;
 }
 

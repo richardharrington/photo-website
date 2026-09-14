@@ -1,9 +1,16 @@
 /**
- * The read-only display API.
+ * The display API, which is the family's API (family-tier.md #1).
+ *
+ * It answers the read routes, `/download/<id>`, and the curation routes in
+ * `lib/curation-routes.ts` — adding, editing, moving to the trash, and
+ * restoring — and nothing else. Permanent deletion, the Inbox, Emails, and the
+ * export live only in `admin.ts`, and nothing admin-only is imported here, so
+ * a display-mode request for one of them is the plain 404 by construction.
  *
  * Thin on purpose: the projection from catalog to response lives in
- * src/shared/display-api.ts, so production, the development fixture server,
- * and the tests all answer with the same code.
+ * src/shared/display-api.ts, and the mutations in the shared route module, so
+ * production, the development fixture server, and the tests all answer with
+ * the same code.
  */
 
 import { getLivePhoto } from '../../src/shared/catalog.ts';
@@ -11,8 +18,10 @@ import { SIGNED_URL_TTL_SECONDS } from '../../src/shared/constants.ts';
 import { isValidPhotoId } from '../../src/shared/ids.ts';
 import { assetGrantPath, signAssetGrant } from '../../src/shared/signing.ts';
 import { loadCatalog } from '../../src/shared/catalog-repository.ts';
-import { S3ObjectStore } from './lib/s3-store.ts';
+import type { ObjectStore } from '../../src/shared/store.ts';
+import { S3ObjectStore, s3Config } from './lib/s3-store.ts';
 import { readRoute } from './lib/read-routes.ts';
+import { curationRoute } from './lib/curation-routes.ts';
 import {
   checkAccess,
   json,
@@ -25,40 +34,44 @@ import {
   subPath,
 } from './lib/http.ts';
 
-function store(): S3ObjectStore {
-  return new S3ObjectStore({
-    endpoint: requiredEnv('R2_S3_ENDPOINT'),
-    bucket: requiredEnv('R2_BUCKET'),
-    accessKeyId: requiredEnv('R2_ACCESS_KEY_ID'),
-    secretAccessKey: requiredEnv('R2_SECRET_ACCESS_KEY'),
-  });
-}
-
 const DOWNLOAD_ROUTE = /^\/download\/([0-9a-f]{32})$/;
 
-export default async function handler(request: Request): Promise<Response> {
-  const refusal = checkAccess(request, 'display');
-  if (refusal) return refusal;
+/**
+ * The handler, over whichever store it is given. Production binds it to R2
+ * below; the whitelist test binds it to an in-memory store.
+ */
+export function createHandler(store: () => ObjectStore) {
+  return async function handler(request: Request): Promise<Response> {
+    const refusal = checkAccess(request, 'display');
+    if (refusal) return refusal;
 
-  if (request.method !== 'GET') return notFound();
+    const path = subPath(request, 'display');
 
-  const path = subPath(request, 'display');
+    try {
+      // Before the reads, only so a trash listing does not load the catalog
+      // twice; the two route lists are disjoint.
+      const curation = await curationRoute(request, path, 'display', store);
+      if (curation) return curation;
 
-  try {
-    const { catalog } = await loadCatalog(store(), nowIso);
+      if (request.method !== 'GET') return notFound();
 
-    const read = readRoute(catalog, path, nowMs());
-    if (read) return read;
+      const { catalog } = await loadCatalog(store(), nowIso);
 
-    const download = DOWNLOAD_ROUTE.exec(path);
-    if (download) return downloadLink(catalog, download[1]!);
+      const read = readRoute(catalog, path, nowMs());
+      if (read) return read;
 
-    return notFound();
-  } catch (error) {
-    console.error('Display API failure', error);
-    return serverError();
-  }
+      const download = DOWNLOAD_ROUTE.exec(path);
+      if (download) return downloadLink(catalog, download[1]!);
+
+      return notFound();
+    } catch (error) {
+      console.error('Display API failure', error);
+      return serverError();
+    }
+  };
 }
+
+export default createHandler(() => new S3ObjectStore(s3Config()));
 
 /**
  * Mint a short-lived signed URL for the full-resolution JPEG.

@@ -30,6 +30,15 @@ describe('makeAuditEvent', () => {
     expect(event.changes).not.toBe(changes);
   });
 
+  it('defaults to the admin API, and accepts the display API', () => {
+    // The default is kept so nothing else moves; the curation routes never
+    // rely on it (curation-routes.test.ts asserts what they write).
+    expect(makeAuditEvent('trash', [], { at }).via).toBe('admin-api');
+    expect(makeAuditEvent('trash', [], { at, via: 'display-api' }).via).toBe(
+      'display-api',
+    );
+  });
+
   it('omits changes when there are none', () => {
     const event = makeAuditEvent('trash', ['a'.repeat(32)], { at, id: 'audit2' });
     expect('changes' in event).toBe(false);

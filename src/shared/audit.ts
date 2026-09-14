@@ -50,8 +50,12 @@ export interface AuditEvent {
   at: string;
   action: AuditAction;
   photoIds: string[];
-  /** How the change arrived. Not a claim about who made it. */
-  via: 'admin-api' | 'scheduled-maintenance' | 'email';
+  /**
+   * How the change arrived. Not a claim about who made it: `display-api` is
+   * anyone holding the family link, and `admin-api` anyone holding the admin
+   * link (family-tier.md #9).
+   */
+  via: 'admin-api' | 'display-api' | 'scheduled-maintenance' | 'email';
   before?: AuditMetadata;
   after?: AuditMetadata;
   /** Per-photo captions, for an event that changed several at once. */

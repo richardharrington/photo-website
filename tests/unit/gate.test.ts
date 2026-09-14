@@ -110,24 +110,32 @@ describe('app shell', () => {
     expect(calls.rewrites).toEqual([`/${DISPLAY_PATH}/index.html`]);
   });
 
-  it('sends a strict CSP with the display app HTML', async () => {
+  async function cspFor(path: string): Promise<string> {
     const { context } = makeContext();
-    const response = await gate(request(`/${DISPLAY_PATH}/`), context);
-    const csp = response.headers.get('Content-Security-Policy') ?? '';
+    const response = await gate(request(path), context);
+    return response.headers.get('Content-Security-Policy') ?? '';
+  }
+
+  /**
+   * The family app uploads (family-tier.md #10). Locally nothing sets a CSP,
+   * so a display policy missing any of these lets uploading work in
+   * development and fail silently in production; this is the only guard.
+   */
+  it('lets the display app run the pipeline and upload', async () => {
+    const csp = await cspFor(`/${DISPLAY_PATH}/`);
 
     expect(csp).toContain("default-src 'self'");
-    expect(csp).toContain("img-src 'self' https://photo-assets.example.workers.dev");
-    expect(csp).not.toContain('wasm-unsafe-eval');
-    expect(csp).not.toContain('r2.cloudflarestorage.com');
+    expect(csp).toContain("script-src 'self' 'wasm-unsafe-eval'");
+    expect(csp).toContain(
+      "img-src 'self' https://photo-assets.example.workers.dev blob: data:",
+    );
+    expect(csp).toContain("connect-src 'self' https://abc123.r2.cloudflarestorage.com");
   });
 
-  it('widens the CSP only for the admin app', async () => {
-    const { context } = makeContext();
-    const response = await gate(request(`/${ADMIN_PATH}/`), context);
-    const csp = response.headers.get('Content-Security-Policy') ?? '';
-
-    expect(csp).toContain("'wasm-unsafe-eval'");
-    expect(csp).toContain('https://abc123.r2.cloudflarestorage.com');
+  it('sends both apps the same policy', async () => {
+    const display = await cspFor(`/${DISPLAY_PATH}/`);
+    expect(display).not.toBe('');
+    expect(await cspFor(`/${ADMIN_PATH}/`)).toBe(display);
   });
 
   it('keeps the HTML shell out of caches so a deploy takes effect', async () => {

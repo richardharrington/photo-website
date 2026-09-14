@@ -69,8 +69,10 @@ describe('contentSecurityPolicy', () => {
     expect(display.get('img-src')).toEqual(["'self'", WORKER]);
   });
 
-  it('never allows inline or eval-based scripts in the display app', () => {
+  it('never allows inline or eval-based scripts', () => {
     expect(display.get('script-src')).toEqual(["'self'"]);
+    // WebAssembly compilation is the one widening, and it is not eval.
+    expect(admin.get('script-src')).toEqual(["'self'", "'wasm-unsafe-eval'"]);
   });
 
   it('does not allow inline styles', () => {
@@ -91,18 +93,14 @@ describe('contentSecurityPolicy', () => {
     }
   });
 
-  it('gives the display app no route to R2 at all', () => {
-    // The viewer never uploads, so R2 has no business in its connect-src.
+  it('widens nothing it was not asked to', () => {
+    // Which apps ask is the gate's business; see gate.test.ts.
     expect(display.get('connect-src')).toEqual(["'self'"]);
+    expect(display.get('script-src')).not.toContain("'wasm-unsafe-eval'");
     expect(contentSecurityPolicy({ workerOrigin: WORKER })).not.toContain(R2);
   });
 
-  it('allows WebAssembly only in the admin app', () => {
-    expect(admin.get('script-src')).toContain("'wasm-unsafe-eval'");
-    expect(display.get('script-src')).not.toContain("'wasm-unsafe-eval'");
-  });
-
-  it('allows the admin app to reach R2 and to preview local files', () => {
+  it('allows an uploading app to reach R2 and to preview local files', () => {
     expect(admin.get('connect-src')).toEqual(["'self'", R2]);
     expect(admin.get('img-src')).toEqual(["'self'", WORKER, 'blob:', 'data:']);
   });

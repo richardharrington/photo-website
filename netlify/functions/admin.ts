@@ -1,6 +1,13 @@
 /**
  * The admin API: catalog reads and mutations only.
  *
+ * It answers everything the display API does — the read routes and the
+ * curation routes in `lib/curation-routes.ts`, through the same code — plus
+ * what only the administrator may do: permanent deletion, bulk captions, the
+ * catalog export, attribution, the Emails page, and the Inbox. Those are
+ * handled in this file and nowhere else, which is what keeps them out of
+ * display mode (family-tier.md #2, #4).
+ *
  * It never touches image bytes. The browser encodes the four artifacts and
  * PUTs them straight to R2 with the presigned URLs this issues; the server's
  * whole role is to hand out those URLs, verify the objects landed, and
@@ -9,50 +16,25 @@
 
 import {
   INBOX_CLAIM_TTL_MINUTES,
-  RENDITIONS,
   SIGNED_URL_TTL_SECONDS,
-  photoObjectKey,
   submissionPartKey,
 } from '../../src/shared/constants.ts';
-import type { Rendition } from '../../src/shared/constants.ts';
-import {
-  findByContentHash,
-  getLivePhoto,
-  trashedPhotos,
-} from '../../src/shared/catalog.ts';
-import type { DerivativeDescriptor } from '../../src/shared/catalog.ts';
+import { getLivePhoto } from '../../src/shared/catalog.ts';
 import { loadCatalog, mutateCatalog } from '../../src/shared/catalog-repository.ts';
 import {
   applyCaptions,
-  beginBatch,
-  commitPhoto,
-  editPhotoMetadata,
   objectKeysFor,
   permanentlyDeletePhotos,
-  resolveSelection,
   resolveTrashedSelection,
-  restorePhotos,
-  trashPhotos,
 } from '../../src/shared/admin-operations.ts';
 import type { SelectionQuery } from '../../src/shared/admin-operations.ts';
-import {
-  auditMetadataOf,
-  makeAuditEvent,
-  writeAuditEvent,
-} from '../../src/shared/audit.ts';
-import {
-  generateAuditId,
-  generatePhotoId,
-  isValidPhotoId,
-} from '../../src/shared/ids.ts';
-import { downloadFilenameFor } from '../../src/shared/filename.ts';
+import { makeAuditEvent, writeAuditEvent } from '../../src/shared/audit.ts';
+import { generateAuditId, isValidPhotoId } from '../../src/shared/ids.ts';
 import {
   NOTIFICATION_TEST_TTL_SECONDS,
   assetGrantPath,
   signAssetGrant,
-  signConfirmation,
   signNotificationTest,
-  verifyConfirmation,
 } from '../../src/shared/signing.ts';
 import {
   cloudflareAddresses,
@@ -83,9 +65,12 @@ import {
 } from '../../src/shared/inbox-repository.ts';
 import { claimAgeMs, isClaimLive } from '../../src/shared/submissions.ts';
 import type { Submission } from '../../src/shared/submissions.ts';
-import { S3ObjectStore } from './lib/s3-store.ts';
+import type { ObjectStore } from '../../src/shared/store.ts';
+import { S3ObjectStore, s3Config } from './lib/s3-store.ts';
 import { readRoute } from './lib/read-routes.ts';
-import { presignedGetUrl, presignedUploadUrls } from './lib/presign.ts';
+import { curationRoute } from './lib/curation-routes.ts';
+import { issueConfirmation, readConfirmation } from './lib/confirmation.ts';
+import { presignedGetUrl } from './lib/presign.ts';
 import {
   badRequest,
   checkAccess,
@@ -100,9 +85,6 @@ import {
   subPath,
 } from './lib/http.ts';
 
-/** How long a preview's confirmation token stays valid. */
-const CONFIRMATION_TTL_SECONDS = 10 * 60;
-
 /**
  * How long to wait on the Worker for a test send.
  *
@@ -115,348 +97,94 @@ const CONFIRMATION_TTL_SECONDS = 10 * 60;
  */
 const TEST_SEND_TIMEOUT_MS = 8_000;
 
-function s3Config() {
-  return {
-    endpoint: requiredEnv('R2_S3_ENDPOINT'),
-    bucket: requiredEnv('R2_BUCKET'),
-    accessKeyId: requiredEnv('R2_ACCESS_KEY_ID'),
-    secretAccessKey: requiredEnv('R2_SECRET_ACCESS_KEY'),
+/**
+ * The handler, over whichever store it is given. Production binds it to R2
+ * below; the whitelist test binds it to an in-memory store.
+ */
+export function createHandler(store: () => ObjectStore) {
+  return async function handler(request: Request): Promise<Response> {
+    const refusal = checkAccess(request, 'admin');
+    if (refusal) return refusal;
+
+    const path = subPath(request, 'admin');
+    const method = request.method;
+
+    try {
+      if (method === 'GET' && path === '/export') return exportCatalog(store);
+      if (method === 'GET' && path === '/emails') return listEmails(store);
+      if (method === 'GET' && path === '/inbox') return listInbox(store);
+      if (method === 'GET' && path === '/inbox/count') return inboxCount(store);
+      if (method === 'GET' && path === '/inbox/part-url') {
+        return inboxPartUrl(new URL(request.url), store);
+      }
+
+      const download = /^\/download\/([0-9a-f]{32})$/.exec(path);
+      if (method === 'GET' && download) return downloadLink(download[1]!, store);
+
+      const attribution = /^\/attribution\/([0-9a-f]{32})$/.exec(path);
+      if (method === 'GET' && attribution) {
+        return photoAttribution(attribution[1]!, store);
+      }
+
+      // Everything the family link may do, answered by the same module the
+      // display function uses. Before the reads only so a trash listing does not
+      // load the catalog twice; the route lists are disjoint.
+      const curation = await curationRoute(request, path, 'admin', store);
+      if (curation) return curation;
+
+      // The admin app browses through the viewer's own projections; see
+      // lib/read-routes.ts for why both functions must answer these.
+      if (method === 'GET') {
+        const { catalog } = await loadCatalog(store(), nowIso);
+        const read = readRoute(catalog, path, nowMs());
+        if (read) return read;
+      }
+
+      if (method !== 'POST') return notFound();
+
+      switch (path) {
+        case '/captions':
+          return await handleCaptions(request, store);
+        case '/permanent-delete/preview':
+          return await handlePermanentDeletePreview(request, store);
+        case '/permanent-delete/confirm':
+          return await handlePermanentDeleteConfirm(request, store);
+        case '/emails/add':
+          return await handleAddRecipient(request, store);
+        case '/emails/remove':
+          return await handleRemoveRecipient(request, store);
+        case '/emails/set-enabled':
+          return await handleSetEnabled(request, 'enabled', store);
+        case '/emails/set-submit':
+          return await handleSetEnabled(request, 'canSubmit', store);
+        case '/emails/set-reviews':
+          return await handleSetEnabled(request, 'reviewsInbox', store);
+        case '/inbox/claim':
+          return await handleInboxClaim(request, store);
+        case '/inbox/resolve':
+          return await handleInboxResolve(request, 'accepted', store);
+        case '/inbox/discard':
+          return await handleInboxResolve(request, 'discarded', store);
+        case '/emails/test':
+          return await handleSendTest(request);
+        default:
+          return notFound();
+      }
+    } catch (error) {
+      // Cloudflare knows why it refused an address and this code does not, so
+      // its wording reaches the administrator rather than a generic failure.
+      if (error instanceof CloudflareApiError) return badRequest(error.message);
+      console.error('Admin API failure', error);
+      return serverError();
+    }
   };
 }
 
-function store(): S3ObjectStore {
-  return new S3ObjectStore(s3Config());
-}
-
-export default async function handler(request: Request): Promise<Response> {
-  const refusal = checkAccess(request, 'admin');
-  if (refusal) return refusal;
-
-  const path = subPath(request, 'admin');
-  const method = request.method;
-
-  try {
-    if (method === 'GET' && path === '/export') return exportCatalog();
-    if (method === 'GET' && path === '/trash') return listTrash();
-    if (method === 'GET' && path === '/trash/count') return trashCount();
-    if (method === 'GET' && path === '/emails') return listEmails();
-    if (method === 'GET' && path === '/inbox') return listInbox();
-    if (method === 'GET' && path === '/inbox/count') return inboxCount();
-    if (method === 'GET' && path === '/inbox/part-url') {
-      return inboxPartUrl(new URL(request.url));
-    }
-
-    const download = /^\/download\/([0-9a-f]{32})$/.exec(path);
-    if (method === 'GET' && download) return downloadLink(download[1]!);
-
-    const attribution = /^\/attribution\/([0-9a-f]{32})$/.exec(path);
-    if (method === 'GET' && attribution) return photoAttribution(attribution[1]!);
-
-    // The admin app browses through the viewer's own projections; see
-    // lib/read-routes.ts for why both functions must answer these.
-    if (method === 'GET') {
-      const { catalog } = await loadCatalog(store(), nowIso);
-      const read = readRoute(catalog, path, nowMs());
-      if (read) return read;
-    }
-
-    if (method !== 'POST') return notFound();
-
-    switch (path) {
-      case '/begin-batch':
-        return await handleBeginBatch();
-      case '/prepare':
-        return await handlePrepare(request);
-      case '/commit':
-        return await handleCommit(request);
-      case '/edit':
-        return await handleEdit(request);
-      case '/captions':
-        return await handleCaptions(request);
-      case '/trash/preview':
-        return await handlePreview(request, 'trash');
-      case '/trash/confirm':
-        return await handleTrashConfirm(request);
-      case '/restore':
-        return await handleRestore(request);
-      case '/permanent-delete/preview':
-        return await handlePreview(request, 'permanent-delete');
-      case '/permanent-delete/confirm':
-        return await handlePermanentDeleteConfirm(request);
-      case '/emails/add':
-        return await handleAddRecipient(request);
-      case '/emails/remove':
-        return await handleRemoveRecipient(request);
-      case '/emails/set-enabled':
-        return await handleSetEnabled(request, 'enabled');
-      case '/emails/set-submit':
-        return await handleSetEnabled(request, 'canSubmit');
-      case '/emails/set-reviews':
-        return await handleSetEnabled(request, 'reviewsInbox');
-      case '/inbox/claim':
-        return await handleInboxClaim(request);
-      case '/inbox/resolve':
-        return await handleInboxResolve(request, 'accepted');
-      case '/inbox/discard':
-        return await handleInboxResolve(request, 'discarded');
-      case '/emails/test':
-        return await handleSendTest(request);
-      default:
-        return notFound();
-    }
-  } catch (error) {
-    // Cloudflare knows why it refused an address and this code does not, so
-    // its wording reaches the administrator rather than a generic failure.
-    if (error instanceof CloudflareApiError) return badRequest(error.message);
-    console.error('Admin API failure', error);
-    return serverError();
-  }
-}
+export default createHandler(() => new S3ObjectStore(s3Config()));
 
 // ---------------------------------------------------------------------------
-// Upload flow
+// Captions
 // ---------------------------------------------------------------------------
-
-async function handleBeginBatch(): Promise<Response> {
-  const batchSeq = await mutateCatalog(store(), { now: nowIso }, beginBatch, {
-    // The counter is bookkeeping, not curation; snapshotting every batch start
-    // would fill the snapshot prefix with states nobody would restore.
-    snapshot: false,
-  });
-  return json({ batchSeq });
-}
-
-interface PrepareBody {
-  contentHash?: string;
-  originalFilename?: string;
-}
-
-/**
- * Check for a duplicate and, if there is none, issue the four presigned PUTs.
- *
- * The duplicate answer here is advisory — it saves an upload nobody needs. The
- * *authoritative* check happens inside the commit's conditional write, which
- * is what closes the race between two concurrent uploads of the same file.
- */
-async function handlePrepare(request: Request): Promise<Response> {
-  const body = await readJson<PrepareBody>(request);
-  if (!body?.contentHash || !body.originalFilename) {
-    return badRequest('contentHash and originalFilename are required.');
-  }
-  if (!/^[0-9a-f]{64}$/.test(body.contentHash)) {
-    return badRequest('contentHash must be a SHA-256 hex digest.');
-  }
-
-  const { catalog } = await loadCatalog(store(), nowIso);
-  const existing = findByContentHash(catalog, body.contentHash);
-  if (existing) {
-    return json({
-      status: 'duplicate',
-      existingId: existing.id,
-      existingTrashed: existing.trashedAt !== null,
-    });
-  }
-
-  const photoId = generatePhotoId();
-  const uploads = await presignedUploadUrls(s3Config(), photoId);
-
-  return json({
-    status: 'ready',
-    photoId,
-    downloadFilename: downloadFilenameFor(body.originalFilename, photoId),
-    uploads,
-  });
-}
-
-interface CommitBody {
-  photoId?: string;
-  contentHash?: string;
-  originalFilename?: string;
-  sourceMimeType?: string;
-  captureDate?: string | null;
-  captureTime?: string | null;
-  captureUtcOffset?: string | null;
-  timestampSource?: string;
-  caption?: string | null;
-  batchSeq?: number;
-  selectionIndex?: number;
-  derivatives?: Record<string, DerivativeDescriptor>;
-  /** Set when this photograph came out of the Inbox; see below. */
-  submissionId?: string;
-  claimToken?: string;
-}
-
-const TIMESTAMP_SOURCES = new Set([
-  'exif-datetimeoriginal',
-  'exif-other',
-  'filename',
-  'manual',
-  'none',
-]);
-
-async function handleCommit(request: Request): Promise<Response> {
-  const body = await readJson<CommitBody>(request);
-  if (!body?.photoId || !isValidPhotoId(body.photoId)) {
-    return badRequest('A valid photoId is required.');
-  }
-  if (!body.contentHash || !/^[0-9a-f]{64}$/.test(body.contentHash)) {
-    return badRequest('contentHash must be a SHA-256 hex digest.');
-  }
-  if (typeof body.batchSeq !== 'number' || typeof body.selectionIndex !== 'number') {
-    return badRequest('batchSeq and selectionIndex are required.');
-  }
-  if (!body.originalFilename || !body.sourceMimeType) {
-    return badRequest('originalFilename and sourceMimeType are required.');
-  }
-  if (!TIMESTAMP_SOURCES.has(body.timestampSource ?? '')) {
-    return badRequest('timestampSource is not recognized.');
-  }
-
-  const derivatives = validateDerivatives(body.derivatives);
-  if (!derivatives) return badRequest('derivatives are missing or malformed.');
-
-  const objectStore = store();
-
-  /*
-   * Attribution, resolved here and never taken from the browser.
-   *
-   * The request names a submission and presents the claim it took on it; the
-   * *sender* comes from the stored record. A tab cannot therefore attribute a
-   * photograph to somebody who did not send it, and a tab whose claim was
-   * taken over cannot commit against that submission at all — which is the
-   * same uniform 404 every other refusal is.
-   */
-  let submittedBy: string | null = null;
-  if (body.submissionId !== undefined) {
-    if (!isValidSubmissionId(body.submissionId)) return notFound();
-    const loaded = await loadSubmission(objectStore, body.submissionId);
-    if (!loaded) return notFound();
-    if (loaded.submission.claim?.token !== (body.claimToken ?? '')) return notFound();
-    submittedBy = loaded.submission.submittedBy;
-  }
-
-  // Verify the objects actually landed before creating a record that promises
-  // they exist. A record whose images 404 is worse than no record.
-  for (const rendition of RENDITIONS) {
-    const head = await objectStore.head(photoObjectKey(body.photoId, rendition));
-    if (!head || head.size === 0) {
-      return badRequest(`The ${rendition} artifact was not uploaded.`);
-    }
-  }
-
-  const auditId = generateAuditId();
-  const at = nowIso();
-
-  const outcome = await mutateCatalog(objectStore, { now: nowIso }, (catalog) =>
-    commitPhoto(
-      catalog,
-      {
-        id: body.photoId!,
-        contentHash: body.contentHash!,
-        originalFilename: body.originalFilename!,
-        downloadFilename: downloadFilenameFor(body.originalFilename!, body.photoId!),
-        sourceMimeType: body.sourceMimeType!,
-        captureDate: body.captureDate ?? null,
-        captureTime: body.captureTime ?? null,
-        captureUtcOffset: body.captureUtcOffset ?? null,
-        timestampSource: body.timestampSource as never,
-        caption: body.caption ?? null,
-        submittedBy,
-        batchSeq: body.batchSeq!,
-        selectionIndex: body.selectionIndex!,
-        derivatives,
-      },
-      at,
-      auditId,
-    ),
-  );
-
-  if (outcome.status === 'duplicate') {
-    return json({
-      status: 'duplicate',
-      existingId: outcome.existingId,
-      existingTrashed: outcome.existingTrashed,
-    });
-  }
-
-  await writeAuditEvent(
-    objectStore,
-    makeAuditEvent('upload', [outcome.photo.id], {
-      at,
-      id: auditId,
-      after: auditMetadataOf(outcome.photo),
-      note: outcome.photo.originalFilename,
-    }),
-  );
-
-  return json({ status: 'created', photo: toPublicPhoto(outcome.photo) });
-}
-
-function validateDerivatives(
-  input: Record<string, DerivativeDescriptor> | undefined,
-): Record<Rendition, DerivativeDescriptor> | null {
-  if (!input) return null;
-  const out = {} as Record<Rendition, DerivativeDescriptor>;
-  for (const rendition of RENDITIONS) {
-    const descriptor = input[rendition];
-    if (
-      !descriptor ||
-      !Number.isInteger(descriptor.width) ||
-      !Number.isInteger(descriptor.height) ||
-      !Number.isInteger(descriptor.bytes) ||
-      descriptor.width <= 0 ||
-      descriptor.height <= 0 ||
-      descriptor.bytes <= 0
-    ) {
-      return null;
-    }
-    out[rendition] = {
-      width: descriptor.width,
-      height: descriptor.height,
-      bytes: descriptor.bytes,
-    };
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------------------
-// Metadata
-// ---------------------------------------------------------------------------
-
-interface EditBody {
-  photoId?: string;
-  date?: string | null;
-  time?: string | null;
-  caption?: string | null;
-}
-
-async function handleEdit(request: Request): Promise<Response> {
-  const body = await readJson<EditBody>(request);
-  if (!body?.photoId || !isValidPhotoId(body.photoId)) return notFound();
-
-  const objectStore = store();
-  const auditId = generateAuditId();
-  const at = nowIso();
-
-  const outcome = await mutateCatalog(objectStore, { now: nowIso }, (catalog) =>
-    editPhotoMetadata(catalog, body.photoId!, body, at, auditId),
-  );
-
-  if (outcome.status === 'not-found') return notFound();
-  if (outcome.status === 'invalid') return badRequest(outcome.error);
-
-  await writeAuditEvent(
-    objectStore,
-    makeAuditEvent('metadata-change', [outcome.photo.id], {
-      at,
-      id: auditId,
-      before: auditMetadataOf(outcome.previous),
-      after: auditMetadataOf(outcome.photo),
-    }),
-  );
-
-  return json({ photo: toPublicPhoto(outcome.photo) });
-}
 
 interface CaptionsBody {
   changes?: unknown;
@@ -472,7 +200,10 @@ interface CaptionsBody {
  * after the catalog write for the same reason `handleEdit`'s is: an event for
  * a write that lost its race would record something that never happened.
  */
-async function handleCaptions(request: Request): Promise<Response> {
+async function handleCaptions(
+  request: Request,
+  store: () => ObjectStore,
+): Promise<Response> {
   const body = await readJson<CaptionsBody>(request);
   if (!body) return badRequest('A list of caption changes is required.');
 
@@ -513,7 +244,7 @@ async function handleCaptions(request: Request): Promise<Response> {
 }
 
 // ---------------------------------------------------------------------------
-// Destructive actions: preview, then confirm against an explicit ID list
+// Permanent deletion: preview, then confirm against an explicit ID list
 // ---------------------------------------------------------------------------
 
 interface PreviewBody {
@@ -521,140 +252,37 @@ interface PreviewBody {
 }
 
 /**
- * Resolve a selection to explicit IDs and issue a token bound to that exact
- * list.
+ * Resolve an explicit list of trashed photos and issue a token bound to it.
  *
- * The confirm step never re-runs the query, so a photo committed between
- * preview and confirm cannot be swept in unseen (decisions.md #12).
+ * The confirm step never re-runs the query, so the list confirmed is the list
+ * the administrator looked at (decisions.md #12). The token is bound to
+ * `permanent-delete`, so a token from the trash preview the family link may
+ * call cannot confirm this (lib/confirmation.ts).
  */
-async function handlePreview(
+async function handlePermanentDeletePreview(
   request: Request,
-  action: 'trash' | 'permanent-delete',
+  store: () => ObjectStore,
 ): Promise<Response> {
   const body = await readJson<PreviewBody>(request);
   if (!body?.selection) return badRequest('A selection is required.');
 
   // Permanent delete only ever acts on an explicit list from the trash view.
   // A group query would be a way to destroy photos nobody looked at.
-  if (action === 'permanent-delete' && body.selection.kind !== 'ids') {
+  if (body.selection.kind !== 'ids') {
     return badRequest('Permanent deletion requires an explicit list of photo IDs.');
   }
 
   const { catalog } = await loadCatalog(store(), nowIso);
-
-  const photoIds =
-    body.selection.kind === 'ids' && action === 'permanent-delete'
-      ? resolveTrashedSelection(catalog, body.selection.photoIds)
-      : resolveSelection(catalog, body.selection);
-
-  const expiresAt = nowSeconds() + CONFIRMATION_TTL_SECONDS;
-  const token = await signConfirmation(requiredEnv('ASSET_SIGNING_KEY'), {
-    action,
-    photoIds,
-    expiresAt,
-  });
-
-  return json({ photoIds, count: photoIds.length, expiresAt, token });
+  return issueConfirmation(
+    'permanent-delete',
+    resolveTrashedSelection(catalog, body.selection.photoIds),
+  );
 }
 
-interface ConfirmBody {
-  photoIds?: string[];
-  expiresAt?: number;
-  token?: string;
-}
-
-async function readConfirmation(
+async function handlePermanentDeleteConfirm(
   request: Request,
-  action: 'trash' | 'permanent-delete',
-): Promise<{ photoIds: string[] } | Response> {
-  const body = await readJson<ConfirmBody>(request);
-  if (
-    !body?.token ||
-    typeof body.expiresAt !== 'number' ||
-    !Array.isArray(body.photoIds)
-  ) {
-    return badRequest(
-      'A confirmation token, its expiry, and its photo IDs are required.',
-    );
-  }
-  if (!body.photoIds.every((id) => typeof id === 'string' && isValidPhotoId(id))) {
-    return badRequest('photoIds contains a malformed ID.');
-  }
-
-  const verified = await verifyConfirmation(
-    requiredEnv('ASSET_SIGNING_KEY'),
-    { action, photoIds: body.photoIds, expiresAt: body.expiresAt },
-    body.token,
-    nowSeconds(),
-  );
-
-  if (!verified.ok) {
-    return badRequest(
-      verified.reason === 'expired'
-        ? 'That confirmation has expired. Please review the selection again.'
-        : 'That confirmation does not match the selection it was issued for.',
-    );
-  }
-
-  return { photoIds: body.photoIds };
-}
-
-async function handleTrashConfirm(request: Request): Promise<Response> {
-  const confirmation = await readConfirmation(request, 'trash');
-  if (confirmation instanceof Response) return confirmation;
-
-  const objectStore = store();
-  const auditId = generateAuditId();
-  const at = nowIso();
-
-  const outcome = await mutateCatalog(objectStore, { now: nowIso }, (catalog) =>
-    trashPhotos(catalog, confirmation.photoIds, at, auditId),
-  );
-
-  if (outcome.affected.length > 0) {
-    await writeAuditEvent(
-      objectStore,
-      makeAuditEvent('trash', outcome.affected, { at, id: auditId }),
-    );
-  }
-
-  return json({ trashed: outcome.affected, count: outcome.affected.length });
-}
-
-interface RestoreBody {
-  photoIds?: string[];
-}
-
-/**
- * Restore is not gated behind a confirmation: it is the *undo*, and it only
- * ever puts photos back.
- */
-async function handleRestore(request: Request): Promise<Response> {
-  const body = await readJson<RestoreBody>(request);
-  if (!Array.isArray(body?.photoIds)) return badRequest('photoIds is required.');
-  if (!body.photoIds.every((id) => typeof id === 'string' && isValidPhotoId(id))) {
-    return badRequest('photoIds contains a malformed ID.');
-  }
-
-  const objectStore = store();
-  const auditId = generateAuditId();
-  const at = nowIso();
-
-  const outcome = await mutateCatalog(objectStore, { now: nowIso }, (catalog) =>
-    restorePhotos(catalog, body.photoIds!, at, auditId),
-  );
-
-  if (outcome.affected.length > 0) {
-    await writeAuditEvent(
-      objectStore,
-      makeAuditEvent('restore', outcome.affected, { at, id: auditId }),
-    );
-  }
-
-  return json({ restored: outcome.affected, count: outcome.affected.length });
-}
-
-async function handlePermanentDeleteConfirm(request: Request): Promise<Response> {
+  store: () => ObjectStore,
+): Promise<Response> {
   const confirmation = await readConfirmation(request, 'permanent-delete');
   if (confirmation instanceof Response) return confirmation;
 
@@ -687,7 +315,10 @@ async function handlePermanentDeleteConfirm(request: Request): Promise<Response>
  * function, because the two are reachable only through their own secret paths.
  * Trashed photos are refused here exactly as they are for a viewer.
  */
-async function downloadLink(photoId: string): Promise<Response> {
+async function downloadLink(
+  photoId: string,
+  store: () => ObjectStore,
+): Promise<Response> {
   const { catalog } = await loadCatalog(store(), nowIso);
   const photo = getLivePhoto(catalog, photoId);
   if (!photo) return notFound();
@@ -708,54 +339,11 @@ async function downloadLink(photoId: string): Promise<Response> {
 }
 
 // ---------------------------------------------------------------------------
-// Trash listing and export
+// Export
 // ---------------------------------------------------------------------------
 
-/**
- * The trash view.
- *
- * Both images come as signed URLs because the Worker refuses capability-URL
- * access to a trashed photo: the thumbnail for the grid, and a `display-1280`
- * preview so the trash's photo view has something to show. It never signs a
- * full-resolution URL for one — a trashed photo must not be downloadable.
- */
-async function listTrash(): Promise<Response> {
-  const { catalog } = await loadCatalog(store(), nowIso);
-  const key = requiredEnv('ASSET_SIGNING_KEY');
-  const workerBase = requiredEnv('WORKER_BASE_URL').replace(/\/+$/, '');
-  const expiresAt = nowSeconds() + SIGNED_URL_TTL_SECONDS;
-
-  const signedUrl = async (photoId: string, rendition: string) => {
-    const grant = { photoId, rendition, expiresAt };
-    return `${workerBase}${assetGrantPath(grant, await signAssetGrant(key, grant))}`;
-  };
-
-  const items = await Promise.all(
-    trashedPhotos(catalog).map(async (photo) => ({
-      photo: toPublicPhoto(photo),
-      trashedAt: photo.trashedAt,
-      thumbnailUrl: await signedUrl(photo.id, 'thumb'),
-      previewUrl: await signedUrl(photo.id, 'display-1280'),
-    })),
-  );
-
-  items.sort((a, b) => (a.trashedAt! < b.trashedAt! ? 1 : -1));
-  return json({ items, expiresAt: new Date(expiresAt * 1000).toISOString() });
-}
-
-/**
- * Just the number, for the persistent Trash navigation link.
- *
- * Separate from listTrash so the header does not mint a signed thumbnail URL
- * per trashed photo on every page view.
- */
-async function trashCount(): Promise<Response> {
-  const { catalog } = await loadCatalog(store(), nowIso);
-  return json({ count: trashedPhotos(catalog).length });
-}
-
 /** The provider-independent curation export: the catalog exactly as stored. */
-async function exportCatalog(): Promise<Response> {
+async function exportCatalog(store: () => ObjectStore): Promise<Response> {
   const { catalog } = await loadCatalog(store(), nowIso);
   return new Response(JSON.stringify(catalog, null, 2), {
     status: 200,
@@ -830,7 +418,7 @@ function recipientRow(
   };
 }
 
-async function listEmails(): Promise<Response> {
+async function listEmails(store: () => ObjectStore): Promise<Response> {
   const [addresses, { state }] = await Promise.all([
     addressClient().list(),
     loadNotificationState(store()),
@@ -864,7 +452,10 @@ interface AddBody {
  * at worst missing an entry, which reads as switched off. The other order
  * would leave a state entry for an address that does not exist.
  */
-async function handleAddRecipient(request: Request): Promise<Response> {
+async function handleAddRecipient(
+  request: Request,
+  store: () => ObjectStore,
+): Promise<Response> {
   const body = await readJson<AddBody>(request);
   const email = readEmail(body?.email);
   if (email instanceof Response) return email;
@@ -910,7 +501,10 @@ interface RemoveBody {
  * The state entry goes with it and is not kept: an address deleted and re-added
  * gets a new Cloudflare id, and its old watermark should not survive that.
  */
-async function handleRemoveRecipient(request: Request): Promise<Response> {
+async function handleRemoveRecipient(
+  request: Request,
+  store: () => ObjectStore,
+): Promise<Response> {
   const body = await readJson<RemoveBody>(request);
   if (typeof body?.id !== 'string' || body.id === '') {
     return badRequest('An address id is required.');
@@ -961,6 +555,7 @@ type SwitchName = 'enabled' | 'canSubmit' | 'reviewsInbox';
 async function handleSetEnabled(
   request: Request,
   which: SwitchName,
+  store: () => ObjectStore,
 ): Promise<Response> {
   const body = await readJson<SetSwitchBody>(request);
   const email = readEmail(body?.email);
@@ -1081,7 +676,10 @@ async function handleSendTest(request: Request): Promise<Response> {
  * projection is a whitelist the viewer receives, and this is a fact about how
  * a photograph arrived, which is none of a viewer's business.
  */
-async function photoAttribution(photoId: string): Promise<Response> {
+async function photoAttribution(
+  photoId: string,
+  store: () => ObjectStore,
+): Promise<Response> {
   const { catalog } = await loadCatalog(store(), nowIso);
   const submittedBy = catalog.photos[photoId]?.submittedBy ?? null;
   if (!submittedBy) return json({ email: null });
@@ -1146,7 +744,7 @@ function inboxRow(
   };
 }
 
-async function listInbox(): Promise<Response> {
+async function listInbox(store: () => ObjectStore): Promise<Response> {
   const [submissions, addresses] = await Promise.all([
     listSubmissions(store()),
     addressClient().list(),
@@ -1167,7 +765,7 @@ async function listInbox(): Promise<Response> {
  * Separate from `listInbox` so a page view does not also fetch Cloudflare's
  * address list, exactly as `trashCount` is separate from `listTrash`.
  */
-async function inboxCount(): Promise<Response> {
+async function inboxCount(store: () => ObjectStore): Promise<Response> {
   const submissions = await listSubmissions(store());
   return json({ count: submissions.length });
 }
@@ -1183,7 +781,7 @@ async function inboxCount(): Promise<Response> {
  * Every refusal is the uniform 404, including an index that names no stored
  * part: a URL must not be signable for a key that does not exist.
  */
-async function inboxPartUrl(url: URL): Promise<Response> {
+async function inboxPartUrl(url: URL, store: () => ObjectStore): Promise<Response> {
   const submissionId = url.searchParams.get('submission') ?? '';
   const index = Number(url.searchParams.get('part'));
   if (!isValidSubmissionId(submissionId)) return notFound();
@@ -1230,7 +828,10 @@ function readClaim(body: ClaimBody | null): { id: string; token: string } | null
  * reported as `held` with its age, which is what lets the page say "being
  * added in another tab, started 3 minutes ago" rather than simply failing.
  */
-async function handleInboxClaim(request: Request): Promise<Response> {
+async function handleInboxClaim(
+  request: Request,
+  store: () => ObjectStore,
+): Promise<Response> {
   const claim = readClaim(await readJson<ClaimBody>(request));
   if (!claim) return notFound();
 
@@ -1270,6 +871,7 @@ interface ResolveBody extends ClaimBody {
 async function handleInboxResolve(
   request: Request,
   kind: 'accepted' | 'discarded',
+  store: () => ObjectStore,
 ): Promise<Response> {
   const body = await readJson<ResolveBody>(request);
   const claim = readClaim(body);

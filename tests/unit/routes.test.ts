@@ -92,6 +92,18 @@ describe('parseRoute', () => {
     expect(parseRoute(`${BASE}/trash`, BASE)).toEqual({ kind: 'not-found' });
   });
 
+  it("gives the family app its trash and none of the admin's pages", () => {
+    // family-tier.md #1: the display app declares ['trash'], so the family's
+    // Trash link resolves while Emails and Inbox stay a 404 in its vocabulary.
+    const FAMILY = ['trash'] as const;
+    expect(parseRoute(`${BASE}/trash`, BASE, FAMILY)).toEqual({
+      kind: 'page',
+      name: 'trash',
+    });
+    expect(parseRoute(`${BASE}/emails`, BASE, FAMILY)).toEqual({ kind: 'not-found' });
+    expect(parseRoute(`${BASE}/inbox`, BASE, FAMILY)).toEqual({ kind: 'not-found' });
+  });
+
   it('accepts an extra page only on its own', () => {
     expect(parseRoute(`${BASE}/trash/extra`, BASE, ADMIN)).toEqual({
       kind: 'not-found',
