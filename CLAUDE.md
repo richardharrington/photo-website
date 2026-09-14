@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```sh
 npm run dev:display     # viewer,  http://localhost:5173/dev-display-path/
+npm run dev:display:lan # viewer over self-signed HTTPS on the LAN, for a phone
 npm run dev:admin       # admin,   http://localhost:5174/dev-admin-path/
 npm run dev:harness     # pipeline harness on :5175, needed by pipeline e2e
 npm run check           # format:check + lint + typecheck + unit tests
@@ -29,8 +30,13 @@ Netlify functions (`tsconfig.functions.json`), and Worker
 change there can typecheck in the app and fail in the Worker.
 
 `npm run dev` is `netlify dev` and needs the Netlify CLI, which is deliberately
-not a dependency (`npx netlify-cli dev`). The three `dev:*` scripts need
-nothing beyond `npm install`.
+not a dependency (`npx netlify-cli dev`). The `dev:*` scripts need nothing
+beyond `npm install`.
+
+A phone cannot add photos over `http://<LAN IP>`: the pipeline hashes with
+`crypto.subtle`, which browsers withhold outside a secure context, so the
+upload fails before it decodes. `dev:display:lan` serves the display app over
+a self-signed certificate on the local network; accept the warning once.
 
 Playwright's `webServer` starts all three dev servers itself, so `npm run
 test:e2e` works from a cold start.
