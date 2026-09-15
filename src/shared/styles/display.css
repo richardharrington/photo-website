@@ -720,6 +720,24 @@
     z-index: 2;
   }
 
+  /*
+   * The stack's box spans the whole margin and grows upward with its content,
+   * so a tall one covers the previous-photo button, which lives in the same
+   * margin. Only what is drawn takes a pointer: the empty rest of the box lets
+   * a click through to the button beneath.
+   */
+  .lightbox__foot,
+  .lightbox__bottom,
+  .lightbox__meta,
+  .lightbox__caption-block,
+  .lightbox__actions {
+    pointer-events: none;
+  }
+
+  .lightbox__foot :is(p, button, dl, form) {
+    pointer-events: auto;
+  }
+
   /* Caption, date, Download, Edit, Delete, Photo info: one column whose items
      share a right edge, so the stack ends on a clean line rather than a ragged
      one. Photo info is lowest, so the button the photo's bottom edge is

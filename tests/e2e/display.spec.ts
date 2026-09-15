@@ -394,6 +394,28 @@ test.describe('the photo view', () => {
     expect((await pictureLeftOf(page)) - Math.max(...edges)).toBeGreaterThanOrEqual(15);
   });
 
+  test('lets a click through the empty part of the corner stack to the previous-photo button', async ({
+    page,
+  }) => {
+    // Short enough that the stack's box, which spans the whole margin, reaches
+    // up past the button beside the picture.
+    await page.setViewportSize({ width: 1280, height: 400 });
+    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['beach-burst-a']}`);
+
+    const previous = page.getByRole('button', { name: 'Previous photo' });
+    await expect(previous).toBeEnabled();
+    const arrow = (await previous.boundingBox())!;
+    const foot = (await page.locator('.lightbox__foot').boundingBox())!;
+    expect(foot.y).toBeLessThan(arrow.y + arrow.height);
+    expect(foot.x).toBeLessThan(arrow.x + arrow.width);
+
+    // A covered button would fail Playwright's own check that it receives
+    // the click.
+    const before = page.url();
+    await previous.click();
+    await expect(page).not.toHaveURL(before);
+  });
+
   test('makes room beside the photo for the form in the edit view', async ({
     page,
   }) => {
