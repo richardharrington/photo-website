@@ -767,7 +767,8 @@ test.describe('the trash', () => {
     await expect(item).toBeVisible();
     await expect(item.locator('img')).toBeVisible();
     await expect(item).toContainText(`${dayHeading}, 2026`);
-    await expect(item).toContainText(/Deleted \w+ \d+, \d{4}, purged \w+ \d+, \d{4}/);
+    await expect(item).toContainText(/Deleted \w+ \d+, \d{4}/);
+    await expect(item).toContainText(/Will be purged \w+ \d+, \d{4}/);
 
     // A trashed photo shows enough to be identified, and nothing more.
     await expect(page.getByRole('button', { name: /Download/ })).toHaveCount(0);

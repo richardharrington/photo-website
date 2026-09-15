@@ -52,6 +52,7 @@ function harness(select: boolean, selected: readonly string[] = []) {
       trash: 'all',
       select,
       restore: false,
+      addedFrom: false,
       filename: true,
     },
   };

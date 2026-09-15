@@ -1576,3 +1576,44 @@ its ordering, and its URLs are unchanged.
     Release: #90 was deployed to production and rolled back because it lacked
     this, and the two ship together.
 
+    **Amended 2026-09-15.** Photo info shows "Added from" on every photograph
+    the family sees — "This device" or "Another device", and "This device"
+    throughout the family's trash, which lists nothing else — rather than only
+    on the photographs that have Delete. The admin shows no such line: it never
+    records what it added, so the line would call the administrator's own
+    uploads "Another device".
+
+## A library that stays current without a refresh — 2026-09-15
+
+93. **Every change to the library reloads the copy the page holds, wherever
+    the change was made.** Both apps hold one library above every page, so a
+    change made on one page and read on another has to reach it. Four did
+    not, and each looked the same: a photograph that should be in All photos
+    or Recently added was missing until the page was refreshed.
+
+    - *A restore from the trash* recounted the trash and nothing else. The
+      trash page now tells the app, which reloads the library as well.
+    - *An Undo pressed on the trash page* restored and reloaded the library,
+      but the trash listing kept showing the photograph. The trash page now
+      reloads on the app's trash revision.
+    - *The Inbox's Add* refreshed the Inbox count only. The page now reloads
+      the library once an Add, or a retry, has settled.
+    - *Uploads* were lost to a remount. The add bar's queue lived in the panel,
+      which is rendered inside whichever listing is showing, so switching
+      between All photos and Recently added, or visiting the trash, unmounted
+      it: the files on their way in vanished from the add bar, and the batch
+      settled in a queue nobody was watching, so the library was never
+      reloaded. The queue now belongs to the app (`useUploads`), which reloads
+      the library when a batch settles whether a panel is mounted or not.
+
+    Underneath the upload case was a race in `refetch` itself, which handed a
+    caller the request already running. That request left before the change
+    the caller was reporting, so an upload that waited on it could clear its
+    tiles against a library that did not yet hold them. A call made while a
+    request runs now waits for one follow-up request, shared by every call in
+    the meantime.
+
+    Rejected: a global "library changed" signal from the curation client,
+    reloading after every commit. A batch of a hundred would be a hundred
+    reloads of the whole timeline where one at the end is enough.
+

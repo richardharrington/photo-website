@@ -156,3 +156,88 @@ describe('useLibrary', () => {
     expect(result.current.error).toBe('The server said no.');
   });
 });
+
+/**
+ * A refetch asked for while another is on its way must not be answered by
+ * that one: its request left before whatever change prompted the second, so
+ * an upload that waited on it would clear its tiles against a library that
+ * does not have them yet, and the photographs would vanish until a reload.
+ */
+describe('refetch', () => {
+  const EMPTY = timelineResponse(
+    { ...fixtureCatalog(), photos: {} },
+    'Family Photos',
+    Date.now(),
+  );
+
+  function holdTimelines() {
+    const held: ((response: Response) => void)[] = [];
+    vi.mocked(fetch).mockImplementation(async (url: string | URL | Request) => {
+      calls.push({
+        method: 'GET',
+        path: String(url).replace(/^.*\/api/, ''),
+        body: undefined,
+      });
+      return new Promise<Response>((resolve) => held.push(resolve));
+    });
+    return held;
+  }
+
+  it('asked for during another, waits for a request of its own', async () => {
+    const { result } = await loadedLibrary();
+    const held = holdTimelines();
+
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    act(() => {
+      first = result.current.refetch();
+    });
+    act(() => {
+      second = result.current.refetch();
+    });
+    expect(held).toHaveLength(1);
+    expect(second).not.toBe(first);
+    // A burst is still one follow-up, not a request per call.
+    expect(result.current.refetch()).toBe(second);
+
+    let settled = false;
+    void second.then(() => {
+      settled = true;
+    });
+
+    await act(async () => {
+      held[0]!(reply(EMPTY));
+      await first;
+    });
+    await waitFor(() => expect(held).toHaveLength(2));
+    expect(settled).toBe(false);
+
+    await act(async () => {
+      held[1]!(reply(TIMELINE));
+      await second;
+    });
+    expect(settled).toBe(true);
+    expect(result.current.data?.total).toBe(TIMELINE.total);
+  });
+
+  it('asked for when nothing is on its way, starts one at once', async () => {
+    const { result } = await loadedLibrary();
+    const before = count('GET', '/timeline');
+    await act(() => result.current.refetch());
+    await act(() => result.current.refetch());
+    expect(count('GET', '/timeline')).toBe(before + 2);
+  });
+});
+
+describe('trashChanged', () => {
+  it('recounts the trash and reloads the library, which a restore changed', async () => {
+    const { result } = await loadedLibrary();
+    const timelines = count('GET', '/timeline');
+    const counts = count('GET', '/trash/count');
+
+    act(() => result.current.trashChanged());
+
+    await waitFor(() => expect(count('GET', '/timeline')).toBe(timelines + 1));
+    await waitFor(() => expect(count('GET', '/trash/count')).toBe(counts + 1));
+  });
+});

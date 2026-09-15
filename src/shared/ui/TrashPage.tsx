@@ -100,10 +100,26 @@ export function TrashPage({
   bar,
   permanentDelete,
   filenames,
+  addedFrom,
+  revision,
 }: {
   nav: ReactNode;
-  /** The header's Trash count is the app's, and a restore changes it. */
+  /**
+   * A restore or a permanent delete happened here: the header's Trash count is
+   * the app's, and a restore puts photographs back into the app's library.
+   */
   onChanged: () => void;
+  /**
+   * The app's trash revision. It changes when the trash changed somewhere
+   * else — an Undo pressed on this page restores through the library — and
+   * the listing reloads on it.
+   */
+  revision: number;
+  /**
+   * Photo info's "Added from" line. The family's trash lists only what this
+   * browser added, so there it always says this device; the admin's has none.
+   */
+  addedFrom: boolean;
   /**
    * The selection over this listing, or null for a trash that does not
    * select. The admin supplies it, holding the state and the deselect
@@ -129,7 +145,7 @@ export function TrashPage({
 
   const resource = useResource<TrashListing>(
     (signal) => curationApi.trash(signal),
-    [reloadKey],
+    [reloadKey, revision],
   );
 
   const items = resource.status === 'ready' ? resource.data.items : NO_ITEMS;
@@ -209,20 +225,23 @@ export function TrashPage({
       // where it came from is a library question.
       attribution: () => Promise.resolve(null),
       restore: (id) => void restore([id]),
-      addedHere: () => false,
+      // The server lists the family only what this browser added
+      // (family-own-trash.md #6), so every photograph here was.
+      addedHere: () => addedFrom,
       can: {
         edit: false,
         download: false,
         trash: 'none',
         select: selection !== null,
         restore: true,
+        addedFrom,
         filename: filenames,
       },
     }),
     // `restore` reads this render's `reload`, which is what `selection` stands
     // for; the selection is rebuilt from the listing on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selection, filenames],
+    [selection, filenames, addedFrom],
   );
 
   if (resource.status === 'loading') {
@@ -304,9 +323,9 @@ export function TrashPage({
                           : 'Undated'}
                       </span>
                       <span>
-                        Deleted {formatCaptureDate(item.trashedAt.slice(0, 10))}, purged{' '}
-                        {purgeDate(item.trashedAt)}
+                        Deleted {formatCaptureDate(item.trashedAt.slice(0, 10))}
                       </span>
+                      <span>Will be purged {purgeDate(item.trashedAt)}</span>
                     </>
                   );
                 }}

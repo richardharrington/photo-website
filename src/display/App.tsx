@@ -14,7 +14,7 @@ import { CurationContext } from '../shared/ui/curation.ts';
 import type { Curation } from '../shared/ui/curation.ts';
 import { useLibrary } from '../shared/ui/library.ts';
 import { LibraryChrome } from '../shared/ui/LibraryChrome.tsx';
-import { UploadPanel } from '../shared/ui/Upload.tsx';
+import { UploadPanel, useUploads } from '../shared/ui/Upload.tsx';
 import { TrashPage } from '../shared/ui/TrashPage.tsx';
 import { getUploader } from '../shared/ui/uploader.ts';
 
@@ -60,14 +60,17 @@ export function App() {
 
   const library = useLibrary({ onRecent });
   const { data, timeline, orderedIds, refetch, startTrash, saveEdit } = library;
-  const { trashCount, countTrashAgain } = library;
+  const { trashCount, trashRevision, trashChanged } = library;
+  // Here rather than in the add bar, which unmounts with each listing.
+  const uploads = useUploads(refetch);
 
   /**
    * Curation for the family's library: edit and download any photograph, and
-   * trash one this browser added, one at a time. No selection, so the selection members are inert
-   * and `select` is false; no filename on a tile or at the photo view's
-   * corner (decision 7); and no attribution, which the display API does not
-   * answer, so it resolves null without a request.
+   * trash one this browser added, one at a time. No selection, so the
+   * selection members are inert and `select` is false; no filename on a tile
+   * or at the photo view's corner (decision 7); Photo info says which device
+   * each photograph was added from; and no attribution, which the display API
+   * does not answer, so it resolves null without a request.
    */
   const curation = useMemo<Curation>(
     () => ({
@@ -88,6 +91,7 @@ export function App() {
         trash: 'own',
         select: false,
         restore: false,
+        addedFrom: true,
         filename: false,
       },
     }),
@@ -121,10 +125,11 @@ export function App() {
   // lightbox and invite a drop onto a view that is not a listing.
   const uploadPanel = (
     <UploadPanel
-      onLibraryChanged={refetch}
+      uploads={uploads}
       emphasized={libraryIsEmpty}
       photoViewOpen={route.kind === 'photo' || route.kind === 'recent-photo'}
       note={getUploader().persistent ? null : STORAGE_NOTE}
+      addedFrom
     />
   );
 
@@ -133,11 +138,13 @@ export function App() {
       // `parseRoute` refuses any name not in FAMILY_PAGES, so this is the trash.
       <TrashPage
         nav={nav}
-        onChanged={countTrashAgain}
+        onChanged={trashChanged}
+        revision={trashRevision}
         selection={null}
         bar={null}
         permanentDelete={null}
         filenames={false}
+        addedFrom
       />
     ) : route.kind === 'not-found' ? (
       <CurationContext.Provider value={curation}>

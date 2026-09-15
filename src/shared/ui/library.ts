@@ -60,7 +60,11 @@ export interface Library {
   index: ReturnType<typeof indexTimeline> | null;
   /** The order the reader sees: library order, or the recent view's own. */
   orderedIds: readonly string[];
-  /** Resolves when the library on the page is up to date. At most one runs. */
+  /**
+   * Resolves when the library on the page holds everything that had happened
+   * by the time it was called. At most one request runs, and a call made
+   * while one is running waits for a single follow-up rather than for it.
+   */
   refetch: () => Promise<void>;
   setPatched: Dispatch<SetStateAction<TimelineResponse | null>>;
   /** Swap photos in where they already sit; for changes that cannot move one. */
@@ -71,6 +75,13 @@ export interface Library {
 
   trashCount: number | null;
   countTrashAgain: () => void;
+  /** Bumped whenever the trash may have changed; a mounted trash page reloads on it. */
+  trashRevision: number;
+  /**
+   * The trash page restored or removed photographs: recount the trash and
+   * reload the library, which a restore puts photographs back into.
+   */
+  trashChanged: () => void;
 
   preview: TrashPreview | null;
   startTrash: (query: SelectionQuery, from: string | null) => Promise<void>;
@@ -115,23 +126,41 @@ export function useLibrary({
    * At most one refetch in flight; a burst of edits is not a burst of GETs.
    *
    * It resolves when the library on the page is up to date, which the upload
-   * panel waits on before it forgets the files it has just added.
+   * panel waits on before it forgets the files it has just added. So a call
+   * made while a request is running is never answered by that request: it
+   * left before whatever prompted this call, and an upload that settled on it
+   * would clear its tiles against a library that does not have them yet. Such
+   * a call waits for one follow-up request instead, which every call made in
+   * the meantime shares.
    */
-  const pendingRefetch = useRef<Promise<void> | null>(null);
+  const runningRefetch = useRef<Promise<void> | null>(null);
+  const waitingRefetch = useRef<Promise<void> | null>(null);
   const refetch = useCallback((): Promise<void> => {
-    const running = pendingRefetch.current;
-    if (running) return running;
-    const next = readApi
-      .timeline()
-      .then((response) => setPatched(response))
-      // A failed background refetch leaves the patched copy standing: it is
-      // the server's own reply to the mutation, not a guess.
-      .catch(() => undefined)
-      .finally(() => {
-        pendingRefetch.current = null;
-      });
-    pendingRefetch.current = next;
-    return next;
+    if (waitingRefetch.current) return waitingRefetch.current;
+
+    const start = (): Promise<void> => {
+      const request = readApi
+        .timeline()
+        .then((response) => setPatched(response))
+        // A failed background refetch leaves the patched copy standing: it is
+        // the server's own reply to the mutation, not a guess.
+        .catch(() => undefined)
+        .finally(() => {
+          runningRefetch.current = null;
+        });
+      runningRefetch.current = request;
+      return request;
+    };
+
+    const running = runningRefetch.current;
+    if (!running) return start();
+
+    const followUp = running.then(() => {
+      waitingRefetch.current = null;
+      return start();
+    });
+    waitingRefetch.current = followUp;
+    return followUp;
   }, []);
 
   /**
@@ -158,6 +187,10 @@ export function useLibrary({
   );
   const trashCount = trash.status === 'ready' ? trash.data.count : null;
   const countTrashAgain = useCallback(() => setTrashKey((key) => key + 1), []);
+  const trashChanged = useCallback(() => {
+    countTrashAgain();
+    void refetch();
+  }, [countTrashAgain, refetch]);
 
   /**
    * The one standing undo offer, for a delete or a caption apply alike, and a
@@ -284,6 +317,8 @@ export function useLibrary({
     setError,
     trashCount,
     countTrashAgain,
+    trashRevision: trashKey,
+    trashChanged,
     preview,
     startTrash,
     confirmTrash,

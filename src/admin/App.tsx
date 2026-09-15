@@ -14,7 +14,7 @@ import { CurationContext } from '../shared/ui/curation.ts';
 import type { Curation } from '../shared/ui/curation.ts';
 import { photoCount, useLibrary } from '../shared/ui/library.ts';
 import { LibraryChrome } from '../shared/ui/LibraryChrome.tsx';
-import { UploadPanel } from '../shared/ui/Upload.tsx';
+import { UploadPanel, useUploads } from '../shared/ui/Upload.tsx';
 import { validateCaption } from '../shared/validation.ts';
 import { reverseCaptionChanges } from './caption-apply.ts';
 import type { CaptionPlan } from './caption-apply.ts';
@@ -82,8 +82,11 @@ export function App() {
     startTrash,
     saveEdit,
     trashCount,
-    countTrashAgain,
+    trashRevision,
+    trashChanged,
   } = library;
+  // Here rather than in the add bar, which unmounts with each listing.
+  const uploads = useUploads(refetch);
 
   const [selection, setSelection] = useState<SelectionState>(EMPTY_SELECTION);
 
@@ -242,6 +245,8 @@ export function App() {
         trash: 'all',
         select: true,
         restore: false,
+        // The admin records nothing about what it added; see `Capabilities`.
+        addedFrom: false,
         filename: true,
       },
     }),
@@ -287,10 +292,11 @@ export function App() {
   // over the lightbox and invite a drop onto a view that is not a listing.
   const uploadPanel = (
     <UploadPanel
-      onLibraryChanged={refetch}
+      uploads={uploads}
       emphasized={libraryIsEmpty}
       photoViewOpen={route.kind === 'photo' || route.kind === 'recent-photo'}
       note={null}
+      addedFrom={false}
     />
   );
 
@@ -308,9 +314,9 @@ export function App() {
       route.name === 'emails' ? (
         <EmailsPage nav={nav} />
       ) : route.name === 'inbox' ? (
-        <InboxPage nav={nav} onChanged={countInboxAgain} />
+        <InboxPage nav={nav} onChanged={countInboxAgain} onLibraryChanged={refetch} />
       ) : (
-        <AdminTrashPage nav={nav} onChanged={countTrashAgain} />
+        <AdminTrashPage nav={nav} onChanged={trashChanged} revision={trashRevision} />
       )
     ) : route.kind === 'not-found' ? (
       <CurationContext.Provider value={curation}>

@@ -653,6 +653,42 @@ test.describe('the family can curate', () => {
     await expect(info.locator('dd', { hasText: 'This device' })).toHaveCount(1);
   });
 
+  test('a photograph that lands after switching views is in the new view', async ({
+    page,
+  }) => {
+    const base = familyBase();
+    await page.goto(`${base}/`);
+    await expect(library(page).first()).toBeVisible();
+
+    const committed = page.waitForResponse(
+      (response) =>
+        response.url().endsWith('/api/commit') &&
+        response.request().method() === 'POST',
+      { timeout: 30_000 },
+    );
+    await page.locator('.drop-target__input').setInputFiles({
+      name: 'switched-views.png',
+      mimeType: 'image/png',
+      // Not the first test's bytes, or it would be skipped as a duplicate.
+      buffer: tinyPng(40, 30),
+    });
+
+    // Away to the other view while it is still on its way in.
+    await page.getByRole('link', { name: 'Recently added' }).click();
+    await expect(page).toHaveURL(`${base}/recent`);
+
+    const { photo } = (await (await committed).json()) as { photo: { id: string } };
+    // A library tile's id: tiles still on their way in carry a queue item's id
+    // instead, and Recently added lays its grid out in `.recent`, not
+    // `.timeline`.
+    const listed = (id: string) => page.locator(`#photo-${id}`);
+
+    // In the view the reader is on, and in the one they left, with no reload.
+    await expect(listed(photo.id)).toBeVisible({ timeout: 15_000 });
+    await page.getByRole('link', { name: 'All photos' }).click();
+    await expect(listed(photo.id)).toBeVisible();
+  });
+
   test('corrects a caption, and it stays corrected', async ({ page }) => {
     const base = familyBase();
     await page.goto(`${base}/photo/${FIXTURE_PHOTO_IDS['market']}`);
@@ -738,6 +774,11 @@ test.describe('the family can curate', () => {
       // One tap opens it, and Restore is the only thing it offers.
       const view = page.getByRole('dialog');
       await expect(view).toBeVisible();
+      // Everything in this browser's trash was added from this browser.
+      await page.getByRole('button', { name: 'Photo info' }).click();
+      await expect(
+        page.locator('#photo-information dd', { hasText: 'This device' }),
+      ).toHaveCount(1);
       await expect(
         page.getByRole('button', { name: 'Delete', exact: true }),
       ).toHaveCount(0);
@@ -751,13 +792,43 @@ test.describe('the family can curate', () => {
       await expect(trashed).toHaveCount(0);
       await expect(trashLink).toHaveText('Trash (2)');
 
-      await page.goto(`${base}/${scratch().path}`);
+      // Back in the library without a reload: the header's link, not a goto.
+      await page.getByRole('link', { name: 'All photos' }).click();
+      await expect(page).toHaveURL(`${base}/`);
       await expect(page.locator(`#photo-${id}`)).toBeVisible();
     } finally {
       await page.request.post(`${adminApi()}/restore`, {
         data: { photoIds: [stranger] },
       });
     }
+  });
+
+  test('an Undo pressed on the Trash page takes the photograph out of its listing', async ({
+    page,
+  }) => {
+    const base = familyBase();
+    const id = scratch().live[1]!;
+    await page.goto(`${base}/photo/${id}`);
+
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(page.getByRole('alertdialog')).toContainText('1 photo');
+    await page.keyboard.press('Enter');
+    const undo = page.getByRole('button', { name: 'Undo', exact: true });
+    await expect(undo).toBeVisible();
+
+    // Over to the trash while the offer still stands; the photograph is there.
+    await page.keyboard.press('Escape');
+    await page.getByRole('link', { name: /^Trash/ }).click();
+    const trashed = page
+      .locator('.photo-grid__item')
+      .filter({ has: page.locator(`img[src*="${id}"]`) });
+    await expect(trashed).toHaveCount(1);
+
+    // Undo from here: gone from the listing and back in the library, no reload.
+    await undo.click();
+    await expect(trashed).toHaveCount(0);
+    await page.getByRole('link', { name: 'All photos' }).click();
+    await expect(page.locator(`#photo-${id}`)).toBeVisible();
   });
 
   test('offers no Delete on a photograph it did not add', async ({ page }) => {
@@ -773,7 +844,8 @@ test.describe('the family can curate', () => {
     await page.getByRole('button', { name: 'Photo info' }).click();
     const info = page.locator('#photo-information');
     await expect(info).toBeVisible();
-    await expect(info).not.toContainText('Added from');
+    await expect(info.locator('dt', { hasText: 'Added from' })).toHaveCount(1);
+    await expect(info.locator('dd', { hasText: 'Another device' })).toHaveCount(1);
 
     // The key does nothing either: no confirmation to answer.
     await page.keyboard.press('Delete');

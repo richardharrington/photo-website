@@ -34,9 +34,12 @@ const PERMANENT_DELETE: PermanentDelete = {
 export function AdminTrashPage({
   nav,
   onChanged,
+  revision,
 }: {
   nav: ReactNode;
   onChanged: () => void;
+  /** The app's trash revision; see `TrashPage`. */
+  revision: number;
 }) {
   const [selection, setSelection] = useState<SelectionState>(EMPTY_SELECTION);
 
@@ -69,8 +72,10 @@ export function AdminTrashPage({
     <TrashPage
       nav={nav}
       onChanged={onChanged}
+      revision={revision}
       selection={select}
       filenames
+      addedFrom={false}
       permanentDelete={PERMANENT_DELETE}
       bar={({ chosen, busy, restore, startPermanentDelete, deselectAll }) =>
         chosen.length > 0 ? (

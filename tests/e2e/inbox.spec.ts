@@ -395,6 +395,12 @@ test('adds the ticked photo with the edited caption, and empties the inbox', asy
   const listing = await (await page.request.get(`${API}/inbox`)).json();
   expect(listing.submissions).toEqual([]);
 
+  // And it is already in the library this page holds: the header's link to
+  // All photos shows it without a reload.
+  const landed = (await (await page.request.get(`${API}/timeline`)).json()).recent[0];
+  await page.getByRole('link', { name: 'All photos' }).click();
+  await expect(page.locator(`#photo-${landed.photoIds[0]}`)).toBeVisible();
+
   // In the library, indistinguishable from a dropped file — and carrying the
   // caption that was typed here rather than the subject line that proposed it.
   const timeline = await (await page.request.get(`${API}/timeline`)).json();

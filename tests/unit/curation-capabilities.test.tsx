@@ -31,6 +31,7 @@ const FAMILY_LIBRARY: Capabilities = {
   trash: 'own',
   select: false,
   restore: false,
+  addedFrom: true,
   filename: false,
 };
 const FAMILY_TRASH: Capabilities = {
@@ -39,6 +40,7 @@ const FAMILY_TRASH: Capabilities = {
   trash: 'none',
   select: false,
   restore: true,
+  addedFrom: true,
   filename: false,
 };
 const ADMIN_LIBRARY: Capabilities = {
@@ -47,6 +49,7 @@ const ADMIN_LIBRARY: Capabilities = {
   trash: 'all',
   select: true,
   restore: false,
+  addedFrom: false,
   filename: true,
 };
 const ADMIN_TRASH: Capabilities = {
@@ -55,6 +58,7 @@ const ADMIN_TRASH: Capabilities = {
   trash: 'none',
   select: true,
   restore: true,
+  addedFrom: false,
   filename: true,
 };
 
@@ -198,7 +202,7 @@ describe('Delete, by who added the photograph', () => {
     expect(line!.nextElementSibling?.textContent).toBe('This device');
   });
 
-  it("under the family's library, on any other photograph: no Delete, inert keys, no Added from line", () => {
+  it("under the family's library, on any other photograph: no Delete, inert keys, and Added from another device", () => {
     const curation = lightboxUnder(FAMILY_LIBRARY, false);
 
     expect(button('Delete')).toBeNull();
@@ -208,9 +212,18 @@ describe('Delete, by who added the photograph', () => {
     fireEvent.keyDown(window, { key: 'Backspace' });
     expect(curation.trash).not.toHaveBeenCalled();
 
-    const panel = openInfo();
-    expect(addedFromLine(panel)).toBeUndefined();
-    expect(panel.textContent).not.toContain('This device');
+    const line = addedFromLine(openInfo());
+    expect(line).toBeDefined();
+    expect(line!.nextElementSibling?.textContent).toBe('Another device');
+  });
+
+  it("under the family's trash: Added from this device, and still no Delete", () => {
+    lightboxUnder(FAMILY_TRASH, true);
+
+    expect(button('Delete')).toBeNull();
+    expect(addedFromLine(openInfo())!.nextElementSibling?.textContent).toBe(
+      'This device',
+    );
   });
 
   it.each([true, false])(

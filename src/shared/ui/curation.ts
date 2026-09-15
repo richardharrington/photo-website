@@ -65,9 +65,10 @@ export interface Curation {
    */
   restore(id: string): void;
   /**
-   * This browser added the photograph. Only the family's library can say yes;
-   * every other listing answers false. It decides only what is shown — the
-   * server decides what may be trashed (family-own-trash.md #12).
+   * This browser added the photograph. Only the family's listings can say yes,
+   * and only where `can.addedFrom`; every other listing answers false. It
+   * decides only what is shown — the server decides what may be trashed
+   * (family-own-trash.md #12).
    */
   addedHere(id: string): boolean;
   /** What the photo view offers for these photographs; see `Capabilities`. */
@@ -77,17 +78,17 @@ export interface Curation {
 /**
  * What a context may do with the photographs it covers.
  *
- * Six flags rather than one `readOnly` or `isAdmin`, because the six listings
- * that provide a context do not agree along any single axis:
+ * Seven flags rather than one `readOnly` or `isAdmin`, because the six
+ * listings that provide a context do not agree along any single axis:
  *
- *   | Listing               | edit | download | trash  | select | restore | filename |
- *   | --------------------- | ---- | -------- | ------ | ------ | ------- | -------- |
- *   | Family library/recent | yes  | yes      | `own`  | no     | no      | no       |
- *   | Family uploading      | yes  | no       | `none` | no     | no      | yes      |
- *   | Family trash          | no   | no       | `none` | no     | yes     | no       |
- *   | Admin library/recent  | yes  | yes      | `all`  | yes    | no      | yes      |
- *   | Admin uploading       | yes  | no       | `none` | no     | no      | yes      |
- *   | Admin trash           | no   | no       | `none` | yes    | yes     | yes      |
+ *   | Listing               | edit | download | trash  | select | restore | added from | filename |
+ *   | --------------------- | ---- | -------- | ------ | ------ | ------- | ---------- | -------- |
+ *   | Family library/recent | yes  | yes      | `own`  | no     | no      | yes        | no       |
+ *   | Family uploading      | yes  | no       | `none` | no     | no      | yes        | yes      |
+ *   | Family trash          | no   | no       | `none` | no     | yes     | yes        | no       |
+ *   | Admin library/recent  | yes  | yes      | `all`  | yes    | no      | no         | yes      |
+ *   | Admin uploading       | yes  | no       | `none` | no     | no      | no         | yes      |
+ *   | Admin trash           | no   | no       | `none` | yes    | yes     | no         | yes      |
  *
  * Both libraries edit and download. The admin's trashes any photograph and the
  * family's only one this browser added (`own`, decided per photograph by
@@ -105,8 +106,12 @@ export interface Curation {
  *
  * `select` is what decides a tile's gestures: where it is true a plain click
  * selects and a double-click opens, and where it is false a plain click opens,
- * as it always did. None of the six is optional, so adding one visits every
- * call site and no listing inherits a default.
+ * as it always did. `addedFrom` is the family's: Photo info on every
+ * photograph says whether it was added from this device or another, so a
+ * missing Delete explains itself. The admin never records what it added, so
+ * the line would say "Another device" of the administrator's own uploads, and
+ * it is not shown there. None of the seven is optional, so adding one visits
+ * every call site and no listing inherits a default.
  */
 export interface Capabilities {
   edit: boolean;
@@ -119,6 +124,8 @@ export interface Capabilities {
   select: boolean;
   /** Restore from the trash. Only a trash listing says yes. */
   restore: boolean;
+  /** Photo info's "Added from" line, answered by `addedHere`. The family's only. */
+  addedFrom: boolean;
   /**
    * The filename on a tile and at the lightbox's top right. Admin only, and
    * the files still uploading. Photo info shows it regardless.

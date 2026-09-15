@@ -348,9 +348,10 @@ is described under
 - A plain click or tap on a photograph opens it. The photo view's bottom-left
   stack is the edit form — capture date, capture time, caption, and **Save
   changes** — with **Download**, **Delete**, and **Photo info** beneath.
-  **Delete** appears only on a photograph added from this browser, whose Photo
-  info also says "Added from: This device"; on any other photograph there is
-  no Delete, disabled or otherwise, and the Delete key does nothing.
+  **Delete** appears only on a photograph added from this browser; on any other
+  photograph there is no Delete, disabled or otherwise, and the Delete key does
+  nothing. Photo info on every photograph says where it was added from, "This
+  device" or "Another device", so a missing Delete explains itself.
   Nothing is saved until Save. While an edit is unsaved the previous and next
   controls are disabled and the arrow keys do nothing, because stepping to
   another photograph is precisely what would discard it; the form says so.
@@ -365,12 +366,18 @@ is described under
   lasts five seconds regardless of what happens in the meantime.
 - After an edit or a delete the page updates in place from the server's reply
   and quietly refetches the library afterwards, so the page never waits on a
-  reload and never stays out of step for long.
+  reload and never stays out of step for long. A restore, an Undo, a batch of
+  uploads settling, and the admin's Inbox Add reload it too, wherever the
+  reader is standing at the time: a photograph put back or added is in All
+  photos and Recently added without refreshing the page.
 - **Trash** is a page of its own: the grid, headed "Trash" with a count, and
   one line above it: "Photos added from this device that have been deleted are
   kept here for 30 days, then removed automatically. Tap one to look at it and
   restore it." It lists only the photographs added from this browser,
-  including one the administrator trashed. Tapping a trashed photograph opens
+  including one the administrator trashed, and Photo info on each says "Added
+  from: This device". Each tile gives its original date, the date it was
+  deleted, and "Will be purged" with the date it will be. Tapping a trashed
+  photograph opens
   the photo view with **Restore** as its action — no download, no delete, no
   edit form — and Restore puts it back, closes the view, and updates the
   count.

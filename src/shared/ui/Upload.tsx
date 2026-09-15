@@ -9,7 +9,7 @@ import {
 import { ACCEPTED_EXTENSIONS } from '../constants.ts';
 import { hasAcceptedExtension } from '../../pipeline/validate.ts';
 import { isInFlight, summarize } from './upload/queue.ts';
-import type { QueueItem, QueueSnapshot } from './upload/queue.ts';
+import type { QueueItem, QueueSnapshot, UploadQueue } from './upload/queue.ts';
 import { createQueue } from './upload/create.ts';
 import { PENDING_IMAGE, pendingPhoto } from './upload/pending.ts';
 import { routes } from './api.ts';
@@ -47,12 +47,8 @@ function stateLabel(item: QueueItem): string {
 const NOTHING_SELECTED: ReadonlySet<string> = new Set();
 
 interface UploadPanelProps {
-  /**
-   * Reload the library: a batch has landed, or an edit here has reached a
-   * photo that is already in it. Awaited after a batch, so these tiles are
-   * never cleared before the library holds what they stand for.
-   */
-  onLibraryChanged: () => void | Promise<void>;
+  /** The app's add-bar queue; see `useUploads`. */
+  uploads: Uploads;
   /** Larger and more prominent when the library is empty. */
   emphasized: boolean;
   /**
@@ -68,6 +64,74 @@ interface UploadPanelProps {
    * adds can be deleted only until the page closes (family-own-trash.md #9).
    */
   note: string | null;
+  /**
+   * Photo info's "Added from" line on these files, which are all on their way
+   * in from this browser. The family's; the admin passes false.
+   */
+  addedFrom: boolean;
+}
+
+/** The add bar's queue as the app holds it. */
+export interface Uploads {
+  queue: UploadQueue;
+  snapshot: QueueSnapshot;
+  /**
+   * The last batch has settled and the library the page holds has since been
+   * reloaded with it, so the files that landed can leave the add bar.
+   */
+  landed: boolean;
+  /** Reload the library, as an edit that reached a stored photograph needs. */
+  libraryChanged: () => void | Promise<void>;
+}
+
+/**
+ * The add bar's queue, for the life of the app rather than of the panel.
+ *
+ * The panel is rendered inside whichever listing is showing, so switching
+ * between All photos and Recently added — or visiting the trash — unmounts
+ * it. A queue that lived in the panel went with it: the files still on their
+ * way in vanished from the add bar, the pipeline carried on in a queue nobody
+ * could see, and the library was never reloaded when they landed, so a
+ * photograph added a moment ago was missing until the page was refreshed.
+ *
+ * So the app holds the queue, and this hook watches it whether or not a panel
+ * is mounted: when a batch settles it reloads the library, and only once that
+ * reload has finished does it say the batch has `landed`. A batch that starts
+ * again before then is not landed, so nothing can clear its tiles early.
+ */
+export function useUploads(onLibraryChanged: () => void | Promise<void>): Uploads {
+  // Lazy state, not a ref: the queue is created once, and reading a ref
+  // during render is unsafe.
+  const [queue] = useState(() => createQueue());
+  const [snapshot, setSnapshot] = useState<QueueSnapshot>(() => queue.snapshot());
+  const [landed, setLanded] = useState(false);
+
+  const reload = useRef(onLibraryChanged);
+  useEffect(() => {
+    reload.current = onLibraryChanged;
+  }, [onLibraryChanged]);
+
+  useEffect(() => {
+    let wasActive = queue.snapshot().active;
+    /** Every start and every settle; a reload answers only the settle it followed. */
+    let edges = 0;
+    return queue.subscribe((next) => {
+      setSnapshot(next);
+      if (next.active === wasActive) return;
+      wasActive = next.active;
+      edges += 1;
+      if (next.active) {
+        setLanded(false);
+        return;
+      }
+      const settle = edges;
+      void Promise.resolve(reload.current()).then(() => {
+        if (settle === edges) setLanded(true);
+      });
+    });
+  }, [queue]);
+
+  return { queue, snapshot, landed, libraryChanged: onLibraryChanged };
 }
 
 /**
@@ -84,22 +148,17 @@ interface UploadPanelProps {
  * written while the machine is still encoding. See `upload/pending.ts`.
  */
 export function UploadPanel({
-  onLibraryChanged,
+  uploads,
   emphasized,
   photoViewOpen,
   note,
+  addedFrom,
 }: UploadPanelProps) {
-  // Lazy state, not a ref: the queue is created once, and reading a ref
-  // during render is unsafe.
-  const [queue] = useState(() => createQueue());
-  const [snapshot, setSnapshot] = useState<QueueSnapshot>(() => queue.snapshot());
+  const { queue, snapshot, landed, libraryChanged } = uploads;
   const [dragging, setDragging] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const targetRef = useRef<HTMLDivElement>(null);
-  const wasActive = useRef(false);
-
-  useEffect(() => queue.subscribe(setSnapshot), [queue]);
 
   const items = snapshot.items;
   const showTarget = !photoViewOpen && openId === null;
@@ -138,33 +197,14 @@ export function UploadPanel({
    * Clearing removes the tile the photo view is showing, which unmounts the
    * view and takes any edit being typed in it with it. A batch of a hundred
    * settles long before its first photograph has been captioned, so that is
-   * the ordinary case rather than a corner of one. Instead the two moments
-   * that can make it safe each ask: the reload finishing, and the view
-   * closing. Refs rather than state, because neither is anything to render.
+   * the ordinary case rather than a corner of one. So this waits for both: the
+   * app's reload to have landed the batch, and nothing to be open here.
+   * `clearCommitted` takes only files that are done, so a batch dropped since
+   * loses nothing to it.
    */
-  const settled = useRef(false);
-  const openIdRef = useRef<string | null>(null);
   useEffect(() => {
-    openIdRef.current = openId;
-  }, [openId]);
-
-  const clearWhenNothingIsOpen = useCallback(() => {
-    if (!settled.current || openIdRef.current !== null) return;
-    settled.current = false;
-    queue.clearCommitted();
-  }, [queue]);
-
-  // Reload the library once, on the edge from busy to idle, rather than on
-  // every state change.
-  useEffect(() => {
-    if (wasActive.current && !snapshot.active) {
-      void Promise.resolve(onLibraryChanged()).then(() => {
-        settled.current = true;
-        clearWhenNothingIsOpen();
-      });
-    }
-    wasActive.current = snapshot.active;
-  }, [snapshot.active, onLibraryChanged, clearWhenNothingIsOpen]);
+    if (landed && openId === null) queue.clearCommitted();
+  }, [landed, openId, queue]);
 
   const addFiles = useCallback(
     (files: FileList | null) => {
@@ -207,27 +247,28 @@ export function UploadPanel({
         const item = await queue.edit(id, edit);
         // An edit that reached the stored photo changed the library, not just
         // this panel, and the library is showing it too by now.
-        if (item.photoId) void onLibraryChanged();
+        if (item.photoId) void libraryChanged();
         return pendingPhoto(item);
       },
       // A file on its way in has no catalog record to have arrived by email.
       attribution: () => Promise.resolve(null),
       // Nothing here is in the trash to put back.
       restore: () => {},
-      // Nor anything committed yet to have been added.
-      addedHere: () => false,
+      // Everything here is on its way in from this browser.
+      addedHere: () => addedFrom,
       can: {
         edit: true,
         download: false,
         trash: 'none',
         select: false,
         restore: false,
+        addedFrom,
         // Before a thumbnail exists the filename is the only way to tell one
         // queued file from another, in either app (family-tier.md #12).
         filename: true,
       },
     }),
-    [queue, onLibraryChanged],
+    [queue, libraryChanged, addedFrom],
   );
 
   const open = openId ? byId.get(openId) : undefined;
@@ -383,11 +424,7 @@ export function UploadPanel({
           photo={pendingPhoto(open)}
           orderedIds={ids}
           backHref={routes.home()}
-          onClose={() => {
-            setOpenId(null);
-            openIdRef.current = null;
-            clearWhenNothingIsOpen();
-          }}
+          onClose={() => setOpenId(null)}
           onStep={setOpenId}
           // The encoded 1280 straight from memory, or the grey stand-in until
           // the encoders have got to it.

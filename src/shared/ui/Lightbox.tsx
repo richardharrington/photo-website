@@ -498,12 +498,14 @@ export function Lightbox({
           >
             <dt>Original filename</dt>
             <dd>{photo.originalFilename}</dd>
-            {curation?.can.trash === 'own' && curation.addedHere(photo.id) ? (
+            {curation?.can.addedFrom ? (
               <>
-                {/* Why Delete is on this photograph here and missing from it
-                    on any other device (family-own-trash.md #4). */}
+                {/* On every photograph the family sees, so a missing Delete
+                    explains itself (family-own-trash.md #4). */}
                 <dt>Added from</dt>
-                <dd>This device</dd>
+                <dd>
+                  {curation.addedHere(photo.id) ? 'This device' : 'Another device'}
+                </dd>
               </>
             ) : null}
             {sender ? (

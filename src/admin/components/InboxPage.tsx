@@ -63,10 +63,17 @@ function minutesAgo(claimedAt: string): number {
 export function InboxPage({
   nav,
   onChanged,
+  onLibraryChanged,
 }: {
   nav: ReactNode;
   /** The header's Inbox count is the app's, and every action here changes it. */
   onChanged: () => void;
+  /**
+   * Reload the app's library. The library is held above this page, so what an
+   * Add commits is missing from All photos and Recently added until it is
+   * reloaded — which a page refresh used to be the only way to do.
+   */
+  onLibraryChanged: () => void;
 }) {
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -121,6 +128,7 @@ export function InboxPage({
             submission={submission}
             claimTtlMinutes={resource.data.claimTtlMinutes}
             onChanged={reload}
+            onLibraryChanged={onLibraryChanged}
           />
         ))
       )}
@@ -135,9 +143,15 @@ interface CardProps {
   submission: InboxSubmission;
   claimTtlMinutes: number;
   onChanged: () => void;
+  onLibraryChanged: () => void;
 }
 
-function SubmissionCard({ submission, claimTtlMinutes, onChanged }: CardProps) {
+function SubmissionCard({
+  submission,
+  claimTtlMinutes,
+  onChanged,
+  onLibraryChanged,
+}: CardProps) {
   const { id, parts } = submission;
 
   /**
@@ -278,6 +292,8 @@ function SubmissionCard({ submission, claimTtlMinutes, onChanged }: CardProps) {
     // One email is one batch: the whole set goes in at once, and the caption
     // travels into each file's own commit rather than as N later edits.
     await queue.add(files, normalizeCaption(caption));
+    // Whatever landed is in the catalog now, failures or not.
+    onLibraryChanged();
 
     const settled = queue.snapshot();
     setPhase('settled');
@@ -289,6 +305,7 @@ function SubmissionCard({ submission, claimTtlMinutes, onChanged }: CardProps) {
   async function retry(itemId: string) {
     if (!mine) return;
     await mine.queue.retry(itemId);
+    onLibraryChanged();
     const settled = mine.queue.snapshot();
     if (settled.counts.failed === 0) await resolve(mine.token, settled);
   }
