@@ -1412,6 +1412,18 @@ the photo ID the rest of that group uses.
       destination holds the catalog, the snapshots, the audit log, and the
       photo objects.
 
+### Telling the family
+
+The family link does more than it used to. Anyone holding it can add
+photographs, correct any date, time, or caption, move any photograph to the
+trash, and restore from the trash. Tell the family when this goes live.
+Anything trashed by mistake can be restored from **Trash** by anyone with the
+link for 30 days, after which the daily maintenance pass removes it for good.
+Permanent deletion, the Inbox, the Emails page, and the export still need the
+admin link. From a phone, a photograph over 30 MP is refused with a message
+saying so: it can be added from a laptop instead, or emailed in once that
+person's address is allowed to submit (see "Adding email submissions").
+
 ## Known gaps
 
 Carried forward from design.md's validation list, and still open:

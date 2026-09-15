@@ -13,7 +13,8 @@ not unresolved product decisions.
 - Provide a small, curated family photo-sharing site.
 - Organize photos by capture year, month, and day.
 - Store nullable capture date, capture time, and caption for each photo.
-- Provide a display-only site and an admin extension at a distinct URL path.
+- Provide a family site, where anyone with the link can view and add
+  photographs, and an admin extension at a distinct URL path.
 - Keep operations simple, free of monthly cost (free tiers only),
   privacy-conscious, and free of third-party browser tracking.
 
@@ -29,7 +30,8 @@ not unresolved product decisions.
 - Bulk downloads as ZIP archives; downloads are initially per-photo only.
 - In-app catalog import/restore; recovery uses the documented R2/laptop backup
   procedure initially.
-- Mobile administration beyond basic browser access; admin is laptop-oriented.
+- Per-person accounts or ownership of photographs; every family member acts
+  with the same rights.
 
 ## Access and privacy model
 
@@ -39,8 +41,14 @@ trusted.
 
 - The display URL and admin URL are separate, independent, high-entropy paths.
   Neither can be derived from the other.
-- The display path can be shared with family; the admin path is shared only with
-  administrators.
+- The display path is the family link and can be shared among family members.
+  Anyone holding it can view, add, edit, and trash photographs and restore them
+  from the trash; the server enforces this by mode, not the page. The admin
+  path is shared only with administrators and additionally allows permanent
+  deletion, the Inbox, the Emails page, and the catalog export.
+- The audit log records which link an act came through (`display-api` or
+  `admin-api`) and nothing about who; there are no accounts, so it makes no
+  person-level claim.
 - The Netlify root and all incorrect paths return a plain 404 and reveal no
   route information.
 - Image URLs follow the same capability-URL philosophy: each photo's derivative
@@ -51,7 +59,8 @@ trusted.
   HTML also has the equivalent robots meta tag.
 - Responses use `Referrer-Policy: no-referrer`, and pages carry a strict
   Content-Security-Policy permitting only same-origin resources, the image
-  Worker origin, and the WebAssembly codecs the admin app uses.
+  Worker origin, the R2 upload origin, and the WebAssembly codecs both apps
+  use.
 - These measures discourage indexing but are not access control.
 - No client analytics, telemetry, external fonts, social metadata, or other
   third-party browser resources are used.
@@ -98,24 +107,27 @@ trusted.
 - Supported browsers are current Chrome, Safari, Firefox, and Edge releases.
   The viewer is responsive on current mobile Safari/Chrome; obsolete browsers
   such as Internet Explorer are unsupported. All supported browsers decode
-  WebP, so display derivatives are WebP-only. The **admin** app additionally
-  requires a Chromium-based browser or Safari: Firefox runs the image
-  pipeline roughly 10x slower and crashed on a fourth consecutive file, so it
-  is unsupported for administration. Viewing the display site in Firefox is
-  fully supported.
+  WebP, so display derivatives are WebP-only. **Uploading**, in either app,
+  works in all of them: Firefox was once unsupported for it, and passed when
+  re-measured after processing became strictly serial (decisions.md #20,
+  #90). On a phone or tablet a photograph over 30 MP is refused before it is
+  processed, with a message saying to add it from a laptop or email it in,
+  because a phone's browser gives a page too little memory to encode one
+  (decisions.md #91).
 - UI: React, TypeScript, and Vite. The display and admin apps are two fully
   separate builds so no admin code can appear under the display path.
 - Server API: Netlify Functions (catalog reads and mutations only; the server
   performs no image processing).
 - Object storage: a private Cloudflare R2 bucket.
-- **All image processing runs in the admin browser.** The admin app decodes
+- **All image processing runs in the uploading browser.** Whichever app adds
+  a photograph decodes
   sources (including HEIC, via a WebAssembly build of libheif), applies
   orientation, converts wide-gamut color to sRGB, validates size, and encodes
   all final artifacts with WebAssembly codecs (mozjpeg, libwebp) so output is
   identical in every supported browser. The browser then uploads the finished artifacts directly
   to R2 using narrowly scoped, short-lived signed PUT URLs issued by the
-  server API. The original source file never leaves the administrator's
-  computer; no server-side processing, background functions, or paid plan
+  server API. The original source file never leaves the uploader's
+  device; no server-side processing, background functions, or paid plan
   features are required.
 - The bucket remains private. A Cloudflare Worker serves display derivatives
   at unguessable ID-based capability URLs with long immutable cache lifetimes
@@ -255,7 +267,12 @@ queue with overall and per-file status rather than an arbitrary batch limit.
    files are skipped. A daily cleanup job removes any orphaned objects from
    interrupted uploads.
 
-## Display site
+## Family site
+
+The display link is the family link (family-tier.md #1): anyone holding it
+can look at the library, add to it, correct it, and move photographs to the
+trash and back. What only the administrator does is described under
+[Admin site](#admin-site).
 
 - The design is restrained and photo-first: neutral backgrounds, system
   typography, generous spacing, and no decorative UI competing with images.
@@ -283,8 +300,66 @@ queue with overall and per-file status rather than an arbitrary batch limit.
 - Below 40rem the header stays in normal flow and scrolls away, as the site
   title always has. At 40rem and above it pins, because the toggle has to be
   reachable from anywhere in a page that is years long. Everything else that
-  pins — the year and month headings, and the admin's selection bar and upload
-  target — sits below it.
+  pins — the year and month headings, the add bar, and the admin's selection
+  bar — sits below it.
+- The header also carries **Trash** with its count, beside the view toggle.
+- Under the header sits the **add bar**. On a phone it reads **Add photos**
+  and opens the picker; on a wider screen it reads **Drop photos here**, with
+  the hint that it can be pressed too. It is pinned to the top of the page, so
+  a photograph can be added wherever the reader has scrolled to in a library
+  years long; it is a large panel while the library is empty and a slim bar
+  once it is not, and it stands down while the photo view is open. There is no
+  persistent server-side "processing" area; a file either commits fully or
+  leaves no record.
+- An added file is a photograph on the page immediately: a tile of its own,
+  above the timeline, on the same grid as the library. It carries its filename
+  at once — the one place the family sees a filename on a tile, since before a
+  thumbnail exists it is the only way to tell one queued file from another —
+  its own capture date within a moment, its picture as soon as the browser has
+  encoded one, well before the upload finishes, and beneath it the per-file
+  state (waiting, processing, uploading, finishing, added, skipped as a
+  duplicate with a link to the photo already stored, failed with a reason and
+  a retry). It opens into the same photo view and the same edit form as any
+  other photograph, so a wrong date can be corrected and a caption written
+  while the device is still working: a correction made before the file commits
+  is carried into that commit, and one made afterwards is an ordinary edit.
+  There is nothing to download or delete there, because nothing is stored yet.
+  Once the batch has settled and the library has been reloaded, the
+  photographs that landed leave this area; failures and duplicates stay until
+  cleared.
+- On a phone or tablet a photograph over 30 MP is refused on its tile before
+  any processing, with a message saying it will work from a laptop or by
+  email (decisions.md #91).
+- A plain click or tap on a photograph opens it. The photo view's bottom-left
+  stack is the edit form — capture date, capture time, caption, and **Save
+  changes** — with **Download**, **Delete**, and **Photo info** beneath.
+  Nothing is saved until Save. While an edit is unsaved the previous and next
+  controls are disabled and the arrow keys do nothing, because stepping to
+  another photograph is precisely what would discard it; the form says so.
+  Escape and closing still leave, and still discard. While a field has focus
+  the keyboard belongs to it: arrows move the caret, Escape leaves the field,
+  and only a second Escape closes the view. With focus outside the form,
+  Delete or Backspace is the same as the Delete button.
+- Delete always confirms through the preview-and-confirm dialog ("Delete
+  photos?" … "will move to the trash, where they are kept for 30 days"), and
+  Enter confirms. The photo view then advances to the next photo (or the
+  previous at the end, or closes if none remain), and a brief Undo appears and
+  lasts five seconds regardless of what happens in the meantime.
+- After an edit or a delete the page updates in place from the server's reply
+  and quietly refetches the library afterwards, so the page never waits on a
+  reload and never stays out of step for long.
+- **Trash** is a page of its own: the grid, headed "Trash" with a count, and
+  one line above it saying deleted photos are kept for 30 days and then
+  removed, that a tap opens a photo to look at and restore, and that only the
+  administrator can delete one permanently. Tapping a trashed photograph opens
+  the photo view with **Restore** as its action — no download, no delete, no
+  edit form — and Restore puts it back, closes the view, and updates the
+  count.
+- What the family does not have: no selection or selection bar, no Select all
+  on a day heading, no caption applied to many photographs at once, no
+  permanent deletion, no Emails, no Inbox, no Export catalog, and no filename
+  on a library tile. The server refuses those routes to the family link; the
+  page not showing them is not the reason they are unavailable.
 - **What counts as recently added** is a property of the photographs, not of
   the viewer, and it is one sentence: everything uploaded in the last 30 days,
   plus every photograph sharing an upload batch with any of it. The batch rule
@@ -332,9 +407,8 @@ queue with overall and per-file status rather than an arbitrary batch limit.
   cache images across visits.
 - Selecting a photo opens it full-size over the timeline, which stays where it
   was underneath. The photo view carries no header bar and no position count:
-  the way back at the top left, and at the bottom left one right-aligned stack
-  of caption (when there is one), capture date (when the photo has one),
-  **Download**, and **Photo info**. Clock time, original filename, and
+  the way back at the top left, and at the bottom left the stack described
+  above: the edit form, then the actions. Clock time, original filename, and
   full-size dimensions live in the Photo info panel, which is a layer of its
   own: Escape closes it and leaves the photograph open, closing the photograph
   only on a second press, and clicking anywhere outside it closes it. Previous
@@ -348,9 +422,9 @@ queue with overall and per-file status rather than an arbitrary batch limit.
   batch's selection/drop order; ingestion time is never presented as a capture
   time. Manual reordering is out of scope; an admin can set an approximate
   capture time when ordering matters.
-- Photos without a date are in a separate **Undated** group. An admin can later
-  assign or correct a date.
-- Original filenames are not shown in the normal viewer grid. A photo
+- Photos without a date are in a separate **Undated** group. Anyone with the
+  family link can later assign or correct a date.
+- Original filenames are not shown on the family's library or trash tiles. A photo
   information view shows the filename and available information.
 - Captions serve as accessible image text. If absent, use a concise fallback
   such as "Photo from August 2, 2026" or "Undated photo." The lightbox and all
@@ -358,50 +432,15 @@ queue with overall and per-file status rather than an arbitrary batch limit.
 
 ## Admin site
 
-The admin site is the display site with curation added. It is the same
-one-page timeline and the same photo view, reached through its own opaque
-path, and everything below applies on top of the display site's rules.
+The admin site is the family site with selection and four administrator-only
+surfaces added: permanent deletion, the Inbox, the Emails page, and the catalog
+export. It is the same one-page timeline, the same add bar, and the same photo
+view, reached through its own opaque path, and everything below applies on top
+of the [family site](#family-site)'s rules.
 
-- The header gains a persistent **Trash** link with an item count and an
-  **Export catalog** link. Every thumbnail shows its original filename.
-  The upload drop area is pinned to the top of the page, so a photograph
-  can be dropped wherever the reader has scrolled to in a library years
-  long; it is a large panel while the library is empty and a slim bar once
-  it is not, and it stands down while the photo view is open. There is no
-  persistent server-side "processing" area; a file either commits fully or
-  leaves no record.
-- A dropped file is a photograph on the page immediately: a tile of its
-  own, above the timeline, on the same grid as the library. It carries its
-  filename at once and its own capture date within a moment, its picture as
-  soon as the browser has encoded one — well before the upload finishes —
-  and beneath it the per-file state (waiting, processing, uploading,
-  finishing, added, skipped as a duplicate with a link to the photo already
-  stored, failed with a reason and a retry). It opens into the same photo
-  view and the same edit form as any other photograph, so a wrong date can
-  be corrected and a caption written while the machine is still working: a
-  correction made before the file commits is carried into that commit, and
-  one made afterwards is an ordinary edit. There is nothing to download or
-  delete there, because there is nothing stored yet. Once the batch has
-  settled and the library has been reloaded the photographs that landed
-  leave this area; failures and duplicates stay until cleared.
-- Clicking a thumbnail opens the photo view, which for an admin carries the
-  edit form in place of the caption and date text: capture date, capture
-  time, caption, and **Save changes**, with **Download**, **Delete**, and
-  **Photo info** beneath. The original filename shows at the top right.
-  Nothing is saved until Save. While an edit is unsaved the previous and
-  next controls are disabled and the arrow keys do nothing, because
-  stepping to another photograph is precisely what would discard it; the
-  form says so. Escape and closing still leave, and still discard — those
-  are asking to go. While a field has focus the keyboard belongs to it:
-  arrows move the caret, Escape leaves the field, and only a second Escape
-  closes the view. With focus outside the form, Delete or Backspace is the same
-  as the Delete button.
-- Delete, single or bulk, always confirms through the preview-and-confirm
-  dialog, which states the resolved count and applies to exactly the
-  photos it named. After a single delete the photo view advances to the
-  next photo (or the previous at the end, or closes if none remain). A
-  brief Undo appears and lasts five seconds regardless of what the admin
-  does in the meantime.
+- The header also carries **Emails**, **Inbox** with its count, and **Export
+  catalog**. Every thumbnail shows its original filename, and so does the top
+  right of the photo view.
 - In the admin's listings — the library, Recently added, and the trash — a
   plain click on a photograph **selects** it and nothing else; a
   **double-click** opens the photo view. On the keyboard, Enter opens and
@@ -440,11 +479,9 @@ path, and everything below applies on top of the display site's rules.
   files still on their way up are the one exception to the click rule — they
   have nothing to select, so their tiles open on a single click, on the same
   screen as the library's below them.
-- After an edit or a delete the page updates in place from the server's
-  reply and quietly refetches the library afterwards, so the page never
-  waits on a reload and never stays out of step for long.
-- Mobile viewing is responsive. Admin workflows are explicitly
-  laptop-oriented; touch-specific bulk-selection UI is out of scope.
+- Deleting a selection confirms through the same preview-and-confirm dialog as
+  a single delete, applies to exactly the photos it named, and offers the same
+  five-second Undo.
 
 ### Emails
 
@@ -539,11 +576,15 @@ path, and everything below applies on top of the display site's rules.
   trash and restore are pure metadata changes.
 - Items are retained for 30 days, then automatically purged (objects deleted,
   records removed, audit retained).
-- The trash provides an explicitly confirmed permanent-delete action.
+- The admin's trash provides an explicitly confirmed permanent-delete
+  action; the family's has none.
+- A family member restores from the lightbox; an administrator can also
+  restore or permanently delete a selection.
 - A deleted photo can be restored during its retention period. Trashed photos
   cannot be downloaded, but the Trash shows them on the same grid and photo
-  view as the library, with thumbnails, filenames, original date, and deletion
-  date for safe identification; both images are short-lived signed URLs.
+  view as the library, with thumbnails, original date, and deletion date (and,
+  for an administrator, filenames) for safe identification; both images are
+  short-lived signed URLs.
 - The image Worker refuses to serve trashed photos. Because it briefly caches
   catalog state, a trashed photo's URLs may continue to work for up to about a
   minute (and images already viewed remain in viewers' browser caches); this
@@ -598,3 +639,11 @@ from the working tree and survives in git history.
   features, and pricing during account setup; the site must run at $0/month.
 - Implement and test the exact `launchd`/`rclone` configuration before launch.
 - Video hosting remains a future, separately scoped capability.
+- **Family-tier device validation (2026-09-14): done.** Firefox on a Mac added
+  five photographs of about 5 MB at a few seconds each and the tab survived,
+  so uploading is supported there (decisions.md #20, #90). On an iPhone 12,
+  mobile Safari's picker hands a HEIC over as a JPEG with its capture date
+  intact; 12 MP and 24 MP photographs process, and a 48 MP one exceeds
+  Safari's 1,536 MB page limit and reloads the page, so phones now refuse
+  photographs over 30 MP with a message (decisions.md #90, #91). No 48
+  MP-capable phone has been tested; one with more memory may allow more.
