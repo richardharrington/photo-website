@@ -67,6 +67,18 @@ export interface PhotoRecord {
    */
   submittedBy?: string | null;
 
+  /**
+   * SHA-256 of the family browser token that committed this photograph, or
+   * null. Only a commit through the family link records one
+   * (family-own-trash.md #3). Never in the viewer projection.
+   *
+   * A hash of a random value, not a person: it lets that one browser trash and
+   * restore the photograph, and says nothing about who holds it. Optional on
+   * read and always written, and `CATALOG_SCHEMA_VERSION` stays 1, for the
+   * same reasons as `submittedBy` above.
+   */
+  uploaderHash?: string | null;
+
   /** Server-assigned, global, monotonic. Orders batches against each other. */
   batchSeq: number;
   /** Position within its batch's selection or drop order. */

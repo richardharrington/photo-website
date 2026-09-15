@@ -69,6 +69,24 @@ export function timingSafeEqualHex(a: string, b: string): boolean {
   return diff === 0;
 }
 
+/**
+ * Length-independent, content-independent string comparison.
+ *
+ * A timing side channel on a path prefix, across the internet and through a
+ * CDN, is not a realistic way to recover a 128-bit secret. This is here
+ * because it costs almost nothing and removes the question entirely. The gate
+ * compares its path segments with it, through `netlify/lib/routing.ts`, and
+ * `uploader.ts` compares an uploader hash with it.
+ */
+export function secureEquals(a: string, b: string): boolean {
+  let diff = a.length ^ b.length;
+  const length = Math.max(a.length, b.length);
+  for (let i = 0; i < length; i += 1) {
+    diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  }
+  return diff === 0;
+}
+
 // ---------------------------------------------------------------------------
 // Signed asset URLs
 // ---------------------------------------------------------------------------

@@ -10,6 +10,8 @@
 /** 128 bits, hex-encoded. */
 const PHOTO_ID_BYTES = 16;
 const AUDIT_ID_BYTES = 8;
+/** 256 bits: a family browser's uploader token (family-own-trash.md 6.1). */
+const UPLOADER_TOKEN_BYTES = 32;
 
 const HEX = '0123456789abcdef';
 
@@ -52,6 +54,15 @@ export function generatePhotoId(): string {
 
 export function generateAuditId(): string {
   return toHex(randomBytes(AUDIT_ID_BYTES));
+}
+
+/**
+ * The secret a family browser proves it added a photograph with. Only its
+ * SHA-256 is ever stored (`uploader.ts`), so it has to be unguessable for the
+ * same reason a photo ID does.
+ */
+export function generateUploaderToken(): string {
+  return toHex(randomBytes(UPLOADER_TOKEN_BYTES));
 }
 
 /** 32 lowercase hex characters. Used to reject malformed IDs before any I/O. */

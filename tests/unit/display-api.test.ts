@@ -134,3 +134,20 @@ describe('submittedBy is never projected', () => {
     expect(JSON.stringify(projected)).not.toContain('cf-address-7');
   });
 });
+
+/**
+ * Nor is `uploaderHash` (family-own-trash.md #5). It is a hash of a random
+ * value, but on the projection every viewer receives it would let anyone
+ * group the library by the device that added it.
+ */
+describe('uploaderHash is never projected', () => {
+  it('omits it from a public photo', () => {
+    const hash = 'ab'.repeat(32);
+    const projected = toPublicPhoto(
+      makePhoto({ id: testPhotoId('family-added'), uploaderHash: hash }),
+    );
+
+    expect('uploaderHash' in projected).toBe(false);
+    expect(JSON.stringify(projected)).not.toContain(hash);
+  });
+});

@@ -12,6 +12,15 @@
  * routes to it and `netlify.toml` declares only `gate`. Do not move it back.
  */
 
+import { secureEquals } from '../../src/shared/signing.ts';
+
+/**
+ * Re-exported so the gate's import stays where it was. It lives in
+ * `src/shared/` because the uploader rules compare with it too, and nothing
+ * under `src/shared/` may import from here.
+ */
+export { secureEquals };
+
 export type AccessMode = 'display' | 'admin';
 
 export interface GateConfig {
@@ -34,22 +43,6 @@ export type RouteDecision =
   | { kind: 'api'; mode: AccessMode; functionPath: string; subPath: string };
 
 const NOT_FOUND: RouteDecision = { kind: 'not-found' };
-
-/**
- * Length-independent, content-independent string comparison.
- *
- * A timing side channel on a path prefix, across the internet and through a
- * CDN, is not a realistic way to recover a 128-bit secret. This is here
- * because it costs almost nothing and removes the question entirely.
- */
-export function secureEquals(a: string, b: string): boolean {
-  let diff = a.length ^ b.length;
-  const length = Math.max(a.length, b.length);
-  for (let i = 0; i < length; i += 1) {
-    diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  }
-  return diff === 0;
-}
 
 function configIsUsable(config: GateConfig): boolean {
   const { displayPath, adminPath } = config;

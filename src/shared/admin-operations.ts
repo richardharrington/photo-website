@@ -60,6 +60,12 @@ export interface CommitInput {
    * somebody who did not send it.
    */
   submittedBy?: string | null;
+  /**
+   * The SHA-256 of the family browser's uploader token, for a commit through
+   * the family link; the admin link never supplies one (family-own-trash.md
+   * #3). Hashed server-side from the request header, never taken from a body.
+   */
+  uploaderHash?: string | null;
 }
 
 export type CommitOutcome =
@@ -119,6 +125,7 @@ export function commitPhoto(
     timestampSource: input.timestampSource,
     caption: input.caption,
     submittedBy: input.submittedBy ?? null,
+    uploaderHash: input.uploaderHash ?? null,
     batchSeq: input.batchSeq,
     selectionIndex: input.selectionIndex,
     // The commit instant, as for every photograph: it is when the photo became
