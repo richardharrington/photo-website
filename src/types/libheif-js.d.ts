@@ -1,5 +1,7 @@
 /**
- * `libheif-js` ships no type declarations. Only the small surface the pipeline
+ * `libheif-js` declares only libheif's low-level Emscripten functions
+ * (`libheif-wasm/libheif.d.ts`, since 1.23), not the `HeifDecoder` wrapper the
+ * pipeline uses or the ESM bundle's path. Only the small surface the pipeline
  * uses is declared here, matching the structural `HeifDecoder` interface in
  * src/pipeline/decode.ts.
  *
