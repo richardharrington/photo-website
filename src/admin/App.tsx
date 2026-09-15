@@ -234,10 +234,12 @@ export function App() {
       attribution: (id) => adminApi.attribution(id),
       // The library holds no trashed photos; the trash page restores.
       restore: () => {},
+      // The admin trashes anything, and never records what it added.
+      addedHere: () => false,
       can: {
         edit: true,
         download: true,
-        trash: true,
+        trash: 'all',
         select: true,
         restore: false,
         filename: true,
@@ -288,6 +290,7 @@ export function App() {
       onLibraryChanged={refetch}
       emphasized={libraryIsEmpty}
       photoViewOpen={route.kind === 'photo' || route.kind === 'recent-photo'}
+      note={null}
     />
   );
 

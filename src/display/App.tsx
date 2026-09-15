@@ -16,6 +16,7 @@ import { useLibrary } from '../shared/ui/library.ts';
 import { LibraryChrome } from '../shared/ui/LibraryChrome.tsx';
 import { UploadPanel } from '../shared/ui/Upload.tsx';
 import { TrashPage } from '../shared/ui/TrashPage.tsx';
+import { getUploader } from '../shared/ui/uploader.ts';
 
 /**
  * The family's one extra page, on top of the routes both apps share. The
@@ -27,13 +28,17 @@ const FAMILY_PAGES = ['trash'] as const;
 /** Nothing is ever selected here: the family app has no selection. */
 const NOTHING_SELECTED: ReadonlySet<string> = new Set();
 
+/** Under the add bar when this browser cannot keep its uploader token. */
+const STORAGE_NOTE =
+  "This browser can't remember your uploads after you close this page, so you won't be able to delete them after that.";
+
 /**
  * The family's site: the library, and the means to add to it and correct it.
  *
  * The display link is the family link (family-tier.md #1). Anyone holding it
- * can add photographs, correct any date, time, or caption, move any photograph
- * to the trash, and restore from the trash — one photograph at a time, in the
- * photo view. There is no selection: a tap on a tile opens it, exactly as it
+ * can add photographs and correct any date, time, or caption, and can move to
+ * the trash, and restore from it, the photographs added from this browser
+ * (family-own-trash.md) — one photograph at a time, in the photo view. There is no selection: a tap on a tile opens it, exactly as it
  * always did (decision 5). What the administrator alone does — permanent
  * deletion, the Inbox, Emails, the export — is not here, and the server refuses
  * it to this link regardless of what this page shows.
@@ -58,8 +63,8 @@ export function App() {
   const { trashCount, countTrashAgain } = library;
 
   /**
-   * Curation for the family's library: edit, download, and trash, one
-   * photograph at a time. No selection, so the selection members are inert
+   * Curation for the family's library: edit and download any photograph, and
+   * trash one this browser added, one at a time. No selection, so the selection members are inert
    * and `select` is false; no filename on a tile or at the photo view's
    * corner (decision 7); and no attribution, which the display API does not
    * answer, so it resolves null without a request.
@@ -76,10 +81,11 @@ export function App() {
       attribution: () => Promise.resolve(null),
       // The library holds no trashed photos; the trash page restores.
       restore: () => {},
+      addedHere: (id) => getUploader().addedHere(id),
       can: {
         edit: true,
         download: true,
-        trash: true,
+        trash: 'own',
         select: false,
         restore: false,
         filename: false,
@@ -100,9 +106,12 @@ export function App() {
         current={route.kind === 'page' ? null : onRecent ? 'recent' : 'library'}
         unseen={unseen}
       />
-      <Link to={routes.trash()}>
-        Trash{trashCount === null ? '' : ` (${trashCount})`}
-      </Link>
+      {/* Only while this browser's trash holds something: most of the family
+          never delete anything, and `/trash` stays reachable regardless
+          (family-own-trash.md #10). */}
+      {trashCount !== null && trashCount > 0 ? (
+        <Link to={routes.trash()}>Trash ({trashCount})</Link>
+      ) : null}
     </>
   );
 
@@ -115,6 +124,7 @@ export function App() {
       onLibraryChanged={refetch}
       emphasized={libraryIsEmpty}
       photoViewOpen={route.kind === 'photo' || route.kind === 'recent-photo'}
+      note={getUploader().persistent ? null : STORAGE_NOTE}
     />
   );
 

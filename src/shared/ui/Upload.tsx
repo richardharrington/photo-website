@@ -62,6 +62,12 @@ interface UploadPanelProps {
    * library.
    */
   photoViewOpen: boolean;
+  /**
+   * One line under the hints, at every width, or null. The family app passes
+   * the warning that this browser cannot keep its uploader token, so what it
+   * adds can be deleted only until the page closes (family-own-trash.md #9).
+   */
+  note: string | null;
 }
 
 /**
@@ -81,6 +87,7 @@ export function UploadPanel({
   onLibraryChanged,
   emphasized,
   photoViewOpen,
+  note,
 }: UploadPanelProps) {
   // Lazy state, not a ref: the queue is created once, and reading a ref
   // during render is unsafe.
@@ -207,10 +214,12 @@ export function UploadPanel({
       attribution: () => Promise.resolve(null),
       // Nothing here is in the trash to put back.
       restore: () => {},
+      // Nor anything committed yet to have been added.
+      addedHere: () => false,
       can: {
         edit: true,
         download: false,
-        trash: false,
+        trash: 'none',
         select: false,
         restore: false,
         // Before a thumbnail exists the filename is the only way to tell one
@@ -272,6 +281,7 @@ export function UploadPanel({
           <p className="drop-target__hint drop-target__hint--narrow">
             JPEG, PNG, and HEIC.
           </p>
+          {note === null ? null : <p className="drop-target__note">{note}</p>}
           <input
             ref={inputRef}
             type="file"

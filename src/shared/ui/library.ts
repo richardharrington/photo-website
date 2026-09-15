@@ -3,12 +3,12 @@
  * (family-tier.md #11).
  *
  * The family app and the admin render the same listings and the same photo
- * view, and since the family link can delete, edit, and upload too, both need
- * the same machinery around them: the fetched timeline and a patched copy,
- * the single-flight refetch, the trash preview and confirm, the advance after
- * a delete, the five-second undo offer, and the error line. One hook holds
- * all of it, so neither app has its own copy to drift. The admin adds its
- * selection and caption apply on top; the family app adds nothing.
+ * view, and since the family link can edit, upload, and delete what it added
+ * too, both need the same machinery around them: the fetched timeline and a
+ * patched copy, the single-flight refetch, the trash preview and confirm, the
+ * advance after a delete, the five-second undo offer, and the error line. One
+ * hook holds all of it, so neither app has its own copy to drift. The admin
+ * adds its selection and caption apply on top; the family app adds nothing.
  *
  * A mutation patches the copy from the server's own reply, so the page never
  * waits on a reload, and a background refetch replaces it a moment later so

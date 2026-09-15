@@ -4,7 +4,7 @@ import { altTextFor } from '../validation.ts';
 import { derivativeSrcSet, derivativeUrl } from '../urls.ts';
 import { formatCaptureDate, formatCaptureTimeForViewer } from '../datetime.ts';
 import { readApi, routes } from './api.ts';
-import { useCuration } from './curation.ts';
+import { canTrash, useCuration } from './curation.ts';
 import { EditForm } from './EditForm.tsx';
 import type { PublicPhoto } from '../display-api.ts';
 
@@ -89,7 +89,7 @@ function captureLine(photo: PublicPhoto): string | null {
  * This is also the editing view, and the whole of it, under any context with
  * `edit`: the bottom-left stack holds the date, time, and caption as fields
  * with a Save button, and the action row gains Delete where the context can
- * trash and Restore where it can restore. Where the context shows filenames —
+ * trash this photograph and Restore where it can restore. Where the context shows filenames —
  * the admin's listings and the files still uploading — the filename is at the
  * top right. There is no side panel and no separate enlarged preview, because
  * this is the enlarged preview.
@@ -295,7 +295,7 @@ export function Lightbox({
         // the button, and the app advances to the next photo after each one.
         case 'Delete':
         case 'Backspace':
-          if (curation?.can.trash) {
+          if (curation && canTrash(curation, photo.id)) {
             event.preventDefault();
             curation.trash(photo.id);
           }
@@ -498,6 +498,14 @@ export function Lightbox({
           >
             <dt>Original filename</dt>
             <dd>{photo.originalFilename}</dd>
+            {curation?.can.trash === 'own' && curation.addedHere(photo.id) ? (
+              <>
+                {/* Why Delete is on this photograph here and missing from it
+                    on any other device (family-own-trash.md #4). */}
+                <dt>Added from</dt>
+                <dd>This device</dd>
+              </>
+            ) : null}
             {sender ? (
               <>
                 {/* Only for a photograph that arrived by email, and only in
@@ -564,7 +572,7 @@ export function Lightbox({
                 {downloading ? 'Preparing download…' : 'Download'}
               </button>
             )}
-            {curation?.can.trash ? (
+            {curation && canTrash(curation, photo.id) ? (
               <button
                 type="button"
                 className="admin-danger"

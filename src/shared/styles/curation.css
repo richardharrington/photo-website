@@ -127,6 +127,15 @@ button:disabled {
   font-size: 0.875rem;
 }
 
+/* A standing caveat under the hint, at every width (family-own-trash.md 7.4):
+   the hint's voice, a little apart from it, and wrapping on a phone. */
+.drop-target__note {
+  margin: calc(var(--space) / 2) 0 0;
+  color: var(--fg-muted);
+  font-size: 0.8125rem;
+  max-width: 36rem;
+}
+
 .drop-target__input {
   display: none;
 }

@@ -45,10 +45,11 @@ function harness(select: boolean, selected: readonly string[] = []) {
     edit: () => Promise.reject(new Error('not in this test')),
     attribution: () => Promise.resolve(null),
     restore: () => {},
+    addedHere: () => false,
     can: {
       edit: true,
       download: true,
-      trash: true,
+      trash: 'all',
       select,
       restore: false,
       filename: true,

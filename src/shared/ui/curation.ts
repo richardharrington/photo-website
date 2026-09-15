@@ -2,8 +2,9 @@
  * The one seam between the shared UI and what a listing may do.
  *
  * Both apps render the same pages, the same grid, and the same lightbox, and
- * both curate: the family link adds, edits, trashes, and restores
- * (family-tier.md #3), and the admin adds selection on top. Rather than thread
+ * both curate: the family link adds and edits (family-tier.md #3), and trashes
+ * and restores what its own browser added (family-own-trash.md), and the admin
+ * trashes anything and adds selection on top. Rather than thread
  * a dozen callbacks through every component, each listing provides this
  * context and the shared components read what they need from it — deciding by
  * `can`, never by whether a context is present.
@@ -63,6 +64,12 @@ export interface Curation {
    * listing implements it as an unreachable no-op.
    */
   restore(id: string): void;
+  /**
+   * This browser added the photograph. Only the family's library can say yes;
+   * every other listing answers false. It decides only what is shown — the
+   * server decides what may be trashed (family-own-trash.md #12).
+   */
+  addedHere(id: string): boolean;
   /** What the photo view offers for these photographs; see `Capabilities`. */
   can: Capabilities;
 }
@@ -73,17 +80,21 @@ export interface Curation {
  * Six flags rather than one `readOnly` or `isAdmin`, because the six listings
  * that provide a context do not agree along any single axis:
  *
- *   | Listing               | edit | download | trash | select | restore | filename |
- *   | --------------------- | ---- | -------- | ----- | ------ | ------- | -------- |
- *   | Family library/recent | yes  | yes      | yes   | no     | no      | no       |
- *   | Family uploading      | yes  | no       | no    | no     | no      | yes      |
- *   | Family trash          | no   | no       | no    | no     | yes     | no       |
- *   | Admin library/recent  | yes  | yes      | yes   | yes    | no      | yes      |
- *   | Admin uploading       | yes  | no       | no    | no     | no      | yes      |
- *   | Admin trash           | no   | no       | no    | yes    | yes     | yes      |
+ *   | Listing               | edit | download | trash  | select | restore | filename |
+ *   | --------------------- | ---- | -------- | ------ | ------ | ------- | -------- |
+ *   | Family library/recent | yes  | yes      | `own`  | no     | no      | no       |
+ *   | Family uploading      | yes  | no       | `none` | no     | no      | yes      |
+ *   | Family trash          | no   | no       | `none` | no     | yes     | no       |
+ *   | Admin library/recent  | yes  | yes      | `all`  | yes    | no      | yes      |
+ *   | Admin uploading       | yes  | no       | `none` | no     | no      | yes      |
+ *   | Admin trash           | no   | no       | `none` | yes    | yes     | yes      |
  *
- * Both libraries edit, download, and trash; only the admin's selects, because
- * selection and its bulk actions are the administrator's (family-tier.md #5). A
+ * Both libraries edit and download. The admin's trashes any photograph and the
+ * family's only one this browser added (`own`, decided per photograph by
+ * `canTrash`), because a family member may take back their own mistake but not
+ * remove anybody else's photograph (family-own-trash.md #4). Only the admin's
+ * selects, because selection and its bulk actions are the administrator's
+ * (family-tier.md #5). A
  * photograph still being uploaded allows editing and nothing else — it is
  * exactly the point of showing it early that its date and caption can be typed
  * before it lands — but it has no stored bytes to download, no catalog record
@@ -100,7 +111,11 @@ export interface Curation {
 export interface Capabilities {
   edit: boolean;
   download: boolean;
-  trash: boolean;
+  /**
+   * Which photographs the photo view offers Delete for: every one, only those
+   * added here (the family's library), or none.
+   */
+  trash: 'all' | 'own' | 'none';
   select: boolean;
   /** Restore from the trash. Only a trash listing says yes. */
   restore: boolean;
@@ -109,6 +124,12 @@ export interface Capabilities {
    * the files still uploading. Photo info shows it regardless.
    */
   filename: boolean;
+}
+
+/** Whether the photo view offers Delete, and the Delete key, for this photograph. */
+export function canTrash(curation: Curation, photoId: string): boolean {
+  if (curation.can.trash === 'all') return true;
+  return curation.can.trash === 'own' && curation.addedHere(photoId);
 }
 
 export const CurationContext = createContext<Curation | null>(null);

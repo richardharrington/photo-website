@@ -81,7 +81,9 @@ function purgeDate(trashedAt: string): string {
  * trashed photo.
  *
  * One page for both apps (family-tier.md 7.7). The family's trash holds no
- * selection: a tap opens a photograph and Restore puts it back. The admin
+ * selection: a tap opens a photograph and Restore puts it back. It holds only
+ * the photographs added from this browser, because that is all the server
+ * lists for the family link (family-own-trash.md #6); nothing here filters. The admin
  * passes a selection, a bar that owns Restore and Delete permanently for it,
  * and the permanent-delete calls; the grid, the photo view, the restore call,
  * and the dialog stay here either way.
@@ -200,17 +202,18 @@ export function TrashPage({
       extendTo: (id) => selection?.extendTo(id),
       selectAll: (all) => selection?.selectAll(all),
       trash: () => {
-        // Unreachable: `can.trash` is false, so no Delete button and no key.
+        // Unreachable: `can.trash` is 'none', so no Delete button and no key.
       },
       edit: () => Promise.reject(new Error('A trashed photo cannot be edited.')),
       // The trash identifies a photograph well enough to decide about it;
       // where it came from is a library question.
       attribution: () => Promise.resolve(null),
       restore: (id) => void restore([id]),
+      addedHere: () => false,
       can: {
         edit: false,
         download: false,
-        trash: false,
+        trash: 'none',
         select: selection !== null,
         restore: true,
         filename: filenames,
@@ -257,9 +260,9 @@ export function TrashPage({
           </p>
         ) : (
           <p className="trash__intro">
-            Deleted photos are kept for {TRASH_RETENTION_DAYS} days, then removed
-            automatically. Tap a photo to look at it and restore it. Only the
-            administrator can delete a photo permanently.
+            Photos added from this device that have been deleted are kept here for{' '}
+            {TRASH_RETENTION_DAYS} days, then removed automatically. Tap one to look at
+            it and restore it.
           </p>
         )}
 

@@ -28,7 +28,7 @@ const photo = toPublicPhoto(
 const FAMILY_LIBRARY: Capabilities = {
   edit: true,
   download: true,
-  trash: true,
+  trash: 'own',
   select: false,
   restore: false,
   filename: false,
@@ -36,7 +36,7 @@ const FAMILY_LIBRARY: Capabilities = {
 const FAMILY_TRASH: Capabilities = {
   edit: false,
   download: false,
-  trash: false,
+  trash: 'none',
   select: false,
   restore: true,
   filename: false,
@@ -44,7 +44,7 @@ const FAMILY_TRASH: Capabilities = {
 const ADMIN_LIBRARY: Capabilities = {
   edit: true,
   download: true,
-  trash: true,
+  trash: 'all',
   select: true,
   restore: false,
   filename: true,
@@ -52,13 +52,13 @@ const ADMIN_LIBRARY: Capabilities = {
 const ADMIN_TRASH: Capabilities = {
   edit: false,
   download: false,
-  trash: false,
+  trash: 'none',
   select: true,
   restore: true,
   filename: true,
 };
 
-function curationWith(can: Capabilities): Curation {
+function curationWith(can: Capabilities, addedHere = false): Curation {
   return {
     selectedIds: new Set(),
     selectOnly: vi.fn(),
@@ -69,6 +69,7 @@ function curationWith(can: Capabilities): Curation {
     edit: vi.fn(() => Promise.reject(new Error('not in this test'))),
     attribution: vi.fn(() => Promise.resolve(null)),
     restore: vi.fn(),
+    addedHere: vi.fn(() => addedHere),
     can,
   };
 }
@@ -79,8 +80,8 @@ function provided(curation: Curation, children: ReactNode) {
   );
 }
 
-function lightboxUnder(can: Capabilities) {
-  const curation = curationWith(can);
+function lightboxUnder(can: Capabilities, addedHere = false) {
+  const curation = curationWith(can, addedHere);
   provided(
     curation,
     <Lightbox
@@ -102,8 +103,8 @@ afterEach(() => {
 });
 
 describe('the lightbox', () => {
-  it("under the family's library: the form and every action but Restore, no filename", () => {
-    lightboxUnder(FAMILY_LIBRARY);
+  it("under the family's library, on a photograph added here: the form and every action but Restore, no filename", () => {
+    lightboxUnder(FAMILY_LIBRARY, true);
 
     expect(form()).not.toBeNull();
     expect(button('Save changes') ?? button('Save')).not.toBeNull();
@@ -158,14 +159,72 @@ describe('the lightbox', () => {
     expect(panel.textContent).not.toContain('Emailed by');
   });
 
-  it("sends Delete and Backspace to the family's trash flow", () => {
-    const curation = lightboxUnder(FAMILY_LIBRARY);
+  it("sends Delete and Backspace to the family's trash flow, for a photograph added here", () => {
+    const curation = lightboxUnder(FAMILY_LIBRARY, true);
 
     fireEvent.keyDown(window, { key: 'Delete' });
     fireEvent.keyDown(window, { key: 'Backspace' });
     expect(curation.trash).toHaveBeenCalledTimes(2);
     expect(curation.trash).toHaveBeenCalledWith(photo.id);
   });
+});
+
+/**
+ * Delete only on the photographs this browser added (family-own-trash.md
+ * 11.2). The server is what enforces it; these pin that the view offers
+ * nothing it would refuse, and takes nothing away from the admin.
+ */
+describe('Delete, by who added the photograph', () => {
+  function openInfo() {
+    fireEvent.pointerDown(button('Photo info')!);
+    fireEvent.click(button('Photo info')!);
+    return document.getElementById('photo-information')!;
+  }
+
+  const addedFromLine = (panel: HTMLElement) =>
+    [...panel.querySelectorAll('dt')].find((dt) => dt.textContent === 'Added from');
+
+  it("under the family's library, on a photograph added here: Delete, the key, and the Added from line", () => {
+    const curation = lightboxUnder(FAMILY_LIBRARY, true);
+
+    expect(button('Delete')).not.toBeNull();
+    fireEvent.keyDown(window, { key: 'Delete' });
+    expect(curation.trash).toHaveBeenCalledWith(photo.id);
+    expect(curation.addedHere).toHaveBeenCalledWith(photo.id);
+
+    const line = addedFromLine(openInfo());
+    expect(line).toBeDefined();
+    expect(line!.nextElementSibling?.tagName).toBe('DD');
+    expect(line!.nextElementSibling?.textContent).toBe('This device');
+  });
+
+  it("under the family's library, on any other photograph: no Delete, inert keys, no Added from line", () => {
+    const curation = lightboxUnder(FAMILY_LIBRARY, false);
+
+    expect(button('Delete')).toBeNull();
+    expect(button('Download')).not.toBeNull();
+    expect(button('Photo info')).not.toBeNull();
+    fireEvent.keyDown(window, { key: 'Delete' });
+    fireEvent.keyDown(window, { key: 'Backspace' });
+    expect(curation.trash).not.toHaveBeenCalled();
+
+    const panel = openInfo();
+    expect(addedFromLine(panel)).toBeUndefined();
+    expect(panel.textContent).not.toContain('This device');
+  });
+
+  it.each([true, false])(
+    "under the admin's library, with addedHere %s: Delete regardless, and no Added from line",
+    (addedHere) => {
+      const curation = lightboxUnder(ADMIN_LIBRARY, addedHere);
+
+      expect(button('Delete')).not.toBeNull();
+      fireEvent.keyDown(window, { key: 'Backspace' });
+      expect(curation.trash).toHaveBeenCalledWith(photo.id);
+
+      expect(addedFromLine(openInfo())).toBeUndefined();
+    },
+  );
 });
 
 describe("the family's grid", () => {
