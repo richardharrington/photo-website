@@ -64,11 +64,15 @@ export function emptyNotificationState(): NotificationState {
   return { schemaVersion: NOTIFICATION_SCHEMA_VERSION, recipients: {} };
 }
 
-/** A recipient with the two new bits off, which is what a version-1 entry
- *  means and what a brand-new one starts as. */
-export function newRecipient(seenThrough: string, enabled = true): RecipientState {
+/**
+ * A recipient with every switch off, which is what a brand-new address starts
+ * as. The digest, Can submit, and Reviews inbox are each turned on by hand on
+ * the Emails page; verifying an address turns on nothing, so its owner hears
+ * from the site only once the administrator has decided they should.
+ */
+export function newRecipient(seenThrough: string): RecipientState {
   return {
-    enabled,
+    enabled: false,
     canSubmit: false,
     reviewsInbox: false,
     seenThrough,

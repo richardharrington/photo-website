@@ -417,8 +417,7 @@ async function handleEmails(
 
     const at = now();
     const state = await mutateNotificationState(store, (current) => {
-      const existing: RecipientState =
-        current.recipients[email] ?? newRecipient(at, false);
+      const existing: RecipientState = current.recipients[email] ?? newRecipient(at);
       const startingDigest = which === 'enabled' && value && !existing.enabled;
       const updated: NotificationState = {
         ...current,

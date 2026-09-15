@@ -38,7 +38,8 @@ function enable(state: NotificationState, email: string) {
       ...state,
       recipients: {
         ...state.recipients,
-        [email]: newRecipient(NOW),
+        // A new recipient starts with every switch off; this one is turned on.
+        [email]: { ...newRecipient(NOW), enabled: true },
       },
     },
     value: email,

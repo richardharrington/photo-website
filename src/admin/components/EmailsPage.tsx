@@ -191,9 +191,10 @@ export function EmailsPage({ nav }: { nav: ReactNode }) {
     <>
       <Layout nav={nav}>
         <p className="emails__intro">
-          Each of these addresses gets one plain-text email a day when new photos have
-          been added — a count and a link, nothing else. Nothing is sent to an address
-          until its owner confirms it.
+          An address with <strong>Notifications</strong> on gets one plain-text email a
+          day when new photos have been added — a count and a link, nothing else.
+          Nothing is sent to an address until its owner confirms it, and every switch
+          starts off: confirming an address turns none of them on.
         </p>
         <p className="emails__intro">
           <strong>Can submit</strong> lets an address email photographs to the site;

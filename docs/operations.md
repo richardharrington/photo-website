@@ -817,11 +817,15 @@ npx wrangler secret put CLOUDFLARE_ADDRESSES_READ_TOKEN
       shows **Awaiting verification** until you click it.
 - [ ] Click the link, reload the page, and confirm the row now reads
       **Verified**.
-- [ ] Press **Send test** and read what arrives. Expect
-      `[Test] No new photos on Family Photos` — the address was switched on
-      just now, so its clock starts now and the library that was already there
-      is not new to it (decisions.md #71). Check the link in it opens the
+- [ ] Press **Send test** and read what arrives. A test is sent whether or
+      not the address's switches are on. Expect
+      `[Test] No new photos on Family Photos` — the address was added just
+      now, so its clock starts now and the library that was already there is
+      not new to it (decisions.md #71). Check the link in it opens the
       Recently added view.
+- [ ] A new address has **Notifications**, **Can submit**, and **Reviews
+      inbox** all off, and confirming it turns none of them on. Turn on
+      **Notifications** for each address that should get the daily digest.
 
   This is the only way to confirm the domain, the binding, the five secrets,
   the token, and the link are all right without waiting for 04:17 UTC — and

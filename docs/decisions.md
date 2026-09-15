@@ -926,6 +926,10 @@ its ordering, and its URLs are unchanged.
     switching off and on again is not a way to make the site re-announce
     itself.
 
+    **Amended 2026-09-15 by #95.** Adding an address no longer switches it
+    on. Its watermark is set when it is added and set again when Notifications
+    is switched on, so the rule above still holds.
+
 72. **The state file is not in the catalog.** Every viewer request loads the
     catalog through the Worker. A list of family email addresses has no
     business travelling on the read path for a thumbnail, so it is a second
@@ -1640,4 +1644,20 @@ its ordering, and its URLs are unchanged.
     administrator gets. The admin keeps its selection bar and nothing about
     it changed; its audit events now record `via` like every other curation
     act.
+
+## A new address starts with every switch off — 2026-09-15
+
+95. **Adding an address, and its owner confirming it, switches nothing on.**
+    Until now an address was added with Notifications on and Can submit and
+    Reviews inbox off, so the moment its owner clicked Cloudflare's
+    verification link the daily digest started going to them without the
+    administrator deciding anything more. The owner wants all three decided
+    by hand: `newRecipient` now returns every switch off, `/emails/add` writes
+    and reports that, and the Emails page says so.
+
+    Nothing about the switches themselves changed. Turning Notifications on
+    still sets the watermark to that moment (#71), so the first digest never
+    announces the library that was already there, and a test can still be
+    sent to a confirmed address whatever its switches say (#73). An address
+    added before this keeps whatever its switches were.
 

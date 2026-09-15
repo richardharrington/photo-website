@@ -107,56 +107,78 @@ test('switches Can submit and Reviews inbox independently of the digest', async 
   const submit = target.getByRole('switch', { name: 'Can submit' });
   const reviews = target.getByRole('switch', { name: 'Reviews inbox' });
 
-  // A new address starts with the digest on and both new bits off; each is a
-  // deliberate decision, not a default that follows from another.
-  await expect(digest).toBeChecked();
+  // A new address starts with all three off; each is a deliberate decision,
+  // not a default that follows from another or from verification.
+  await expect(digest).not.toBeChecked();
   await expect(submit).not.toBeChecked();
   await expect(reviews).not.toBeChecked();
 
   await submit.click();
   await expect(submit).toBeChecked();
-  await expect(digest).toBeChecked();
+  await expect(digest).not.toBeChecked();
 
   await reviews.click();
   await expect(reviews).toBeChecked();
+  await expect(digest).not.toBeChecked();
 
-  // Switching the digest off leaves the other two exactly where they were.
+  // Switching the digest on, and off again, leaves the other two exactly where
+  // they were.
+  await digest.click();
+  await expect(digest).toBeChecked();
+  await expect(submit).toBeChecked();
+  await expect(reviews).toBeChecked();
+
   await digest.click();
   await expect(digest).not.toBeChecked();
   await expect(submit).toBeChecked();
   await expect(reviews).toBeChecked();
 });
 
-test('starts a new address switched on, and has never sent to it', async ({ page }) => {
+test('starts a verified address with every switch off, and has never sent to it', async ({
+  page,
+}) => {
+  // The fixture's VERIFIED address is confirmed the moment it is added, which
+  // is the case in question: verification switches nothing on.
   await add(page, VERIFIED);
+  await expect(row(page, VERIFIED)).toContainText('Verified');
+  for (const name of ['Notifications', 'Can submit', 'Reviews inbox']) {
+    const toggle = row(page, VERIFIED).getByRole('switch', { name });
+    await expect(toggle).toBeEnabled();
+    await expect(toggle).not.toBeChecked();
+  }
+  await expect(row(page, VERIFIED)).toContainText('Off');
+  await expect(row(page, VERIFIED)).toContainText('Never');
+
+  // And it is still off after the page is loaded again from the server.
+  await page.reload();
   await expect(
     row(page, VERIFIED).getByRole('switch', { name: 'Notifications' }),
-  ).toBeChecked();
-  await expect(row(page, VERIFIED)).toContainText('Never');
+  ).not.toBeChecked();
 });
 
-test('switches an address off and on again', async ({ page }) => {
+test('switches an address on and off again', async ({ page }) => {
   await add(page, VERIFIED);
   const toggle = row(page, VERIFIED).getByRole('switch', { name: 'Notifications' });
 
-  // A click, not `uncheck()`: the switch is controlled by the refetched list
+  // A click, not `check()`: the switch is controlled by the refetched list
   // rather than by the click, so a helper that clicks until the box agrees
   // would click twice and land back where it started.
   await toggle.click();
-  await expect(row(page, VERIFIED)).toContainText('Off');
-  await expect(toggle).not.toBeChecked();
-
-  await toggle.click();
   await expect(row(page, VERIFIED)).toContainText('On');
   await expect(toggle).toBeChecked();
+
+  await toggle.click();
+  await expect(row(page, VERIFIED)).toContainText('Off');
+  await expect(toggle).not.toBeChecked();
 });
 
 test('sends a test and reports the result on the row', async ({ page }) => {
   await add(page, VERIFIED);
   await row(page, VERIFIED).getByRole('button', { name: 'Send test' }).click();
 
-  // Enabling starts the clock at that moment, so a library that was already
-  // there is not new to this address — which is exactly the point.
+  // A test goes out whether or not the digest is on: that is the use of it.
+  // Adding the address started its clock, so a library that was already there
+  // is not new to it — which is exactly the point.
   await expect(row(page, VERIFIED)).toContainText('Sent: no new photos');
   // It reports in place; it never navigates.
   await expect(page).toHaveURL(`${BASE}/emails`);

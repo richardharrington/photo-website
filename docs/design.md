@@ -520,7 +520,9 @@ of the [family site](#family-site)'s rules.
   **Can submit** (mail from this address is accepted into the Inbox), and
   **Reviews inbox** (this address's digest says when the Inbox is waiting). Any
   combination is allowed, and all three are inert until the address is
-  confirmed.
+  confirmed. All three start off when an address is added and stay off when it
+  is confirmed: nothing is sent to an address, and nothing it sends is
+  accepted, until the administrator switches it on by hand.
 - A recipient who is confirmed and switched on receives **one plain-text email
   a day**, and only on a day something arrived: how many photographs were added
   since the last message they were sent, and a link to the Recently added view.

@@ -398,9 +398,10 @@ async function handleAddRecipient(
       ...state,
       recipients: {
         ...state.recipients,
-        // Enabling starts the clock: `seenThrough` is now, so the first digest
-        // never announces the library that was already there. The two
-        // submission bits start off; each is a deliberate decision.
+        // Every switch starts off, the digest included; each is a deliberate
+        // decision on the Emails page, and verifying the address changes
+        // none of them. Turning the digest on later restarts the clock, so the
+        // first digest never announces the library that was already there.
         [address.email]: newRecipient(at),
       },
     },
@@ -412,7 +413,7 @@ async function handleAddRecipient(
       id: address.id,
       email: address.email,
       verified: address.verified,
-      enabled: true,
+      enabled: false,
       canSubmit: false,
       reviewsInbox: false,
       lastSent: null,
@@ -505,8 +506,7 @@ async function handleSetEnabled(
   if (!address.verified) return notFound();
 
   const state = await mutateNotificationState(store(), (current) => {
-    const existing: RecipientState =
-      current.recipients[email] ?? newRecipient(at, false);
+    const existing: RecipientState = current.recipients[email] ?? newRecipient(at);
     const startingDigest = which === 'enabled' && value && !existing.enabled;
 
     const next: RecipientState = {
