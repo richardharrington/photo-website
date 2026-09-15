@@ -454,6 +454,8 @@ test.describe('the photo view', () => {
     expect(form.y + form.height).toBeLessThanOrEqual(remove.y + 1);
     expect(Math.abs(remove.y - info.y)).toBeLessThan(2);
     expect(info.x).toBeGreaterThan(remove.x);
+    // Left-aligned with the form, under Save and Cancel.
+    expect(Math.abs(remove.x - form.x)).toBeLessThan(2);
     await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
 
     // And the whole stack sits clear of the picture.
