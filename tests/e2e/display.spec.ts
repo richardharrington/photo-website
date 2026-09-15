@@ -5,6 +5,23 @@ import { tinyPng } from '../../fixtures/tiny-png.ts';
 
 const BASE = '/dev-display-path';
 
+/**
+ * Where the picture itself starts, in pixels. `object-fit: contain` centres the
+ * picture inside the img element's box, so the visible left edge is derived
+ * from the element's box and its aspect ratio.
+ */
+function pictureLeftOf(page: Page) {
+  return page.locator('.lightbox__image').evaluate((node) => {
+    const img = node as HTMLImageElement;
+    const box = img.getBoundingClientRect();
+    const ratio =
+      Number(img.getAttribute('width')) / Number(img.getAttribute('height'));
+    return box.left + (box.width - Math.min(box.width, box.height * ratio)) / 2;
+  });
+}
+
+const rightOf = (box: { x: number; width: number }) => box.x + box.width;
+
 /** True when the element's box is inside the viewport, top and bottom. */
 async function isInViewport(locator: Locator) {
   return locator.evaluate((node) => {
@@ -197,12 +214,12 @@ test.describe('the photo view', () => {
 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
-    // The family's photo view is the editing view (family-tier.md 5.3), so the
-    // date is the value of its field.
-    await expect(page.getByLabel('Capture date')).toHaveValue('2026-08-15');
+    // The photo view opens to read (read-first-photo-view.md), so the date is
+    // text.
+    await expect(page.locator('.lightbox__date')).toHaveText('August 15, 2026');
 
     await page.getByRole('button', { name: 'Next photo' }).click();
-    await expect(page.getByLabel('Capture date')).toHaveValue('2026-08-02');
+    await expect(page.locator('.lightbox__date')).toHaveText('August 2, 2026');
   });
 
   test('closes the info panel on the way to the next photo', async ({ page }) => {
@@ -329,11 +346,11 @@ test.describe('the photo view', () => {
   }) => {
     await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['market']}`);
 
-    // In its field, which is where the family reads and corrects it; the
-    // filename stays out of the view until Photo info (family-tier.md #7).
-    await expect(
-      page.getByRole('textbox', { name: 'Caption', exact: true }),
-    ).toHaveValue('Saturday market.');
+    // As text, with no field to be had on a photograph this browser did not
+    // add; the filename stays out of the view until Photo info
+    // (family-tier.md #7).
+    await expect(page.locator('.lightbox__caption')).toHaveText('Saturday market.');
+    await expect(page.getByRole('dialog').getByRole('textbox')).toHaveCount(0);
     await expect(page.getByText('IMG_20260815_100500.HEIC')).toHaveCount(0);
     await expect(page.locator('.lightbox__filename')).toHaveCount(0);
 
@@ -357,39 +374,70 @@ test.describe('the photo view', () => {
     await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['market']}`);
     await expect(page.locator('.lightbox__image')).toBeVisible();
 
+    const box = async (locator: Locator) => (await locator.boundingBox())!;
+    const caption = await box(page.locator('.lightbox__caption'));
+    const date = await box(page.locator('.lightbox__date'));
+    const download = await box(
+      page.getByRole('button', { name: 'Download', exact: true }),
+    );
+    const info = await box(page.getByRole('button', { name: 'Photo info' }));
+
+    // The read view's corner stack: caption above date, then the buttons, with
+    // Photo info lowest, all sharing one right edge.
+    expect(caption.y).toBeLessThan(date.y);
+    expect(date.y).toBeLessThan(download.y);
+    expect(download.y).toBeLessThan(info.y);
+    const edges = [caption, date, download, info].map(rightOf);
+    for (const edge of edges) expect(Math.abs(edge - edges[0]!)).toBeLessThan(2);
+
+    // And that edge ends short of the picture.
+    expect((await pictureLeftOf(page)) - Math.max(...edges)).toBeGreaterThanOrEqual(15);
+  });
+
+  test('makes room beside the photo for the form in the edit view', async ({
+    page,
+  }) => {
+    // A photograph this browser added, so it has Edit.
+    const id = FIXTURE_PHOTO_IDS['scratch-0-a']!;
+    await page.addInitScript(
+      ({ token, ids }) => {
+        window.localStorage.setItem('photo-uploader-token', token);
+        window.localStorage.setItem('photo-uploaded-ids', JSON.stringify(ids));
+      },
+      { token: FIXTURE_UPLOADER_TOKEN, ids: [id] },
+    );
+    // The picture slides over when Edit opens; measure where it lands.
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(`${BASE}/photo/${id}`);
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await expect(page.locator('.edit-form')).toBeVisible();
+
     const back = (await page.locator('.lightbox__back').boundingBox())!;
-    const image = (await page.locator('.lightbox__image').boundingBox())!;
     const form = (await page.locator('.edit-form').boundingBox())!;
-    const download = (await page
-      .getByRole('button', { name: 'Download', exact: true })
+    const remove = (await page
+      .getByRole('button', { name: 'Delete', exact: true })
       .boundingBox())!;
     const info = (await page
       .getByRole('button', { name: 'Photo info' })
       .boundingBox())!;
 
-    // The picture starts below the way back rather than beside it: in the
-    // editing view the stage clears a fixed gutter for the form, exactly as
-    // the admin's photo view does, and nothing overlaps the picture.
-    expect(image.y).toBeGreaterThanOrEqual(back.y + back.height);
+    // The stage clears a fixed gutter for the form, so the picture starts to
+    // the right of the way back rather than under it. (It can reach the top:
+    // with no arrows beside it, a landscape picture grows to the stage's
+    // height.)
+    expect(await pictureLeftOf(page)).toBeGreaterThanOrEqual(back.x + back.width);
 
-    // The family's photo view is the editing view (family-tier.md 5.3): the
-    // form, then Download, Delete, and Photo info across one row beneath it.
-    expect(form.y + form.height).toBeLessThanOrEqual(download.y + 1);
-    expect(Math.abs(download.y - info.y)).toBeLessThan(2);
-    expect(info.x).toBeGreaterThan(download.x);
+    // The form, then Delete and Photo info across one row beneath it, and no
+    // Download.
+    expect(form.y + form.height).toBeLessThanOrEqual(remove.y + 1);
+    expect(Math.abs(remove.y - info.y)).toBeLessThan(2);
+    expect(info.x).toBeGreaterThan(remove.x);
+    await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
 
-    // And the whole stack sits clear of the picture. `object-fit: contain`
-    // centres the picture inside the img element's box, so the visible left
-    // edge is derived from the element's box and its aspect ratio.
-    const right = (box: { x: number; width: number }) => box.x + box.width;
-    const pictureLeft = await page.locator('.lightbox__image').evaluate((node) => {
-      const img = node as HTMLImageElement;
-      const box = img.getBoundingClientRect();
-      const ratio =
-        Number(img.getAttribute('width')) / Number(img.getAttribute('height'));
-      return box.left + (box.width - Math.min(box.width, box.height * ratio)) / 2;
-    });
-    expect(pictureLeft - Math.max(right(form), right(info))).toBeGreaterThanOrEqual(15);
+    // And the whole stack sits clear of the picture.
+    expect(
+      (await pictureLeftOf(page)) - Math.max(rightOf(form), rightOf(info)),
+    ).toBeGreaterThanOrEqual(15);
   });
 
   test('preserves line breaks in a caption without interpreting markup', async ({
@@ -397,11 +445,14 @@ test.describe('the photo view', () => {
   }) => {
     await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['beach-scan']}`);
 
-    // A field's value is text by construction, line breaks and all.
-    const caption = page.getByRole('textbox', { name: 'Caption', exact: true });
-    await expect(caption).toHaveValue(
-      /Scanned from a print\.[\s\S]*\n[\s\S]*Nobody remembers who took it\./,
+    const shown = await page.locator('.lightbox__caption').evaluate((node) => ({
+      text: (node as HTMLElement).innerText,
+      elements: node.children.length,
+    }));
+    expect(shown.text).toMatch(
+      /Scanned from a print\.\n\s*\nNobody remembers who took it\./,
     );
+    expect(shown.elements).toBe(0);
   });
 });
 
@@ -691,16 +742,154 @@ test.describe('the family can curate', () => {
 
   test('corrects a caption, and it stays corrected', async ({ page }) => {
     const base = familyBase();
-    await page.goto(`${base}/photo/${FIXTURE_PHOTO_IDS['market']}`);
+    await page.goto(`${base}/photo/${scratch().live[0]}`);
 
-    const caption = page.getByRole('textbox', { name: 'Caption', exact: true });
-    await expect(caption).toHaveValue('Saturday market.');
-    await caption.fill('Saturday market, in the rain.');
+    const shown = page.locator('.lightbox__caption');
+    const field = page.getByRole('textbox', { name: 'Caption', exact: true });
+    await expect(shown).toHaveText('First rocket up.');
+
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await field.fill('First rocket up, in the rain.');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+
+    // Back to reading, with the new words and a word to say so.
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+    await expect(field).toHaveCount(0);
+    await expect(shown).toHaveText('First rocket up, in the rain.');
+
+    await page.reload();
+    await expect(shown).toHaveText('First rocket up, in the rain.');
+
+    // Put the fixture back.
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await field.fill('First rocket up.');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(shown).toHaveText('First rocket up.');
+  });
+
+  test('offers no Edit on a photograph it did not add, and is refused one', async ({
+    page,
+  }) => {
+    const base = familyBase();
+    const id = FIXTURE_PHOTO_IDS['market']!;
+    await page.goto(`${base}/photo/${id}`);
+
+    await expect(page.getByRole('button', { name: 'Download' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(
+      0,
+    );
+    await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(
+      0,
+    );
+
+    // The server refuses it regardless of what the page shows
+    // (read-first-photo-view.md #24).
+    const refused = await page.request.post(`${base}/api/edit`, {
+      headers: { 'x-photo-uploader': FIXTURE_UPLOADER_TOKEN },
+      data: { photoId: id, caption: 'Not mine to change.' },
+    });
+    expect(refused.status()).toBe(404);
+  });
+
+  test('clamps a long caption, with More to read it all and Less to put it back', async ({
+    page,
+  }) => {
+    const base = familyBase();
+    const id = scratch().live[1]!;
+    const long = Array.from(
+      { length: 30 },
+      (_, index) => `Line ${index + 1} of a caption that goes on and on.`,
+    ).join('\n');
+
+    await page.goto(`${base}/photo/${id}`);
+    const shown = page.locator('.lightbox__caption');
+    const more = page.locator('.lightbox__more');
+    const overflows = () =>
+      shown.evaluate((node) => node.scrollHeight > node.clientHeight + 1);
+
+    await page.getByRole('button', { name: 'Edit', exact: true }).click();
+    await page.getByRole('textbox', { name: 'Caption', exact: true }).fill(long);
     await page.getByRole('button', { name: 'Save changes' }).click();
     await expect(page.getByText('Saved', { exact: true })).toBeVisible();
 
-    await page.reload();
-    await expect(caption).toHaveValue('Saturday market, in the rain.');
+    try {
+      // Clamped, and More, because the clamp has cut something off.
+      await expect(more).toHaveText('More');
+      await expect(more).toHaveAttribute('aria-expanded', 'false');
+      expect(await overflows()).toBe(true);
+
+      // Expanded in place, capped at half the viewport, and scrolling there.
+      await more.click();
+      await expect(more).toHaveText('Less');
+      await expect(more).toHaveAttribute('aria-expanded', 'true');
+      const { height, viewport } = await shown.evaluate((node) => ({
+        height: node.getBoundingClientRect().height,
+        viewport: window.innerHeight,
+      }));
+      expect(height).toBeLessThanOrEqual(viewport / 2 + 1);
+      expect(await overflows()).toBe(true);
+
+      // Expansion belongs to one photograph: away and back, it is collapsed.
+      await page.keyboard.press('ArrowRight');
+      await expect(page).not.toHaveURL(new RegExp(id));
+      await page.keyboard.press('ArrowLeft');
+      await expect(page).toHaveURL(new RegExp(id));
+      await expect(more).toHaveText('More');
+    } finally {
+      const response = await page.request.post(`${base}/api/edit`, {
+        headers: { 'x-photo-uploader': FIXTURE_UPLOADER_TOKEN },
+        data: {
+          photoId: id,
+          date: scratch().path.replaceAll('/', '-'),
+          time: '21:07:45',
+          caption: null,
+        },
+      });
+      expect(response.status()).toBe(200);
+    }
+  });
+
+  test('unwinds Escape one layer at a time, and never over unsaved typing', async ({
+    page,
+  }) => {
+    const base = familyBase();
+    await page.goto(`${base}/photo/${scratch().live[0]}`);
+
+    const form = page.locator('.edit-form');
+    const edit = page.getByRole('button', { name: 'Edit', exact: true });
+    const field = page.getByRole('textbox', { name: 'Caption', exact: true });
+    const info = page.locator('#photo-information');
+
+    // Nothing typed: Escape leaves Edit, and the photograph stays open.
+    await edit.click();
+    await expect(form).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(form).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(edit).toBeFocused();
+
+    // Photo info is a layer of its own, over either view.
+    await edit.click();
+    await page.getByRole('button', { name: 'Photo info' }).click();
+    await expect(info).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(info).toHaveCount(0);
+    await expect(form).toBeVisible();
+
+    // Typed and unsaved: the field lets go of Escape, and then Escape refuses.
+    await field.fill('Never saved');
+    await field.press('Escape');
+    await expect(field).not.toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(form).toBeVisible();
+    await expect(field).toHaveValue('Never saved');
+    await expect(page.getByText('Unsaved changes')).toBeVisible();
+
+    // Cancel discards without asking, and then Escape closes the photograph.
+    await form.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('.lightbox__caption')).toHaveText('First rocket up.');
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
   });
 
   test('moves a photograph it added to the trash, and restores it from there', async ({

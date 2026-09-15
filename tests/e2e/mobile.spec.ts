@@ -69,10 +69,71 @@ test('the photo view puts its controls below the photo, not over it', async ({
   expect(download.y).toBeGreaterThanOrEqual(image.y + image.height - 1);
   expect(Math.abs(download.y - info.y)).toBeLessThan(2);
   expect(info.x).toBeGreaterThan(download.x);
+  // Not a photograph this browser added, so nothing to edit or delete.
+  await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0);
 
   await next.click();
   await expect(dialog).toBeVisible();
   expect(await overflows(page)).toBe(false);
+});
+
+/** Open a portrait photograph this browser added, so it has Edit. */
+async function openOwned(page: Page) {
+  const id = FIXTURE_PHOTO_IDS['scratch-0-b']!;
+  await page.addInitScript(
+    ({ token, ids }) => {
+      window.localStorage.setItem('photo-uploader-token', token);
+      window.localStorage.setItem('photo-uploaded-ids', JSON.stringify(ids));
+    },
+    { token: FIXTURE_UPLOADER_TOKEN, ids: [id] },
+  );
+  await page.goto(`${BASE}/photo/${id}`);
+  await expect(page.locator('.lightbox__image')).toBeVisible();
+}
+
+/** The picture's own height, inside the img element's `object-fit: contain` box. */
+function pictureHeight(page: Page) {
+  return page.locator('.lightbox__image').evaluate((node) => {
+    const img = node as HTMLImageElement;
+    const box = img.getBoundingClientRect();
+    const ratio =
+      Number(img.getAttribute('width')) / Number(img.getAttribute('height'));
+    return Math.min(box.height, box.width / ratio);
+  });
+}
+
+/**
+ * The point of opening to read (read-first-photo-view.md): on a phone the form
+ * takes its height straight out of the picture's, so the picture is bigger
+ * without it.
+ */
+test('the picture is taller in the read view than in the edit view', async ({
+  page,
+}) => {
+  test.skip(
+    (page.viewportSize()?.width ?? 0) >= 640,
+    'the stacked layout is below the 40rem breakpoint',
+  );
+
+  await openOwned(page);
+  const reading = await pictureHeight(page);
+
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(page.locator('.edit-form')).toBeVisible();
+  const editing = await pictureHeight(page);
+
+  expect(reading).toBeGreaterThan(editing);
+});
+
+test('opening Edit focuses no field, so no keyboard comes up over the form', async ({
+  page,
+}) => {
+  await openOwned(page);
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(page.locator('.edit-form')).toBeVisible();
+
+  const focused = await page.evaluate(() => document.activeElement?.tagName ?? '');
+  expect(['INPUT', 'TEXTAREA', 'BODY']).not.toContain(focused);
 });
 
 test('closing the photo view returns to its tile at phone width', async ({ page }) => {

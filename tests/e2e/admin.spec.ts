@@ -68,6 +68,22 @@ const selected = (page: Page) => page.locator('.photo-grid__link[data-selected]'
 const tiles = (page: Page, anchor: string) =>
   page.locator(`${anchor} .photo-grid__link`);
 
+/**
+ * The photo view's form fields. Exact, because a label match is otherwise a
+ * substring: "Date" is in "Undated photo.", which is an undated photograph's
+ * dialog label.
+ */
+const dateField = (page: Page) => page.getByLabel('Date', { exact: true });
+const timeField = (page: Page) => page.getByLabel('Time', { exact: true });
+const captionField = (page: Page) =>
+  page.getByRole('textbox', { name: 'Caption', exact: true });
+
+/** Bring up the form behind the photo view's Edit (read-first-photo-view.md). */
+async function openEditor(page: Page) {
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(page.locator('.edit-form')).toBeVisible();
+}
+
 /** Confirm the dialog that is up, whatever its button is called. */
 async function confirmDelete(page: Page, label = 'Delete') {
   await page
@@ -420,95 +436,160 @@ test.describe('the admin photo view', () => {
     await expect(page.getByRole('dialog')).toBeVisible();
   }
 
-  test('names the file and carries the edit form in place of the caption', async ({
+  test('names the file, opens to read, and keeps the edit form behind Edit', async ({
+    page,
+  }) => {
+    await openFirst(page);
+    const { day, dayHeading, files } = scratch();
+
+    await expect(page.locator('.lightbox__filename')).toHaveText(files[0]!);
+    // The photograph's words as text, and no fields until Edit.
+    await expect(page.locator('.lightbox__caption')).toHaveText('First rocket up.');
+    await expect(page.locator('.lightbox__date')).toHaveText(`${dayHeading}, 2026`);
+    await expect(page.getByRole('dialog').getByRole('textbox')).toHaveCount(0);
+    for (const name of ['Download', 'Edit', 'Delete', 'Photo info']) {
+      await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+    }
+
+    await openEditor(page);
+    await expect(dateField(page)).toHaveValue(day);
+    await expect(timeField(page)).toHaveValue('21:03:11');
+    await expect(captionField(page)).toHaveValue('First rocket up.');
+    await expect(page.locator('.lightbox__caption')).toHaveCount(0);
+
+    // Beneath the form: Delete and Photo info, and no Download.
+    for (const name of ['Delete', 'Photo info']) {
+      await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+    }
+    await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(
+      0,
+    );
+  });
+
+  test('offers Edit on a photograph no browser added', async ({ page }) => {
+    // The family edits only what its browser added; the administrator edits
+    // everything.
+    await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['market']}`);
+    await expect(page.getByRole('button', { name: 'Edit', exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Delete', exact: true }),
+    ).toBeVisible();
+  });
+
+  test('arrows across the library, and each photograph opens to read', async ({
     page,
   }) => {
     await openFirst(page);
     const { files } = scratch();
+    const cancel = () =>
+      page.getByRole('button', { name: 'Cancel', exact: true }).click();
 
-    await expect(page.locator('.lightbox__filename')).toHaveText(files[0]!);
-    // The viewer's caption and date text is not there; the fields are.
-    await expect(page.locator('.lightbox__caption')).toHaveCount(0);
-    await expect(page.getByLabel('Capture date')).toHaveValue(scratch().day);
-    await expect(page.getByLabel('Capture time')).toHaveValue('21:03:11');
-    await expect(
-      page.getByRole('textbox', { name: 'Caption', exact: true }),
-    ).toHaveValue('First rocket up.');
-
-    // And the actions beneath it.
-    for (const name of ['Download', 'Delete', 'Photo info']) {
-      await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
-    }
-  });
-
-  test('arrows across the library, resetting the form each step', async ({ page }) => {
-    await openFirst(page);
-    const { files } = scratch();
-
+    // To move on from the form: Cancel, then step.
+    await openEditor(page);
+    await cancel();
     await page.getByRole('button', { name: 'Next photo' }).click();
     await expect(page.locator('.lightbox__filename')).toHaveText(files[1]!);
-    await expect(
-      page.getByRole('textbox', { name: 'Caption', exact: true }),
-    ).toHaveValue('');
-    await expect(page.getByLabel('Capture time')).toHaveValue('21:07:45');
+    await expect(page.locator('.edit-form')).toHaveCount(0);
+
+    await openEditor(page);
+    await expect(captionField(page)).toHaveValue('');
+    await expect(timeField(page)).toHaveValue('21:07:45');
+    await cancel();
 
     await page.keyboard.press('ArrowLeft');
     await expect(page.locator('.lightbox__filename')).toHaveText(files[0]!);
-    await expect(
-      page.getByRole('textbox', { name: 'Caption', exact: true }),
-    ).toHaveValue('First rocket up.');
+    await openEditor(page);
+    await expect(captionField(page)).toHaveValue('First rocket up.');
   });
 
-  test('will not step away from an edit that has not been saved', async ({ page }) => {
+  test('hides the arrows in the edit view, and Escape keeps an unsaved edit', async ({
+    page,
+  }) => {
     await openFirst(page);
     const { files } = scratch();
+    const next = page.getByRole('button', { name: 'Next photo' });
+    const previous = page.getByRole('button', { name: 'Previous photo' });
+    await expect(next).toBeVisible();
 
-    await page
-      .getByRole('textbox', { name: 'Caption', exact: true })
-      .fill('Never saved');
+    // Absent rather than disabled, and the keys do nothing either.
+    await openEditor(page);
+    await expect(next).toHaveCount(0);
+    await expect(previous).toHaveCount(0);
+
+    await captionField(page).fill('Never saved');
     await expect(page.getByText('Unsaved changes')).toBeVisible();
-
-    // Stepping is what would discard it, so both ways of stepping stop.
-    await expect(page.getByRole('button', { name: 'Next photo' })).toBeDisabled();
-    await expect(page.getByRole('button', { name: 'Previous photo' })).toBeDisabled();
     await page.locator('.lightbox').click();
     await page.keyboard.press('ArrowRight');
     await expect(page.locator('.lightbox__filename')).toHaveText(files[0]!);
 
-    // Put back what was there, and the view moves again — no flag to get
+    // Escape would drop the typing while leaving the photograph open, so it
+    // does nothing, and "Unsaved changes" is why.
+    await page.keyboard.press('Escape');
+    await expect(captionField(page)).toHaveValue('Never saved');
+    await expect(page.getByRole('dialog')).toBeVisible();
+
+    // Put back what was there, and Escape leaves the form — no flag to get
     // stuck on, just a comparison against what is stored.
-    await page
-      .getByRole('textbox', { name: 'Caption', exact: true })
-      .fill('First rocket up.');
+    await captionField(page).fill('First rocket up.');
     await expect(page.getByText('Unsaved changes')).toBeHidden();
-    await page.getByRole('button', { name: 'Next photo' }).click();
-    await expect(page.locator('.lightbox__filename')).toHaveText(files[1]!);
-  });
-
-  test('still lets an unsaved edit be abandoned deliberately', async ({ page }) => {
-    // Escape and the way back are asking to leave, and always have been.
-    await openFirst(page);
-    await page
-      .getByRole('textbox', { name: 'Caption', exact: true })
-      .fill('Never saved');
-
     await page.locator('.lightbox').click();
     await page.keyboard.press('Escape');
+    await expect(page.locator('.edit-form')).toHaveCount(0);
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(next).toBeVisible();
+  });
+
+  test('lets an unsaved edit be abandoned deliberately, by Cancel or the way back', async ({
+    page,
+  }) => {
+    await openFirst(page);
+
+    // Cancel discards without asking.
+    await openEditor(page);
+    await captionField(page).fill('Never saved');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(page.locator('.lightbox__caption')).toHaveText('First rocket up.');
+
+    // So does the way back, which is asking to leave.
+    await openEditor(page);
+    await captionField(page).fill('Never saved');
+    await page.getByRole('link', { name: /Lightbox/ }).click();
     await expect(page.locator('.lightbox')).toBeHidden();
 
     await openFirst(page);
-    await expect(
-      page.getByRole('textbox', { name: 'Caption', exact: true }),
-    ).toHaveValue('First rocket up.');
+    await openEditor(page);
+    await expect(captionField(page)).toHaveValue('First rocket up.');
+  });
+
+  test('keeps an unsaved edit through a Delete that is cancelled', async ({ page }) => {
+    await openFirst(page);
+    await openEditor(page);
+    await captionField(page).fill('Never saved');
+
+    // The confirmation is the deliberate step, so the typing does not block it.
+    await page.locator('.lightbox').click();
+    await page.keyboard.press('Backspace');
+    const confirm = page.getByRole('alertdialog');
+    await expect(confirm).toContainText('1 photo');
+    // Two Cancels on screen now: the dialog's, and the form's under it.
+    await confirm.getByRole('button', { name: 'Cancel' }).click();
+    await expect(confirm).toHaveCount(0);
+
+    await expect(captionField(page)).toHaveValue('Never saved');
+    await page.locator('.edit-form').getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('.lightbox__caption')).toHaveText('First rocket up.');
   });
 
   test('disables the time field when there is no date', async ({ page }) => {
     // A time is meaningful only alongside a date.
     await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['undated-a']}`);
-    await expect(page.getByLabel('Capture time')).toBeDisabled();
+    await expect(page.locator('.lightbox__date')).toHaveText('Undated');
+    await openEditor(page);
+    await expect(timeField(page)).toBeDisabled();
 
-    await page.getByLabel('Capture date').fill('2026-01-01');
-    await expect(page.getByLabel('Capture time')).toBeEnabled();
+    await dateField(page).fill('2026-01-01');
+    await expect(timeField(page)).toBeEnabled();
   });
 
   test('rejects an impossible date without contacting the server', async ({ page }) => {
@@ -518,10 +599,12 @@ test.describe('the admin photo view', () => {
     });
 
     await openFirst(page);
-    await page.getByLabel('Capture date').fill('2026-02-30');
+    await openEditor(page);
+    await dateField(page).fill('2026-02-30');
     await page.getByRole('button', { name: 'Save changes' }).click();
 
     await expect(page.getByRole('alert')).toContainText('real date');
+    await expect(page.locator('.edit-form')).toBeVisible();
     expect(requests).toEqual([]);
   });
 
@@ -532,12 +615,14 @@ test.describe('the admin photo view', () => {
     const moved = `${day.slice(0, 7)}-20`;
 
     await openFirst(page);
-    await page
-      .getByRole('textbox', { name: 'Caption', exact: true })
-      .fill('Edited by a test');
-    await page.getByLabel('Capture date').fill(moved);
+    await openEditor(page);
+    await captionField(page).fill('Edited by a test');
+    await dateField(page).fill(moved);
     await page.getByRole('button', { name: 'Save changes' }).click();
-    await expect(page.getByText('Saved')).toBeVisible();
+
+    // Back to reading, saying so.
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+    await expect(page.locator('.lightbox__caption')).toHaveText('Edited by a test');
 
     // Patched in place from the reply: the new day exists behind the photo
     // view, and the old one is one photo lighter. No reload.
@@ -551,21 +636,21 @@ test.describe('the admin photo view', () => {
 
     // Put the fixture back.
     await tiles(page, `#d-${moved}`).first().dblclick();
-    await page.getByLabel('Capture date').fill(day);
-    await page.getByLabel('Capture time').fill('21:03:11');
-    await page
-      .getByRole('textbox', { name: 'Caption', exact: true })
-      .fill('First rocket up.');
+    await openEditor(page);
+    await dateField(page).fill(day);
+    await timeField(page).fill('21:03:11');
+    await captionField(page).fill('First rocket up.');
     await page.getByRole('button', { name: 'Save changes' }).click();
-    await expect(page.getByText('Saved')).toBeVisible();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
     await page.goto(path);
     await expect(page.locator(`${anchor} .photo-grid__item`)).toHaveCount(3);
   });
 
   test('a field owns the keyboard while it has focus', async ({ page }) => {
     await openFirst(page);
+    await openEditor(page);
     const { files } = scratch();
-    const caption = page.getByRole('textbox', { name: 'Caption', exact: true });
+    const caption = captionField(page);
 
     await caption.fill('abcd');
     // Arrows move the caret and Backspace deletes a character: neither
@@ -577,9 +662,15 @@ test.describe('the admin photo view', () => {
     await expect(page.getByRole('alertdialog')).toHaveCount(0);
     await expect(page.locator('.lightbox__filename')).toHaveText(files[0]!);
 
-    // Escape leaves the field; only a second Escape closes the view.
+    // Escape leaves the field. With the edit unsaved, the next does nothing.
     await caption.press('Escape');
+    await expect(caption).not.toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(caption).toHaveValue('acd');
     await expect(page.getByRole('dialog')).toBeVisible();
+
+    // Cancelled, there is nothing left to unwind but the photograph.
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
   });
@@ -701,26 +792,26 @@ test.describe('adding photographs', () => {
     const tile = pending.locator('.photo-grid__item').filter({ hasText: uploadFile });
     await expect(tile).toHaveCount(1);
 
-    // It opens into the library's own photo view and the library's own form.
+    // It opens into the library's own photo view, reading.
     await tile.locator('.photo-grid__link').click();
     await expect(page.locator('.lightbox')).toBeVisible();
     await expect(page.locator('.lightbox__filename')).toHaveText(uploadFile);
-    await expect(page.getByLabel('Capture date')).toHaveValue('');
+    await expect(page.locator('.lightbox__date')).toHaveText('Undated');
 
     // Editing is all it offers: there are no stored bytes to download and no
-    // catalog record to delete.
-    await expect(page.getByRole('button', { name: 'Save changes' })).toBeVisible();
+    // catalog record to delete. Edit is there in the admin too, where nothing
+    // counts as added from this browser.
     await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(
       0,
     );
+    await openEditor(page);
+    await expect(dateField(page)).toHaveValue('');
 
-    await page.getByLabel('Capture date').fill(uploadDay);
-    await page
-      .getByRole('textbox', { name: 'Caption', exact: true })
-      .fill('Typed on the way up.');
+    await dateField(page).fill(uploadDay);
+    await captionField(page).fill('Typed on the way up.');
     await page.getByRole('button', { name: 'Save changes' }).click();
-    await expect(page.getByText('Saved')).toBeVisible();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
 
     await page.keyboard.press('Escape');
 
@@ -736,9 +827,7 @@ test.describe('adding photographs', () => {
     await expect(landed).toHaveCount(1);
 
     await landed.locator('.photo-grid__link').dblclick();
-    await expect(
-      page.getByRole('textbox', { name: 'Caption', exact: true }),
-    ).toHaveValue('Typed on the way up.');
+    await expect(page.locator('.lightbox__caption')).toHaveText('Typed on the way up.');
 
     // Put the fixture back the way it was found: out of the library, and out
     // of the trash behind it.
@@ -797,6 +886,9 @@ test.describe('the trash', () => {
     await expect(page.getByRole('button', { name: 'Photo info' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(
+      0,
+    );
+    await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(
       0,
     );
     await expect(
@@ -909,11 +1001,12 @@ test.describe('the recent view in the admin', () => {
     await page.goto(`${BASE}/recent/photo/${ids[0]}`);
     await expect(page.getByRole('dialog')).toBeVisible();
 
-    const caption = page.getByRole('textbox', { name: 'Caption', exact: true });
+    await openEditor(page);
+    const caption = captionField(page);
     const original = await caption.inputValue();
     await caption.fill('Edited from the recent view.');
-    await page.getByRole('button', { name: 'Save' }).click();
-    await expect(page.getByText('Saved')).toBeVisible();
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
 
     // An edit must not take the photograph out of its upload sitting: it
     // did not arrive at a different time because its caption changed.
@@ -922,9 +1015,10 @@ test.describe('the recent view in the admin', () => {
     await expect(page.locator(`#photo-${ids[0]}`)).toHaveCount(1);
 
     await page.goto(`${BASE}/recent/photo/${ids[0]}`);
-    await page.getByRole('textbox', { name: 'Caption', exact: true }).fill(original);
-    await page.getByRole('button', { name: 'Save' }).click();
-    await expect(page.getByText('Saved')).toBeVisible();
+    await openEditor(page);
+    await captionField(page).fill(original);
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
   });
 });
 
@@ -1032,10 +1126,10 @@ test.describe('applying a caption to a selection', () => {
     // Nothing selected carries the text any more, so it is an offer again.
     await expect(applyButton(page)).toBeVisible();
 
+    // The photo view reads what is stored: no caption line at all.
     await grid.nth(1).dblclick();
-    await expect(
-      page.getByRole('textbox', { name: 'Caption', exact: true }),
-    ).toHaveValue('');
+    await expect(page.locator('.lightbox__date')).toBeVisible();
+    await expect(page.locator('.lightbox__caption')).toHaveCount(0);
   });
 
   test('lists every caption it would replace, and Cancel changes nothing', async ({
@@ -1141,13 +1235,20 @@ test.describe('applying a caption to a selection', () => {
     await expect(slot(page)).toHaveText('Applied');
 
     await grid.nth(1).dblclick();
-    const caption = page.getByRole('textbox', { name: 'Caption', exact: true });
+    await openEditor(page);
+    const caption = captionField(page);
     await expect(caption).toHaveValue('Launch night');
 
     // The banner is above the photo view, so this is reachable from here.
     await page.getByRole('button', { name: 'Undo' }).click();
     await expect(caption).toHaveValue('');
     await expect(page.getByText('Unsaved changes')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+
+    // Nothing unsaved, so Escape leaves the form rather than refusing.
+    await page.locator('.lightbox').click();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.edit-form')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Next photo' })).toBeEnabled();
   });
 });
