@@ -367,6 +367,32 @@ describe('the edit view', () => {
   });
 });
 
+describe('coming back to a photograph', () => {
+  it('starts afresh: no Photo info, no edit view, and no "Saved"', async () => {
+    const { show } = mount(ADMIN_LIBRARY);
+
+    press(button('Photo info')!);
+    expect(document.getElementById('photo-information')).not.toBeNull();
+    show(second);
+    show(first);
+    expect(document.getElementById('photo-information')).toBeNull();
+
+    // A delete from the edit view advances; Undo can bring the photograph back.
+    openEdit();
+    show(second);
+    show(first);
+    expect(form()).toBeNull();
+
+    openEdit();
+    fireEvent.change(captionField(), { target: { value: 'Launch night' } });
+    fireEvent.submit(form()!);
+    await waitFor(() => expect(screen.queryByRole('status')).not.toBeNull());
+    show(second);
+    show(first);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+});
+
 describe('Escape', () => {
   it('leaves an edit view holding nothing unsaved, and then closes the photograph', () => {
     const { onClose } = mount(ADMIN_LIBRARY);

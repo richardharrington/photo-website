@@ -155,6 +155,26 @@ export function Lightbox({
   /** Whether the collapsed caption is actually cut short, so More means something. */
   const [clamped, setClamped] = useState(false);
 
+  /*
+   * The photograph the state above was last rendered for.
+   *
+   * Keying by ID closes everything on the way to another photograph, but the
+   * view stays mounted while it steps, so coming back to the one just left
+   * would find its ID still there: the caption expanded again, Photo info
+   * open again, or — after a delete advanced and Undo brought it back — the
+   * edit view. Arriving anywhere clears all of it, during render rather than
+   * in an effect, so no frame shows the old state (read-first-photo-view.md
+   * #6, #17).
+   */
+  const [arrivedAt, setArrivedAt] = useState(photo.id);
+  if (arrivedAt !== photo.id) {
+    setArrivedAt(photo.id);
+    setInfoFor(null);
+    setEditingFor(null);
+    setSavedFor(null);
+    setExpandedFor(null);
+  }
+
   /**
    * Where focus goes once the view has switched, because the button that
    * switched it has just unmounted: into the dialog on entering the edit view
