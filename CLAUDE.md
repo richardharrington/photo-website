@@ -88,7 +88,7 @@ Display mode may mutate: it reaches the curation routes in
 `netlify/functions/lib/curation-routes.ts` and nothing admin-only. The route
 lists in that module and in `admin.ts` are the tier; a test asserts them.
 
-In display mode a trash, restore, or permanent delete reaches only photographs whose
+In display mode an edit, trash, restore, or permanent delete reaches only photographs whose
 `uploaderHash` matches the request's `x-photo-uploader` token
 (`src/shared/uploader.ts`); anything else is the plain 404.
 

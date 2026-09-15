@@ -449,11 +449,19 @@ second adds nothing to the display bundle but a few branches.
     off `--photo-left` as the viewer's does (#32), because the previous-photo
     button sits exactly where a stack measured from the picture would end.
 
+    **Amended 2026-09-15 by #96.** "Always" and "No Edit toggle" did not
+    survive: the photo view opens to read, and the form is behind Edit.
+
 42. **Explicit Save, and an unsaved edit is discarded silently** on arrow
     navigation, Escape, and close, exactly as the old panel discarded it. The
     form is keyed on the photo's ID, so arrowing remounts it with the stored
     values; keying on the metadata too would remount it the moment a save came
     back and wipe the "Saved" mark the user was meant to see.
+
+    **Amended 2026-09-15 by #96.** Inside the edit view Escape no longer
+    discards: it refuses while an edit is unsaved, the arrows are hidden, and
+    "Saved" is shown by the read view the save returns to. Closing the
+    photograph still discards.
 
 43. **Fields own the keyboard while focused.** With focus inside the form,
     ArrowLeft, ArrowRight, Delete, Backspace, and Escape do what they do in a
@@ -1587,6 +1595,9 @@ its ordering, and its URLs are unchanged.
     records what it added, so the line would call the administrator's own
     uploads "Another device".
 
+    **Amended 2026-09-15 by #97.** "Editing is not narrowed" did not survive:
+    the family edits only what it added, by this same rule.
+
 ## A library that stays current without a refresh — 2026-09-15
 
 93. **Every change to the library reloads the copy the page holds, wherever
@@ -1660,4 +1671,71 @@ its ordering, and its URLs are unchanged.
     announces the library that was already there, and a test can still be
     sent to a confirmed address whatever its switches say (#73). An address
     added before this keeps whatever its switches were.
+
+## The photo view opens to read, and the family edits only what it added — 2026-09-15
+
+96. **The photo view opens to read, with the form behind Edit**
+    (docs/specs/read-first-photo-view.md). Opening a photograph shows its
+    date (or "Undated"), its caption, and Download, Edit, Delete, and Photo
+    info as the context allows; nothing is a field. Edit brings up the form
+    that was always there, minus Download. On a phone the form sat between the
+    picture and the buttons and took its height straight out of the
+    picture's, so photographs were too small; more broadly, the owner missed
+    the plain view the site had before the family could edit, and wants the
+    view people see most of the time to be clean. This reverses #41's
+    "always" and "No Edit toggle", at every width and in both apps: the
+    administrator accepts a click in front of every correction too.
+
+    The edit view belongs to one photograph, held by ID, so every arrival is
+    in the read view. Save is disabled until something has changed, a
+    successful save returns to the read view with "Saved", and a new Cancel
+    discards without asking. The arrows are absent while editing and the keys
+    do nothing, and Escape unwinds a field, then Photo info, then does nothing
+    while an edit is unsaved, then leaves Edit — so #42's "discarded silently
+    on … Escape" no longer holds inside the edit view. Closing the photograph
+    still discards and cannot be refused. A long caption is clamped, four
+    lines narrow and ten wide, with More, and an expanded one is capped at
+    half the viewport. On a wide screen the picture slides over when Edit
+    opens and back when it closes.
+
+    Rejected: the read view on narrow screens only, because an iPhone in
+    landscape is wider than 40rem and would switch behaviour on rotation; by
+    device; and family only. Rejected for long captions: showing them whole,
+    which shrinks the picture again; a fixed scrolling box with no More; and
+    an overlay sheet. Rejected: a history entry for Edit, so Back would leave
+    the edit view — the router keys on the pathname alone, "← Lightbox" would
+    need rules of its own, and a swipe back still could not be refused.
+    Rejected: staying in the edit view while arrowing, for captioning a run
+    of photographs; the owner chose it and then reverted it. Rejected: an
+    instant jump when Edit opens, and floating the form over the picture so
+    it never moves.
+
+97. **The family edits only what it added from the same browser**
+    (docs/specs/read-first-photo-view.md #22–25). Edit follows exactly the
+    rule Delete follows (#92): in the family app it is offered, and the
+    server allows `/edit`, only for a photograph whose uploader hash matches
+    the browser's token. This reverses family-own-trash.md #7 and #92's
+    "Editing is not narrowed". The administrator still edits everything.
+
+    The server enforces it, not the page: in display mode `/edit` goes
+    through the same `reachOf` / `reaches` check as trash and restore, inside
+    the mutation callback so a retry re-checks, and before the edit is
+    validated, so an invalid date on someone else's photograph is the plain
+    404 rather than a 400 that would say the photograph was reached. The
+    files still uploading stay editable in both apps, because every one of
+    them is on its way in from this browser; a correction made after one has
+    committed is an ordinary edit of a photograph whose commit recorded this
+    browser's hash.
+
+    Accepted consequences: the family can never edit anything already in the
+    library before uploader tokens existed, anything the administrator
+    uploaded, or anything accepted from the Inbox — including a photograph a
+    family member emailed in themselves, since Add runs in the admin app and
+    nothing links an email sender to a browser. A photograph added from one
+    device cannot be edited from another, or after the browser's storage is
+    cleared, and nobody but the administrator can date an undated photograph
+    they did not add. Rejected: letting the family edit photographs with no
+    uploader hash while protecting other browsers' uploads, which would make
+    the Edit and Delete rules differ; and hiding the button while leaving the
+    route open, which breaks the rule the trash follows.
 

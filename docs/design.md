@@ -43,17 +43,18 @@ trusted.
 - The display URL and admin URL are separate, independent, high-entropy paths.
   Neither can be derived from the other.
 - The display path is the family link and can be shared among family members.
-  Anyone holding it can view, add, and edit photographs, and trash, restore,
-  and permanently delete the ones added from the same browser; the server
-  enforces this by mode, not the page. The admin path is shared only with
-  administrators and additionally allows trashing and permanently deleting any
-  photograph, the Inbox, the Emails page, and the catalog export.
+  Anyone holding it can view and add photographs, and edit, trash, restore,
+  and permanently delete the photographs added from their own browser; the
+  server enforces this by mode, not the page. The admin path is shared only
+  with administrators and additionally allows editing, trashing, and
+  permanently deleting any photograph, the Inbox, the Emails page, and the
+  catalog export.
 - A family browser keeps a random uploader token in its local storage and
   sends it with every change it makes. A photograph added through the family
   link stores only the token's hash, which is never shown to viewers and never
   written to the audit log. It identifies a browser, not a person, and it is
-  what lets that browser alone trash, restore, and permanently delete the
-  photograph (family-own-trash.md).
+  what lets that browser alone edit, trash, restore, and permanently delete
+  the photograph (family-own-trash.md, read-first-photo-view.md).
 - The audit log records which link an act came through (`display-api` or
   `admin-api`) and nothing about who; there are no accounts, so it makes no
   person-level claim.
@@ -278,8 +279,8 @@ queue with overall and per-file status rather than an arbitrary batch limit.
 ## Family site
 
 The display link is the family link (family-tier.md #1): anyone holding it
-can look at the library, add to it, correct it, and move the photographs added
-from their own browser to the trash and back. What only the administrator does
+can look at the library, add to it, and correct, trash, and restore the
+photographs added from their own browser. What only the administrator does
 is described under
 [Admin site](#admin-site).
 
@@ -339,8 +340,8 @@ is described under
   else; for any other it says "This photo was added before and then later
   deleted. Ask the site admin if you want it to be restored.", with no link,
   and the file cannot be added again until the administrator restores it or it
-  is purged. It opens into the same photo view and the same edit form as any
-  other photograph, so a wrong date can be corrected and a caption written
+  is purged. It opens into the same photo view as any other photograph, with
+  **Edit** always offered, so a wrong date can be corrected and a caption written
   while the device is still working: a correction made before the file commits
   is carried into that commit, and one made afterwards is an ordinary edit.
   There is nothing to download or delete there, because nothing is stored yet.
@@ -350,20 +351,24 @@ is described under
 - On a phone or tablet a photograph over 30 MP is refused on its tile before
   any processing, with a message saying it will work from a laptop or by
   email (decisions.md #91).
-- A plain click or tap on a photograph opens it. The photo view's bottom-left
-  stack is the edit form — capture date, capture time, caption, and **Save
-  changes** — with **Download**, **Delete**, and **Photo info** beneath.
-  **Delete** appears only on a photograph added from this browser; on any other
-  photograph there is no Delete, disabled or otherwise, and the Delete key does
-  nothing. Photo info on every photograph says where it was added from, "This
-  device" or "Another device", so a missing Delete explains itself.
-  Nothing is saved until Save. While an edit is unsaved the previous and next
-  controls are disabled and the arrow keys do nothing, because stepping to
-  another photograph is precisely what would discard it; the form says so.
-  Escape and closing still leave, and still discard. While a field has focus
-  the keyboard belongs to it: arrows move the caret, Escape leaves the field,
-  and only a second Escape closes the view. With focus outside the form,
-  Delete or Backspace is the same as the Delete button.
+- A plain click or tap on a photograph opens it to read. The photo view shows
+  its date (or "Undated"), its caption clamped to a few lines with **More**
+  when it runs longer, and **Download**, **Edit**, **Delete**, and **Photo
+  info**. **Edit** and **Delete** appear only on a photograph added from this
+  browser; on any other photograph there is neither, disabled or otherwise,
+  and the Delete key does nothing. Photo info on every photograph says where
+  it was added from, "This device" or "Another device", so a missing Edit and
+  Delete explain themselves.
+  **Edit** brings up the form — date, time, caption, **Save changes** and
+  **Cancel** — with Delete and Photo info beneath and no Download, and hides
+  previous and next, so the arrow keys do nothing there. Nothing is saved
+  until Save, which is available once something has changed and returns to
+  the photograph with "Saved"; Cancel discards and returns. Escape leaves a
+  field, then the info panel, then does nothing while an edit is unsaved, then
+  leaves Edit. Closing the photograph still discards. While a field has focus
+  the keyboard belongs to it: arrows move the caret, Escape leaves the field.
+  With focus outside the form, Delete or Backspace is the same as the Delete
+  button.
 - Delete always confirms through the preview-and-confirm dialog ("Delete
   photos?" … "will move to the trash, where they are kept for 30 days"), and
   Enter confirms. The photo view then advances to the next photo (or the
@@ -388,9 +393,9 @@ is described under
   saying it cannot be undone, then removes the photograph and its files for
   good.
 - What the family does not have: no selection or selection bar, no Select all
-  on a day heading, no caption applied to many photographs at once, no delete
-  or permanent delete of a photograph added from another browser or by the
-  administrator, no Emails, no Inbox, no Export catalog, and no filename
+  on a day heading, no caption applied to many photographs at once, no edit,
+  delete, or permanent delete of a photograph added from another browser, by
+  email, or by the administrator, no Emails, no Inbox, no Export catalog, and no filename
   on a library tile. The server refuses those routes to the family link; the
   page not showing them is not the reason they are unavailable.
 - **What counts as recently added** is a property of the photographs, not of
@@ -441,7 +446,7 @@ is described under
 - Selecting a photo opens it full-size over the timeline, which stays where it
   was underneath. The photo view carries no header bar and no position count:
   the way back at the top left, and at the bottom left the stack described
-  above: the edit form, then the actions. Clock time, original filename, and
+  above: the date, the caption, and the actions; the form only after Edit. Clock time, original filename, and
   full-size dimensions live in the Photo info panel, which is a layer of its
   own: Escape closes it and leaves the photograph open, closing the photograph
   only on a second press, and clicking anywhere outside it closes it. Previous
@@ -455,8 +460,9 @@ is described under
   batch's selection/drop order; ingestion time is never presented as a capture
   time. Manual reordering is out of scope; an admin can set an approximate
   capture time when ordering matters.
-- Photos without a date are in a separate **Undated** group. Anyone with the
-  family link can later assign or correct a date.
+- Photos without a date are in a separate **Undated** group. The
+  administrator, or whoever added the photograph from the same browser, can
+  later assign a date.
 - Original filenames are not shown on the family's library or trash tiles. A photo
   information view shows the filename and available information.
 - Captions serve as accessible image text. If absent, use a concise fallback

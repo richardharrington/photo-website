@@ -233,6 +233,9 @@ duplicates stay until cleared.
 
 ### 5.3 A photograph
 
+Amended by `docs/specs/read-first-photo-view.md`: the lightbox opens
+read-only, the form is behind Edit, and the family edits only what it added.
+
 Tapping a tile opens the lightbox. The bottom-left stack is the admin's:
 capture date, capture time, and caption fields with **Save changes**, and an
 action row of **Download**, **Delete**, and **Photo info**. No filename at

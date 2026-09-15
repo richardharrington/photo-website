@@ -153,7 +153,9 @@ Numbered so the implementation and the docs can cite them.
    not merely unrestorable.
 
 7. **Editing is unchanged.** Anyone with the family link can edit any
-   photograph's date, time, and caption.
+   photograph's date, time, and caption. (Reversed by
+   `docs/specs/read-first-photo-view.md` #22–25: the family edits only what
+   it added.)
 
 8. **An owned photograph the administrator trashed appears in its owner's
    trash, and they can restore it.** No trashed-by record. A disagreement
@@ -615,7 +617,8 @@ back from production. Amend #90 with a pointer to #92.
 - Any expiry or time window on ownership.
 - Cross-device ownership, token export, or recovery.
 - Recording who trashed a photograph.
-- Narrowing who may edit.
+- ~~Narrowing who may edit.~~ (Since done: `docs/specs/read-first-photo-view.md`
+  #22–25.)
 - Detecting storage eviction.
 - Any change to the admin link.
 
