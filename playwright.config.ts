@@ -40,6 +40,21 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
       stdout: 'ignore',
     },
+    /*
+     * The family app again, once per desktop project, for display.spec.ts's
+     * "the family can curate" tests. Those upload, edit, trash, and restore,
+     * and the fixture library is one in-memory store per dev server: on the
+     * shared :5173 they would race the display tests that count the library
+     * exactly, and each other across the two engines. A server of their own
+     * per project makes every count they assert exact.
+     */
+    ...['chromium', 'webkit'].map((project, index) => ({
+      command: `npx vite --config vite.display.config.ts --port ${5176 + index} --strictPort`,
+      url: `http://localhost:${5176 + index}/dev-display-path/`,
+      reuseExistingServer: !process.env.CI,
+      stdout: 'ignore' as const,
+      name: `family-${project}`,
+    })),
     {
       // The pipeline needs a real engine: createImageBitmap, OffscreenCanvas,
       // and WebAssembly cannot be exercised meaningfully under a DOM shim.

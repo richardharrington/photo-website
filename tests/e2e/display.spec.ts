@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
-import type { Locator } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
+import { tinyPng } from '../../fixtures/tiny-png.ts';
 
 const BASE = '/dev-display-path';
 
@@ -531,6 +532,166 @@ test.describe('images', () => {
       expect(requested.some((url) => url.includes(FIXTURE_PHOTO_IDS[seed]!))).toBe(
         false,
       );
+    }
+  });
+});
+
+/**
+ * The display link is the family link (family-tier.md 11.3): anyone holding it
+ * can add a photograph, correct one, move one to the trash, and restore it,
+ * and nothing only the administrator does.
+ *
+ * Against a family dev server of this project's own (playwright.config.ts),
+ * because these change the library and the tests above count it exactly.
+ * Serial, because each builds on the library the one before left behind.
+ * The upload is the same generated PNG the admin's upload test uses, so it
+ * needs no `sample-photos/` and never skips.
+ */
+test.describe('the family can curate', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  function familyBase(): string {
+    const port = test.info().project.name === 'webkit' ? 5177 : 5176;
+    return `http://localhost:${port}/dev-display-path`;
+  }
+
+  /** The library's own tiles, not the files still on their way in. */
+  const library = (page: Page) =>
+    page.locator('.timeline:not(.upload__pending) .photo-grid__item');
+
+  test('adds a photograph from the add bar', async ({ page }) => {
+    const base = familyBase();
+    await page.goto(`${base}/`);
+    await expect(library(page)).toHaveCount(18);
+
+    const name = 'family-upload.png';
+    await page.locator('.drop-target__input').setInputFiles({
+      name,
+      mimeType: 'image/png',
+      buffer: tinyPng(),
+    });
+
+    // A tile of its own at once, named after the file: the one place the
+    // family sees a filename (family-tier.md #12).
+    const tile = page
+      .locator('.upload__pending .photo-grid__item')
+      .filter({ hasText: name });
+    await expect(tile).toHaveCount(1);
+    await expect(tile.locator('.photo-grid__filename')).toHaveText(name);
+
+    // Once it has landed and the library has reloaded, it is in the library and
+    // its tile has gone.
+    await expect(library(page)).toHaveCount(19, { timeout: 30_000 });
+    await expect(page.locator('.upload__pending')).toHaveCount(0);
+  });
+
+  test('corrects a caption, and it stays corrected', async ({ page }) => {
+    const base = familyBase();
+    await page.goto(`${base}/photo/${FIXTURE_PHOTO_IDS['market']}`);
+
+    const caption = page.getByRole('textbox', { name: 'Caption', exact: true });
+    await expect(caption).toHaveValue('Saturday market.');
+    await caption.fill('Saturday market, in the rain.');
+    await page.getByRole('button', { name: 'Save changes' }).click();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+
+    await page.reload();
+    await expect(caption).toHaveValue('Saturday market, in the rain.');
+  });
+
+  test('moves a photograph to the trash, and restores it from there', async ({
+    page,
+  }) => {
+    const base = familyBase();
+    const id = FIXTURE_PHOTO_IDS['market']!;
+    await page.goto(`${base}/photo/${id}`);
+
+    const trashLink = page.getByRole('link', { name: /^Trash/ });
+    await expect(trashLink).toHaveText('Trash (2)');
+
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(page.getByRole('alertdialog')).toContainText('1 photo');
+    await page.keyboard.press('Enter');
+
+    // The photo view advances rather than closing: August 15th's only photo
+    // gives way to the next in the library, on August 2nd.
+    await expect(page).not.toHaveURL(new RegExp(id));
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByLabel('Capture date')).toHaveValue('2026-08-02');
+    await expect(trashLink).toHaveText('Trash (3)');
+
+    // Close the photo view to reach the header, as anyone would.
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await trashLink.click();
+    await expect(page).toHaveURL(`${base}/trash`);
+    await expect(page.locator('.trash__intro')).toContainText(
+      'Only the administrator can delete a photo permanently.',
+    );
+
+    // No filename on a family tile, so it is found by the photo its thumbnail is.
+    const trashed = page
+      .locator('.photo-grid__item')
+      .filter({ has: page.locator(`img[src*="${id}"]`) });
+    await expect(trashed).toHaveCount(1);
+    await trashed.locator('.photo-grid__link').click();
+
+    // One tap opens it, and Restore is the only thing it offers.
+    const view = page.getByRole('dialog');
+    await expect(view).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(
+      0,
+    );
+    await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Delete permanently' })).toHaveCount(
+      0,
+    );
+    await page.getByRole('button', { name: 'Restore' }).click();
+
+    await expect(view).toHaveCount(0);
+    await expect(trashed).toHaveCount(0);
+    await expect(trashLink).toHaveText('Trash (2)');
+
+    await page.goto(`${base}/2026/08/15`);
+    await expect(page.locator(`#photo-${id}`)).toBeVisible();
+  });
+
+  test('is refused what only the administrator does', async ({ page }) => {
+    const base = familyBase();
+
+    expect((await page.request.get(`${base}/api/emails`)).status()).toBe(404);
+    expect(
+      (
+        await page.request.post(`${base}/api/permanent-delete/preview`, {
+          data: {
+            selection: { kind: 'ids', photoIds: [FIXTURE_PHOTO_IDS['deleted-0']] },
+          },
+        })
+      ).status(),
+    ).toBe(404);
+
+    // While a curation route on the very same link answers.
+    expect((await page.request.get(`${base}/api/trash/count`)).status()).toBe(200);
+  });
+
+  test("shows none of the administrator's controls", async ({ page }) => {
+    const base = familyBase();
+    await page.goto(`${base}/2026/08/02`);
+
+    // A plain click opens, as it always did (family-tier.md #5), and selects
+    // nothing.
+    await page.locator('#d-2026-08-02 .photo-grid__link').first().click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    await expect(page.locator('.selection-bar')).toHaveCount(0);
+    await expect(page.locator('[data-selected]')).toHaveCount(0);
+    await expect(page.locator('.selection-help')).toHaveCount(0);
+    await expect(page.locator('.timeline__select-all')).toHaveCount(0);
+    await expect(page.locator('.photo-grid__filename')).toHaveCount(0);
+    for (const name of ['Emails', /^Inbox/, 'Export catalog']) {
+      await expect(page.getByRole('link', { name })).toHaveCount(0);
     }
   });
 });

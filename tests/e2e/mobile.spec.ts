@@ -3,8 +3,10 @@ import type { Page } from '@playwright/test';
 import { FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
 
 /**
- * The viewer is responsive on current mobile Safari/Chrome. Admin workflows
- * are laptop-oriented and are deliberately not covered here.
+ * The family app on a phone: responsive on current mobile Safari/Chrome, and
+ * able to add photographs, which is what the family does from a phone
+ * (family-tier.md). The admin's selection is laptop-oriented and deliberately
+ * not covered here.
  */
 
 const BASE = '/dev-display-path';
@@ -120,4 +122,86 @@ test('the recent view fits the viewport and closes to its tile', async ({ page }
     return box.top >= 0 && box.top < window.innerHeight;
   });
   expect(inView).toBe(true);
+});
+
+/**
+ * One element, one input; only the words follow the 40rem breakpoint
+ * (family-tier.md #13). At phone width there is nothing to drop from.
+ */
+test("the add bar's words follow the breakpoint, and it opens the picker", async ({
+  page,
+}) => {
+  await page.goto(`${BASE}/`);
+
+  const bar = page.getByRole('button', { name: /Add photos/ });
+  await expect(bar).toBeVisible();
+
+  const narrow = (page.viewportSize()?.width ?? 0) < 640;
+  const shown = page.locator(
+    narrow ? '.drop-target__headline--narrow' : '.drop-target__headline--wide',
+  );
+  const hidden = page.locator(
+    narrow ? '.drop-target__headline--wide' : '.drop-target__headline--narrow',
+  );
+  await expect(shown).toBeVisible();
+  await expect(shown).toHaveText(narrow ? 'Add photos' : 'Drop photos here');
+  await expect(hidden).toBeHidden();
+
+  const chooser = page.waitForEvent('filechooser');
+  await bar.click();
+  expect((await chooser).isMultiple()).toBe(true);
+  expect(await overflows(page)).toBe(false);
+});
+
+test('the trash fits the viewport', async ({ page }) => {
+  await page.goto(`${BASE}/trash`);
+  await expect(page.locator('.trash__intro')).toBeVisible();
+  await expect(page.locator('.photo-grid__item')).toHaveCount(2);
+  expect(await overflows(page)).toBe(false);
+});
+
+/**
+ * decisions.md #91. A phone's page is killed processing a 48 MP photograph, so
+ * a phone refuses one before the decode and says where it will work.
+ *
+ * Only the header is read before the refusal, so a PNG signature and an IHDR
+ * claiming 8064 × 6048 is a whole test file: nothing reaches the decoder, and
+ * nothing reaches the server.
+ */
+test('a photo too large for a phone is refused on its tile, saying where it will work', async ({
+  page,
+}) => {
+  test.skip(
+    test.info().project.name !== 'mobile-safari',
+    'the limit applies to phones',
+  );
+
+  await page.goto(`${BASE}/`);
+
+  const header = Buffer.alloc(33);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header, 0);
+  header.writeUInt32BE(13, 8);
+  header.write('IHDR', 12, 'ascii');
+  header.writeUInt32BE(8064, 16);
+  header.writeUInt32BE(6048, 20);
+  header[24] = 8;
+  header[25] = 2;
+
+  await page.locator('.drop-target__input').setInputFiles({
+    name: 'too-big.png',
+    mimeType: 'image/png',
+    buffer: header,
+  });
+
+  const tile = page
+    .locator('.upload__pending .photo-grid__item')
+    .filter({ hasText: 'too-big.png' });
+  await expect(tile).toContainText('Failed');
+  await expect(tile).toContainText(
+    'This photo is 48.8 MP, too large to add from a phone. It will work if you ' +
+      'add it from a laptop, or email it in (ask the site admin how).',
+  );
+
+  await page.getByRole('button', { name: 'Clear' }).click();
+  await expect(tile).toHaveCount(0);
 });
