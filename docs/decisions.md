@@ -1481,6 +1481,11 @@ its ordering, and its URLs are unchanged.
       already transcodes, and the 48 MP failure is memory, which a narrower
       accept list cannot touch. #91 is what follows from it instead.
 
+    **Amended by #92.** "Move any photograph to the trash, and restore from
+    the trash" did not survive: the family trashes and restores only what its
+    own browser added. This decision was deployed to production, rolled back
+    for that reason, and returns only together with #92.
+
 ## Phones and large photographs — 2026-09-14
 
 91. **A phone refuses a photograph over 30 MP before decoding it, and says
@@ -1508,3 +1513,66 @@ its ordering, and its URLs are unchanged.
     means for some photographs and not others. Either deserves its own spec.
     Also rejected: detecting memory rather than the device, which no
     browser in question exposes to a page.
+
+## The family trashes only what it added — 2026-09-14
+
+92. **The family trashes only what it added from the same browser**
+    (docs/specs/family-own-trash.md). #90 let anyone holding the family link
+    move any photograph to the trash. The owner does not want a family member
+    able to trash photographs at random; the case worth serving is the
+    accidental upload, where someone adds a photograph, realises at once that
+    it should not be on the site, and wants it gone without asking the
+    administrator.
+
+    So a family browser keeps a random 256-bit token in local storage and
+    sends it in `x-photo-uploader` on every curation request. A commit through
+    the family link records the token's SHA-256 on the photograph as
+    `uploaderHash`, and in display mode the trash preview, the confirm, the
+    restore, the trash listing, and its count reach only photographs whose
+    hash matches. Anything else is the plain 404 an unknown photograph gets.
+    The family's preview accepts only an explicit ID list, because a day or a
+    month selection would otherwise sweep in photographs nobody here added,
+    and the confirm and the restore re-check ownership inside the mutation
+    callback, so a retry after a conflicting write checks the catalog it
+    writes. The admin link ignores the header and reaches everything, as
+    before.
+
+    Ownership is a browser, not a person or a network. Rejected: the IP
+    address, which a household shares and a phone changes every time it
+    leaves the house; and a browser fingerprint, which two iPhones of the same
+    model on the same iOS version share. A random token identifies one browser
+    and stores nothing about anyone; the catalog holds only its hash, which is
+    in neither the viewer projection nor the audit log. This reverses, for
+    trashing alone, #90's rejection of a browser-remembered "my uploads": here
+    losing it costs the chance to delete one's own mistake, and nothing else.
+    Also rejected: a link or a code carrying the token to another device,
+    which puts a deletion secret in something the family forwards.
+
+    The browser remembers the IDs it committed rather than asking the server
+    which photographs it owns. Rejected: putting the uploader hash in the
+    viewer projection, which would let any viewer group the library by the
+    device that added it; and an "own" flag computed per request, which makes
+    every read vary by header. Delete appears only on those photographs, with
+    no disabled button elsewhere; Photo info on one says "Added from: This
+    device", which is how someone on another device can work out why Delete
+    is missing. Both apps share one origin and so one local storage, so only
+    the family's entry point configures the token: an admin that recorded its
+    uploads there would have the family link offer Delete on photographs the
+    server refuses.
+
+    Accepted consequences. A photograph added from a phone cannot be trashed
+    from the same person's laptop, from a replacement phone, or after that
+    browser loses its storage, as iOS does for a site unvisited for weeks, and
+    nothing detects that. Everything already in the library, every admin
+    upload, and every Inbox acceptance has no hash and stays the
+    administrator's to trash. When storage refuses the token the page keeps it
+    in memory, so a mistake noticed straight away can still be deleted, and
+    the add bar says deleting stops working when the page closes. A photograph
+    its browser added that the administrator trashed appears in that browser's
+    trash and can be restored from there: there is no trashed-by record, and a
+    disagreement about such a photograph is a family conversation. Editing is
+    not narrowed.
+
+    Release: #90 was deployed to production and rolled back because it lacked
+    this, and the two ship together.
+

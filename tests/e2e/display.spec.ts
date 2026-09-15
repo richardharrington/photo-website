@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Locator, Page } from '@playwright/test';
-import { FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
+import { FIXTURE_PHOTO_IDS, FIXTURE_UPLOADER_TOKEN } from '../../fixtures/catalog.ts';
 import { tinyPng } from '../../fixtures/tiny-png.ts';
 
 const BASE = '/dev-display-path';
@@ -431,7 +431,7 @@ test.describe('trashed and unknown resources', () => {
 
     await expect(page.getByRole('heading', { name: 'Not found' })).toBeVisible();
     // Nothing on the page hints that this ID ever existed. The header's Trash
-    // link is the family's, on every page, and says nothing about this one.
+    // link, where there is one, is this browser's and says nothing about it.
     await expect(
       page.getByRole('main').getByText(/deleted|trash|removed/i),
     ).toHaveCount(0);
@@ -538,14 +538,20 @@ test.describe('images', () => {
 
 /**
  * The display link is the family link (family-tier.md 11.3): anyone holding it
- * can add a photograph, correct one, move one to the trash, and restore it,
- * and nothing only the administrator does.
+ * can add a photograph and correct one, and can move to the trash and restore
+ * what its own browser added (family-own-trash.md 11.3), and nothing only the
+ * administrator does.
  *
  * Against a family dev server of this project's own (playwright.config.ts),
  * because these change the library and the tests above count it exactly.
  * Serial, because each builds on the library the one before left behind.
  * The upload is the same generated PNG the admin's upload test uses, so it
  * needs no `sample-photos/` and never skips.
+ *
+ * Each page starts as the browser that added the scratch days: the fixture
+ * uploader's token, whose hash every scratch-day photograph carries, and
+ * those photographs' IDs as added here. Only a test that opens a context of
+ * its own starts as a stranger.
  */
 test.describe('the family can curate', () => {
   test.describe.configure({ mode: 'serial' });
@@ -555,14 +561,58 @@ test.describe('the family can curate', () => {
     return `http://localhost:${port}/dev-display-path`;
   }
 
+  /** The admin base of the same fixture process, for arranging what a family cannot. */
+  function adminApi(): string {
+    return familyBase().replace('/dev-display-path', '/dev-admin-path/api');
+  }
+
+  /** This project's scratch day, which only this project's tests change. */
+  function scratch() {
+    const index = test.info().project.name === 'webkit' ? 1 : 0;
+    return {
+      path: `2026/07/0${4 + index}`,
+      live: ['a', 'b', 'c'].map(
+        (letter) => FIXTURE_PHOTO_IDS[`scratch-${index}-${letter}`]!,
+      ),
+    };
+  }
+
+  /** Every photograph the fixture uploader added, on both scratch days. */
+  const SCRATCH_IDS = Object.entries(FIXTURE_PHOTO_IDS)
+    .filter(([seed]) => seed.startsWith('scratch-') || seed.startsWith('deleted-'))
+    .map(([, id]) => id);
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(
+      ({ token, ids }) => {
+        // Only into an empty storage, so what this page itself remembers
+        // survives a reload.
+        if (window.localStorage.getItem('photo-uploader-token') === null) {
+          window.localStorage.setItem('photo-uploader-token', token);
+          window.localStorage.setItem('photo-uploaded-ids', JSON.stringify(ids));
+        }
+      },
+      { token: FIXTURE_UPLOADER_TOKEN, ids: SCRATCH_IDS },
+    );
+  });
+
   /** The library's own tiles, not the files still on their way in. */
   const library = (page: Page) =>
     page.locator('.timeline:not(.upload__pending) .photo-grid__item');
 
-  test('adds a photograph from the add bar', async ({ page }) => {
+  test('adds a photograph from the add bar, which it can then delete', async ({
+    page,
+  }) => {
     const base = familyBase();
     await page.goto(`${base}/`);
     await expect(library(page)).toHaveCount(18);
+
+    const committed = page.waitForResponse(
+      (response) =>
+        response.url().endsWith('/api/commit') &&
+        response.request().method() === 'POST',
+      { timeout: 30_000 },
+    );
 
     const name = 'family-upload.png';
     await page.locator('.drop-target__input').setInputFiles({
@@ -583,6 +633,24 @@ test.describe('the family can curate', () => {
     // its tile has gone.
     await expect(library(page)).toHaveCount(19, { timeout: 30_000 });
     await expect(page.locator('.upload__pending')).toHaveCount(0);
+
+    // The commit carried this browser's token, and the photograph it made is
+    // one this browser can delete — after a reload, too.
+    const response = await committed;
+    expect(response.request().headers()['x-photo-uploader']).toBe(
+      FIXTURE_UPLOADER_TOKEN,
+    );
+    const { photo } = (await response.json()) as { photo: { id: string } };
+
+    await page.goto(`${base}/photo/${photo.id}`);
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Delete', exact: true }),
+    ).toBeVisible();
+    await page.getByRole('button', { name: 'Photo info' }).click();
+    const info = page.locator('#photo-information');
+    await expect(info.locator('dt', { hasText: 'Added from' })).toHaveCount(1);
+    await expect(info.locator('dd', { hasText: 'This device' })).toHaveCount(1);
   });
 
   test('corrects a caption, and it stays corrected', async ({ page }) => {
@@ -599,61 +667,147 @@ test.describe('the family can curate', () => {
     await expect(caption).toHaveValue('Saturday market, in the rain.');
   });
 
-  test('moves a photograph to the trash, and restores it from there', async ({
+  test('moves a photograph it added to the trash, and restores it from there', async ({
     page,
   }) => {
     const base = familyBase();
-    const id = FIXTURE_PHOTO_IDS['market']!;
-    await page.goto(`${base}/photo/${id}`);
+    const id = scratch().live[2]!;
 
-    const trashLink = page.getByRole('link', { name: /^Trash/ });
-    await expect(trashLink).toHaveText('Trash (2)');
+    // Something in the trash that this browser did not add, which its trash
+    // must not show. Put there through the admin base, and put back after.
+    const stranger = FIXTURE_PHOTO_IDS['undated-a']!;
+    const preview = await page.request.post(`${adminApi()}/trash/preview`, {
+      data: { selection: { kind: 'ids', photoIds: [stranger] } },
+    });
+    await page.request.post(`${adminApi()}/trash/confirm`, {
+      data: await preview.json(),
+    });
 
-    await page.getByRole('button', { name: 'Delete', exact: true }).click();
-    await expect(page.getByRole('alertdialog')).toContainText('1 photo');
-    await page.keyboard.press('Enter');
+    try {
+      await page.goto(`${base}/photo/${id}`);
 
-    // The photo view advances rather than closing: August 15th's only photo
-    // gives way to the next in the library, on August 2nd.
-    await expect(page).not.toHaveURL(new RegExp(id));
+      // Both scratch days' trashed photographs are this browser's; the one
+      // nobody added is not counted.
+      const trashLink = page.getByRole('link', { name: /^Trash/ });
+      await expect(trashLink).toHaveText('Trash (2)');
+
+      await page.getByRole('button', { name: 'Photo info' }).click();
+      await expect(
+        page.locator('#photo-information dt', { hasText: 'Added from' }),
+      ).toHaveCount(1);
+
+      await page.getByRole('button', { name: 'Delete', exact: true }).click();
+      await expect(page.getByRole('alertdialog')).toContainText('1 photo');
+      await page.keyboard.press('Enter');
+
+      // The photo view advances rather than closing.
+      await expect(page).not.toHaveURL(new RegExp(id));
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await expect(trashLink).toHaveText('Trash (3)');
+
+      // Close the photo view to reach the header, as anyone would.
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await trashLink.click();
+      await expect(page).toHaveURL(`${base}/trash`);
+      await expect(page.locator('.trash__intro')).toContainText(
+        'Photos added from this device that have been deleted are kept here for 30 days',
+      );
+
+      // Only this browser's photographs: every tile is a scratch-day one, and
+      // the photograph nobody added is not among them.
+      const tiles = page.locator('.photo-grid__item img');
+      await expect(tiles).toHaveCount(3);
+      for (const src of await tiles.evaluateAll((images) =>
+        images.map((image) => image.getAttribute('src') ?? ''),
+      )) {
+        expect(
+          SCRATCH_IDS.some((scratchId) => src.includes(scratchId)),
+          src,
+        ).toBe(true);
+        expect(src).not.toContain(stranger);
+      }
+
+      // No filename on a family tile, so it is found by the photo its thumbnail is.
+      const trashed = page
+        .locator('.photo-grid__item')
+        .filter({ has: page.locator(`img[src*="${id}"]`) });
+      await expect(trashed).toHaveCount(1);
+      await trashed.locator('.photo-grid__link').click();
+
+      // One tap opens it, and Restore is the only thing it offers.
+      const view = page.getByRole('dialog');
+      await expect(view).toBeVisible();
+      await expect(
+        page.getByRole('button', { name: 'Delete', exact: true }),
+      ).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
+      await expect(
+        page.getByRole('button', { name: 'Delete permanently' }),
+      ).toHaveCount(0);
+      await page.getByRole('button', { name: 'Restore' }).click();
+
+      await expect(view).toHaveCount(0);
+      await expect(trashed).toHaveCount(0);
+      await expect(trashLink).toHaveText('Trash (2)');
+
+      await page.goto(`${base}/${scratch().path}`);
+      await expect(page.locator(`#photo-${id}`)).toBeVisible();
+    } finally {
+      await page.request.post(`${adminApi()}/restore`, {
+        data: { photoIds: [stranger] },
+      });
+    }
+  });
+
+  test('offers no Delete on a photograph it did not add', async ({ page }) => {
+    const base = familyBase();
+    await page.goto(`${base}/photo/${FIXTURE_PHOTO_IDS['beach-early']}`);
+
     await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByLabel('Capture date')).toHaveValue('2026-08-02');
-    await expect(trashLink).toHaveText('Trash (3)');
-
-    // Close the photo view to reach the header, as anyone would.
-    await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog')).toHaveCount(0);
-    await trashLink.click();
-    await expect(page).toHaveURL(`${base}/trash`);
-    await expect(page.locator('.trash__intro')).toContainText(
-      'Only the administrator can delete a photo permanently.',
-    );
-
-    // No filename on a family tile, so it is found by the photo its thumbnail is.
-    const trashed = page
-      .locator('.photo-grid__item')
-      .filter({ has: page.locator(`img[src*="${id}"]`) });
-    await expect(trashed).toHaveCount(1);
-    await trashed.locator('.photo-grid__link').click();
-
-    // One tap opens it, and Restore is the only thing it offers.
-    const view = page.getByRole('dialog');
-    await expect(view).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Download' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(
       0,
     );
-    await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Delete permanently' })).toHaveCount(
-      0,
-    );
-    await page.getByRole('button', { name: 'Restore' }).click();
 
-    await expect(view).toHaveCount(0);
-    await expect(trashed).toHaveCount(0);
-    await expect(trashLink).toHaveText('Trash (2)');
+    await page.getByRole('button', { name: 'Photo info' }).click();
+    const info = page.locator('#photo-information');
+    await expect(info).toBeVisible();
+    await expect(info).not.toContainText('Added from');
 
-    await page.goto(`${base}/2026/08/15`);
-    await expect(page.locator(`#photo-${id}`)).toBeVisible();
+    // The key does nothing either: no confirmation to answer.
+    await page.keyboard.press('Delete');
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  });
+
+  test('a fresh browser has no Trash link, and is refused a trash', async ({
+    browser,
+  }) => {
+    const base = familyBase();
+    const context = await browser.newContext();
+    try {
+      const page = await context.newPage();
+      const counted = page.waitForResponse((response) =>
+        response.url().endsWith('/api/trash/count'),
+      );
+      await page.goto(`${base}/photo/${scratch().live[0]}`);
+
+      // Its trash is empty, so there is no link to it.
+      expect(await (await counted).json()).toEqual({ count: 0 });
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await expect(page.getByRole('link', { name: /^Trash/ })).toHaveCount(0);
+      await expect(
+        page.getByRole('button', { name: 'Delete', exact: true }),
+      ).toHaveCount(0);
+
+      // And the server refuses it regardless of what the page shows.
+      const refused = await page.request.post(`${base}/api/trash/preview`, {
+        data: { selection: { kind: 'ids', photoIds: [scratch().live[0]] } },
+      });
+      expect(refused.status()).toBe(404);
+    } finally {
+      await context.close();
+    }
   });
 
   test('is refused what only the administrator does', async ({ page }) => {

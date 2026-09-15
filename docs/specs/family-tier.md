@@ -6,6 +6,10 @@ this, without the interview's context, so this document is meant to be
 complete. Where this spec and the code disagree, the spec wins; where it and
 `docs/design.md` disagree, the spec wins and the doc is updated (section 12).
 
+Decisions 3 and 6, the trash in sections 5.3 and 5.4, and the Trash link in
+5.1 are amended by `family-own-trash.md`: the family trashes, restores, and
+sees in the trash only photographs added from the same browser.
+
 ## 1. Outcome
 
 The display link becomes the family link. Anyone who holds it can add

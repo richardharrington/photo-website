@@ -32,6 +32,7 @@ not unresolved product decisions.
   procedure initially.
 - Per-person accounts or ownership of photographs; every family member acts
   with the same rights.
+- Cross-device ownership of uploads.
 
 ## Access and privacy model
 
@@ -42,10 +43,17 @@ trusted.
 - The display URL and admin URL are separate, independent, high-entropy paths.
   Neither can be derived from the other.
 - The display path is the family link and can be shared among family members.
-  Anyone holding it can view, add, edit, and trash photographs and restore them
-  from the trash; the server enforces this by mode, not the page. The admin
+  Anyone holding it can view, add, and edit photographs, and trash and restore
+  the ones added from the same browser; the server enforces this by mode, not
+  the page. The admin
   path is shared only with administrators and additionally allows permanent
   deletion, the Inbox, the Emails page, and the catalog export.
+- A family browser keeps a random uploader token in its local storage and
+  sends it with every change it makes. A photograph added through the family
+  link stores only the token's hash, which is never shown to viewers and never
+  written to the audit log. It identifies a browser, not a person, and it is
+  what lets that browser alone trash and restore the photograph
+  (family-own-trash.md).
 - The audit log records which link an act came through (`display-api` or
   `admin-api`) and nothing about who; there are no accounts, so it makes no
   person-level claim.
@@ -270,8 +278,9 @@ queue with overall and per-file status rather than an arbitrary batch limit.
 ## Family site
 
 The display link is the family link (family-tier.md #1): anyone holding it
-can look at the library, add to it, correct it, and move photographs to the
-trash and back. What only the administrator does is described under
+can look at the library, add to it, correct it, and move the photographs added
+from their own browser to the trash and back. What only the administrator does
+is described under
 [Admin site](#admin-site).
 
 - The design is restrained and photo-first: neutral backgrounds, system
@@ -302,7 +311,10 @@ trash and back. What only the administrator does is described under
   reachable from anywhere in a page that is years long. Everything else that
   pins — the year and month headings, the add bar, and the admin's selection
   bar — sits below it.
-- The header also carries **Trash** with its count, beside the view toggle.
+- The header also carries **Trash** with its count, beside the view toggle, but
+  only while this browser's trash holds something: it appears after the first
+  delete and disappears when the count returns to zero, and `/trash` stays
+  reachable.
 - Under the header sits the **add bar**. On a phone it reads **Add photos**
   and opens the picker; on a wider screen it reads **Drop photos here**, with
   the hint that it can be pressed too. It is pinned to the top of the page, so
@@ -310,7 +322,10 @@ trash and back. What only the administrator does is described under
   years long; it is a large panel while the library is empty and a slim bar
   once it is not, and it stands down while the photo view is open. There is no
   persistent server-side "processing" area; a file either commits fully or
-  leaves no record.
+  leaves no record. When the browser cannot keep its uploader token, a line
+  under the hint says so at every width: "This browser can't remember your
+  uploads after you close this page, so you won't be able to delete them
+  after that." Silent storage eviction cannot be detected and gets no message.
 - An added file is a photograph on the page immediately: a tile of its own,
   above the timeline, on the same grid as the library. It carries its filename
   at once — the one place the family sees a filename on a tile, since before a
@@ -333,6 +348,9 @@ trash and back. What only the administrator does is described under
 - A plain click or tap on a photograph opens it. The photo view's bottom-left
   stack is the edit form — capture date, capture time, caption, and **Save
   changes** — with **Download**, **Delete**, and **Photo info** beneath.
+  **Delete** appears only on a photograph added from this browser, whose Photo
+  info also says "Added from: This device"; on any other photograph there is
+  no Delete, disabled or otherwise, and the Delete key does nothing.
   Nothing is saved until Save. While an edit is unsaved the previous and next
   controls are disabled and the arrow keys do nothing, because stepping to
   another photograph is precisely what would discard it; the form says so.
@@ -349,14 +367,16 @@ trash and back. What only the administrator does is described under
   and quietly refetches the library afterwards, so the page never waits on a
   reload and never stays out of step for long.
 - **Trash** is a page of its own: the grid, headed "Trash" with a count, and
-  one line above it saying deleted photos are kept for 30 days and then
-  removed, that a tap opens a photo to look at and restore, and that only the
-  administrator can delete one permanently. Tapping a trashed photograph opens
+  one line above it: "Photos added from this device that have been deleted are
+  kept here for 30 days, then removed automatically. Tap one to look at it and
+  restore it." It lists only the photographs added from this browser,
+  including one the administrator trashed. Tapping a trashed photograph opens
   the photo view with **Restore** as its action — no download, no delete, no
   edit form — and Restore puts it back, closes the view, and updates the
   count.
 - What the family does not have: no selection or selection bar, no Select all
-  on a day heading, no caption applied to many photographs at once, no
+  on a day heading, no caption applied to many photographs at once, no delete
+  of a photograph added from another browser or by the administrator, no
   permanent deletion, no Emails, no Inbox, no Export catalog, and no filename
   on a library tile. The server refuses those routes to the family link; the
   page not showing them is not the reason they are unavailable.
@@ -578,6 +598,8 @@ of the [family site](#family-site)'s rules.
   records removed, audit retained).
 - The admin's trash provides an explicitly confirmed permanent-delete
   action; the family's has none.
+- The family's trash lists only the photographs added from the same browser,
+  and a family member restores only those; the admin's lists everything.
 - A family member restores from the lightbox; an administrator can also
   restore or permanently delete a selection.
 - A deleted photo can be restored during its retention period. Trashed photos
