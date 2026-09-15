@@ -172,6 +172,10 @@ fixture server.
   and Workers globals** — it is compiled into all three targets. `ui/` is the
   only place under `src/shared/` where DOM globals are allowed;
   `src/shared/timeline-patch.ts` is not in it and must stay runtime-neutral.
+- **Only the family entry point configures the uploader token.** Both apps
+  share an origin and so share local storage; an admin that recorded its
+  uploads there would show the family Delete on photographs the server
+  refuses.
 - **Display mode is a tier, not a read-only mode.** The display Function
   answers the curation routes; the fixture server's display branch must answer
   exactly the same list, and both must refuse every admin-only route with the

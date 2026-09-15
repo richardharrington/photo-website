@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   hashUploaderToken,
@@ -78,5 +80,35 @@ describe('isOwnedBy', () => {
 
   it('is true for the same hash', () => {
     expect(isOwnedBy(owned, TOKEN_HASH)).toBe(true);
+  });
+});
+
+/**
+ * Both apps share an origin, and so local storage. Only the family's entry
+ * point may configure the uploader (family-own-trash.md 9): an admin that did
+ * would record its uploads as added here and have the family link show Delete
+ * on photographs the server refuses.
+ */
+describe('who configures the uploader', () => {
+  function sources(dir: string): string[] {
+    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? sources(join(dir, entry.name))
+        : /\.tsx?$/.test(entry.name)
+          ? [join(dir, entry.name)]
+          : [],
+    );
+  }
+
+  it('is the family entry point', () => {
+    const main = readFileSync('src/display/main.tsx', 'utf8');
+    expect(main).toContain('configureUploader(getUploader())');
+  });
+
+  it('is never anything in the admin app', () => {
+    for (const file of sources('src/admin')) {
+      const text = readFileSync(file, 'utf8');
+      expect(text, file).not.toMatch(/configureUploader|getUploader|ui\/uploader/);
+    }
   });
 });

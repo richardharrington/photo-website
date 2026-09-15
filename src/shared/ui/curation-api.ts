@@ -14,6 +14,11 @@
  *
  * The error parsing lives here because a mutation that is refused has to say
  * why, where a read only ever succeeds or 404s.
+ *
+ * The family app configures an uploader, and from then on every request here
+ * carries its token and every photograph this browser commits is remembered
+ * (family-own-trash.md 6.3). The admin never configures one, so its requests
+ * carry no token and its uploads are remembered nowhere.
  */
 
 import { routes } from './api.ts';
@@ -23,6 +28,8 @@ import type { PhotoEdit } from './curation.ts';
 import type { SelectionQuery } from '../admin-operations.ts';
 import type { Rendition } from '../constants.ts';
 import type { DerivativeDescriptor } from '../catalog.ts';
+import { UPLOADER_HEADER } from '../uploader.ts';
+import type { Uploader } from './uploader.ts';
 
 /** A rejection the API explains, as opposed to a bare failure. */
 export class ApiError extends Error {
@@ -32,10 +39,21 @@ export class ApiError extends Error {
   }
 }
 
+let uploader: Uploader | null = null;
+
+/** Called once by the family app's entry point. The admin never calls it. */
+export function configureUploader(value: Uploader): void {
+  uploader = value;
+}
+
 export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(routes.api(path), {
     ...init,
-    headers: { accept: 'application/json', ...init?.headers },
+    headers: {
+      accept: 'application/json',
+      ...(uploader ? { [UPLOADER_HEADER]: uploader.token } : {}),
+      ...init?.headers,
+    },
     credentials: 'omit',
   });
 
@@ -110,7 +128,7 @@ export const curationApi = {
   prepare: (contentHash: string, originalFilename: string) =>
     post<PrepareResult>('/prepare', { contentHash, originalFilename }),
 
-  commit: (body: {
+  commit: async (body: {
     photoId: string;
     contentHash: string;
     originalFilename: string;
@@ -127,7 +145,13 @@ export const curationApi = {
      *  sender from the record; the browser never supplies one. */
     submissionId?: string;
     claimToken?: string;
-  }) => post<CommitResult>('/commit', body),
+  }) => {
+    const result = await post<CommitResult>('/commit', body);
+    // A duplicate is somebody's photograph already, not this browser's.
+    if (result.status === 'created' && result.photo)
+      uploader?.remember(result.photo.id);
+    return result;
+  },
 
   // ---- Curation ---------------------------------------------------------
 
