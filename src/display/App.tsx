@@ -143,6 +143,9 @@ export function App() {
       photoViewOpen={route.kind === 'photo' || route.kind === 'recent-photo'}
       note={getUploader().persistent ? null : STORAGE_NOTE}
       addedFrom
+      // The family's trash lists only what this browser added, so only those
+      // get "Find it in the trash" on a skipped file (family-own-trash.md #6).
+      trashShows={(id) => getUploader().addedHere(id)}
     />
   );
 

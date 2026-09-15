@@ -43,6 +43,18 @@ function stateLabel(item: QueueItem): string {
   return STATE_LABELS[item.state];
 }
 
+/**
+ * A skipped file whose twin is in a trash this page cannot show.
+ *
+ * The family's trash lists only what this browser added (family-own-trash.md
+ * #6), so for somebody else's photograph — or one no family browser added —
+ * "Find it in the trash" would lead to a trash that does not list it, and the
+ * file cannot be added again while its twin is there. This says who can bring
+ * it back instead.
+ */
+export const DELETED_ELSEWHERE =
+  'This photo was added before and then later deleted. Ask the site admin if you want it to be restored.';
+
 /** Nothing is selectable here; see the curation below. */
 const NOTHING_SELECTED: ReadonlySet<string> = new Set();
 
@@ -69,6 +81,13 @@ interface UploadPanelProps {
    * in from this browser. The family's; the admin passes false.
    */
   addedFrom: boolean;
+  /**
+   * Whether this app's trash page lists the photograph with this ID. The
+   * admin's lists everything; the family's only what this browser added. A
+   * file skipped because its twin is in the trash links there only when the
+   * trash will show it, and otherwise says `DELETED_ELSEWHERE`.
+   */
+  trashShows: (photoId: string) => boolean;
 }
 
 /** The add bar's queue as the app holds it. */
@@ -153,6 +172,7 @@ export function UploadPanel({
   photoViewOpen,
   note,
   addedFrom,
+  trashShows,
 }: UploadPanelProps) {
   const { queue, snapshot, landed, libraryChanged } = uploads;
   const [dragging, setDragging] = useState(false);
@@ -374,6 +394,15 @@ export function UploadPanel({
               note={(photo) => {
                 const item = byId.get(photo.id);
                 if (!item) return null;
+                if (
+                  item.state === 'skipped' &&
+                  item.existingPhotoTrashed &&
+                  item.existingPhotoId !== undefined &&
+                  !trashShows(item.existingPhotoId)
+                ) {
+                  // No link: the trash this page can reach does not list it.
+                  return <span className="upload__state">{DELETED_ELSEWHERE}</span>;
+                }
                 return (
                   <>
                     <span

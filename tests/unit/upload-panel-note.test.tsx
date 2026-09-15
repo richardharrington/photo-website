@@ -2,34 +2,49 @@
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, renderHook } from '@testing-library/react';
+import type { ItemState, QueueItem } from '../../src/shared/ui/upload/queue.ts';
 
 /**
- * The add bar's queue and its note.
+ * The add bar's queue, its note, and what a skipped file's tile says.
  *
- * The queue is replaced with a fake whose busy state the test drives, so no
- * part of the pipeline loads. What is pinned is that the app-held queue
- * reloads the library when a batch settles whether or not a panel is mounted
- * (the panel unmounts with each listing), and says the batch has landed only
- * once that reload has finished; and that the note renders or does not.
+ * The queue is replaced with a fake whose busy state and items the test
+ * drives, so no part of the pipeline loads. What is pinned is that the
+ * app-held queue reloads the library when a batch settles whether or not a
+ * panel is mounted (the panel unmounts with each listing), and says the batch
+ * has landed only once that reload has finished; that the note renders or
+ * does not; and that a file skipped because its twin is in the trash links to
+ * the trash only when that trash will show it.
  */
 
 const fake = vi.hoisted(() => {
   const listeners = new Set<(snapshot: unknown) => void>();
-  const state = { active: false };
+  const state = { active: false, items: [] as unknown[] };
   const snapshot = () => ({
-    items: [],
+    items: state.items,
     batchSeq: null,
     active: state.active,
-    counts: {},
+    counts: {
+      queued: 0,
+      processing: 0,
+      uploading: 0,
+      committing: 0,
+      done: 0,
+      skipped: state.items.length,
+      failed: 0,
+    },
   });
   return {
     reset() {
       state.active = false;
+      state.items = [];
       listeners.clear();
     },
     setActive(active: boolean) {
       state.active = active;
       for (const listener of listeners) listener(snapshot());
+    },
+    setItems(items: unknown[]) {
+      state.items = items;
     },
     queue: {
       snapshot,
@@ -53,7 +68,8 @@ vi.mock('../../src/shared/ui/upload/create.ts', () => ({
   createQueue: () => fake.queue,
 }));
 
-const { UploadPanel, useUploads } = await import('../../src/shared/ui/Upload.tsx');
+const { DELETED_ELSEWHERE, UploadPanel, useUploads } =
+  await import('../../src/shared/ui/Upload.tsx');
 
 beforeAll(() => {
   // The panel publishes its height through a ResizeObserver.
@@ -126,7 +142,13 @@ describe('useUploads', () => {
   });
 });
 
-function Panel({ note }: { note: string | null }) {
+function Panel({
+  note = null,
+  trashShows = () => true,
+}: {
+  note?: string | null;
+  trashShows?: (photoId: string) => boolean;
+}) {
   const uploads = useUploads(() => {});
   return (
     <UploadPanel
@@ -135,6 +157,7 @@ function Panel({ note }: { note: string | null }) {
       photoViewOpen={false}
       note={note}
       addedFrom={false}
+      trashShows={trashShows}
     />
   );
 }
@@ -151,5 +174,68 @@ describe("the add bar's note", () => {
     const { container } = render(<Panel note={null} />);
     expect(container.querySelector('.drop-target')).not.toBeNull();
     expect(container.querySelector('.drop-target__note')).toBeNull();
+  });
+});
+
+const EXISTING = 'a'.repeat(32);
+
+/** A file the queue skipped because the same photograph is already stored. */
+function skipped(trashed: boolean): QueueItem {
+  const state: ItemState = 'skipped';
+  return {
+    id: 'item-1',
+    file: new File([], 'beach.jpg'),
+    selectionIndex: 0,
+    state,
+    progress: 1,
+    source: null,
+    edit: null,
+    caption: null,
+    preview: null,
+    existingPhotoId: EXISTING,
+    existingPhotoTrashed: trashed,
+  };
+}
+
+function tile(container: HTMLElement) {
+  const note = container.querySelector('.upload__pending .photo-grid__note');
+  return {
+    text: note?.textContent ?? '',
+    links: [...(note?.querySelectorAll('a') ?? [])].map((link) => link.textContent),
+  };
+}
+
+describe('a file skipped because its twin is in the trash', () => {
+  it('says who can restore it, with no link, when this trash does not list it', () => {
+    fake.setItems([skipped(true)]);
+    const trashShows = vi.fn(() => false);
+    const { container } = render(<Panel trashShows={trashShows} />);
+
+    expect(trashShows).toHaveBeenCalledWith(EXISTING);
+    expect(tile(container)).toEqual({ text: DELETED_ELSEWHERE, links: [] });
+    expect(DELETED_ELSEWHERE).toBe(
+      'This photo was added before and then later deleted. Ask the site admin if you want it to be restored.',
+    );
+  });
+
+  it('points at the trash when this trash lists it', () => {
+    fake.setItems([skipped(true)]);
+    const { container } = render(<Panel trashShows={() => true} />);
+
+    const { text, links } = tile(container);
+    expect(text).toContain('Already uploaded, now in the trash – skipped');
+    expect(text).not.toContain(DELETED_ELSEWHERE);
+    expect(links).toEqual(['Find it in the trash']);
+  });
+
+  it('links a live duplicate to its photo, without asking about the trash', () => {
+    fake.setItems([skipped(false)]);
+    const trashShows = vi.fn(() => false);
+    const { container } = render(<Panel trashShows={trashShows} />);
+
+    expect(trashShows).not.toHaveBeenCalled();
+    const { text, links } = tile(container);
+    expect(text).toContain('Already uploaded – skipped');
+    expect(links).toEqual(['View the existing photo']);
   });
 });

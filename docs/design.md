@@ -334,7 +334,12 @@ is described under
   encoded one, well before the upload finishes, and beneath it the per-file
   state (waiting, processing, uploading, finishing, added, skipped as a
   duplicate with a link to the photo already stored, failed with a reason and
-  a retry). It opens into the same photo view and the same edit form as any
+  a retry). A duplicate whose twin is in the trash links to the trash only when
+  this browser added that photograph, because the family's trash lists nothing
+  else; for any other it says "This photo was added before and then later
+  deleted. Ask the site admin if you want it to be restored.", with no link,
+  and the file cannot be added again until the administrator restores it or it
+  is purged. It opens into the same photo view and the same edit form as any
   other photograph, so a wrong date can be corrected and a caption written
   while the device is still working: a correction made before the file commits
   is carried into that commit, and one made afterwards is an ordinary edit.

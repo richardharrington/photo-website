@@ -300,6 +300,8 @@ export function App() {
       photoViewOpen={route.kind === 'photo' || route.kind === 'recent-photo'}
       note={null}
       addedFrom={false}
+      // The admin's trash lists every trashed photograph.
+      trashShows={() => true}
     />
   );
 
