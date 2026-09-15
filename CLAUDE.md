@@ -172,6 +172,11 @@ fixture server.
   answers the curation routes; the fixture server's display branch must answer
   exactly the same list, and both must refuse every admin-only route with the
   plain 404.
+- **A phone refuses a photo over `MAX_PHONE_SOURCE_PIXELS` (30 MP) before
+  decoding it.** Measured on an iPhone 12: Safari kills a page at 1,536 MB, and
+  a 48 MP photo reaches that during the full-resolution encode, which the
+  family sees as a silent reload (decisions.md #91). Do not raise it without
+  re-measuring on a device; a DOM shim or a desktop browser cannot show it.
 - **`full` is excluded from `DISPLAY_RENDITIONS`.** The full-resolution JPEG is
   reachable only through a short-lived HMAC-signed URL, never from a photo ID.
 - Objects never move. Trash is a catalog field; only permanent deletion or the

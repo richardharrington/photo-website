@@ -17,6 +17,7 @@ import { processFile, readSourceMetadata } from '../../../pipeline/index.ts';
 import { UploadQueue } from './queue.ts';
 import type { QueueDependencies } from './queue.ts';
 import { curationApi } from '../curation-api.ts';
+import { isPhoneBrowser } from '../device.ts';
 
 /**
  * PUT one artifact straight to R2 with its presigned URL.
@@ -48,6 +49,8 @@ export function createQueue(overrides: Partial<QueueDependencies> = {}): UploadQ
         // Already read, so the date on the tile and the date committed are
         // the same value rather than two parses expected to agree.
         metadata: options.metadata,
+        // Read once per file, at the moment it is processed.
+        phone: isPhoneBrowser(),
       }),
     readMetadata: (file) => readSourceMetadata(file, file.name),
     editPhoto: async (photoId, edit) => (await curationApi.edit(photoId, edit)).photo,

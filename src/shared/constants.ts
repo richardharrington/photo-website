@@ -15,6 +15,19 @@ export const MAX_SOURCE_BYTES = 50 * 1024 * 1024;
  */
 export const MAX_SOURCE_PIXELS = 50_000_000;
 
+/**
+ * The largest image a phone is allowed to process, lower than the general
+ * limit because a phone's browser gives a page far less memory.
+ *
+ * Measured on an iPhone 12 (family-tier validation, decisions.md #91): Safari
+ * allows a page 1,536 MB, a 24 MP photograph processed within it, and a 48 MP
+ * one took the page to 1,573 MB during the full-resolution JPEG encode and was
+ * killed — a silent reload, with nothing on screen to say why. Refusing before
+ * the decode turns that into a message on the file's tile. 30 MP sits between
+ * the two sizes phones actually take.
+ */
+export const MAX_PHONE_SOURCE_PIXELS = 30_000_000;
+
 export const ACCEPTED_MIME_TYPES = [
   'image/jpeg',
   'image/png',

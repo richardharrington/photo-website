@@ -14,7 +14,8 @@
  *
  * So one processing loop feeds a bounded pool of uploaders.
  *
- * The queue is also what the administrator sees and edits during an upload.
+ * The queue is also what the person adding photos sees and edits during an
+ * upload, in either app.
  * Every dropped file's EXIF is read up front, before the serial loop reaches
  * it, so a tile can show its capture date within a moment of the drop rather
  * than when its turn comes round; and a date or caption typed while a file is
@@ -73,7 +74,7 @@ export interface QueueItem {
    */
   source: SourceMetadata | null;
   /**
-   * What the administrator typed and saved, which outranks `source` and is
+   * What the person adding it typed and saved, which outranks `source` and is
    * carried into this file's commit — or applied as an ordinary edit, if the
    * commit has already happened.
    */
@@ -99,7 +100,7 @@ export interface QueueItem {
   existingPhotoTrashed?: boolean;
   /** Set for `done`. */
   photoId?: string;
-  /** Set for `failed`, and shown to the administrator. */
+  /** Set for `failed`, and shown on the file's tile. */
   error?: string;
   /** True once a failure has been retried, so the UI can say so. */
   retried?: boolean;
@@ -255,7 +256,7 @@ export class UploadQueue {
   }
 
   /**
-   * Record what the administrator typed for one file, wherever it has got to.
+   * Record what was typed for one file, wherever it has got to.
    *
    * Two cases, and the difference is meant to be invisible. A file that has
    * not committed yet simply carries the values into its own commit, so what
@@ -443,7 +444,7 @@ export class UploadQueue {
       // nothing can be typed into the gap between reading it and sending it.
       this.update(item.id, { state: 'committing', progress: 0.95 });
 
-      // What the administrator typed while this file was in flight, if
+      // What was typed while this file was in flight, if
       // anything, in place of what the photograph said about itself.
       const typed = this.require(item.id).edit;
       const captureDate = typed ? typed.date : photo.captureDate;

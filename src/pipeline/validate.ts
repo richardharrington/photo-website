@@ -9,6 +9,7 @@
 
 import {
   ACCEPTED_EXTENSIONS,
+  MAX_PHONE_SOURCE_PIXELS,
   MAX_SOURCE_BYTES,
   MAX_SOURCE_PIXELS,
 } from '../shared/constants.ts';
@@ -16,12 +17,16 @@ import { detectFormat, readDimensions } from './dimensions.ts';
 import type { SourceDimensions, SourceFormat } from './dimensions.ts';
 
 export type RejectionCode =
-  'too-large' | 'unsupported-format' | 'too-many-pixels' | 'unreadable';
+  | 'too-large'
+  | 'unsupported-format'
+  | 'too-many-pixels'
+  | 'too-many-pixels-for-phone'
+  | 'unreadable';
 
 export interface Rejection {
   ok: false;
   code: RejectionCode;
-  /** Shown to the administrator, so it says what to do about it. */
+  /** Shown on the file's tile, to whoever added it, so it says what to do. */
   message: string;
 }
 
@@ -57,6 +62,15 @@ export function hasAcceptedExtension(filename: string): boolean {
  */
 export const HEADER_PROBE_BYTES = 512 * 1024;
 
+export interface ValidationOptions {
+  /**
+   * The file is being added from a phone, whose browser gives a page far less
+   * memory; see `MAX_PHONE_SOURCE_PIXELS`. The caller decides, because this
+   * module must not read browser globals.
+   */
+  phone?: boolean;
+}
+
 /**
  * Validate a source file from its size and a prefix of its bytes.
  *
@@ -67,6 +81,7 @@ export const HEADER_PROBE_BYTES = 512 * 1024;
 export function validateSource(
   byteLength: number,
   headerBytes: Uint8Array,
+  options: ValidationOptions = {},
 ): ValidationOutcome {
   if (byteLength > MAX_SOURCE_BYTES) {
     return {
@@ -102,6 +117,20 @@ export function validateSource(
         `That image is ${formatMegapixels(pixels)} ` +
         `(${dimensions.dimensions.width}x${dimensions.dimensions.height}), over the ` +
         `${formatMegapixels(MAX_SOURCE_PIXELS)} limit. Downsize it before uploading.`,
+    };
+  }
+
+  // Before the decode, which is what would exhaust a phone's page and reload
+  // it with no explanation. Nothing is wrong with the photograph, so the
+  // message says where it will work instead.
+  if (options.phone && pixels > MAX_PHONE_SOURCE_PIXELS) {
+    return {
+      ok: false,
+      code: 'too-many-pixels-for-phone',
+      message:
+        `This photo is ${formatMegapixels(pixels)}, too large to add from a phone. ` +
+        'It will work if you add it from a laptop, or email it in ' +
+        '(ask the site admin how).',
     };
   }
 

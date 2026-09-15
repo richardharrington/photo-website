@@ -33,7 +33,7 @@ const STATE_LABELS: Record<QueueItem['state'], string> = {
  * What a tile says about itself.
  *
  * A skipped file whose twin is in the trash is the one state the label alone
- * gets wrong: "already uploaded" sends the administrator looking for a
+ * gets wrong: "already uploaded" sends whoever added it looking for a
  * photograph the library does not show.
  */
 function stateLabel(item: QueueItem): string {
@@ -256,9 +256,21 @@ export function UploadPanel({
           tabIndex={0}
           aria-label="Add photos: drop files here, or press to choose them"
         >
-          <p className="drop-target__headline">Drop photos here</p>
-          <p className="drop-target__hint">
+          {/* The words follow the 40rem breakpoint, in the stylesheet
+              (family-tier.md #13): a phone has nothing to drop, so there it
+              is simply "Add photos". One element, one input; only the text
+              changes. */}
+          <p className="drop-target__headline drop-target__headline--wide">
+            Drop photos here
+          </p>
+          <p className="drop-target__hint drop-target__hint--wide">
             or press to choose them. JPEG, PNG, and HEIC.
+          </p>
+          <p className="drop-target__headline drop-target__headline--narrow">
+            Add photos
+          </p>
+          <p className="drop-target__hint drop-target__hint--narrow">
+            JPEG, PNG, and HEIC.
           </p>
           <input
             ref={inputRef}

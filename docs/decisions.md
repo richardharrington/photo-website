@@ -13,7 +13,8 @@ the architecture without reconstructing the conversation.
 - **Admin browser is flexible** — whichever browser works best; no
   requirement to support processing in all of them, but no dependence on one.
   *(Amended by #20: admin requires Chromium or Safari; Firefox is
-  unsupported.)*
+  unsupported. Amended again by #90: re-measured once processing was serial,
+  Firefox uploads fine, and uploading is supported in every browser.)*
 - **HEIC must be handled**, because the owner's iPhone produces it by
   default, but converting it during upload (rather than storing it) is fine.
 
@@ -161,6 +162,12 @@ open question surfaced; the resulting decisions follow.
     recorded above: admin requires a Chromium-based browser or Safari. **The
     display site is unaffected** — Firefox views the site normally, so the
     viewer support matrix in design.md is unchanged.
+
+    *Amended 2026-09-14 (#90).* The measurement predated strictly serial
+    processing (#21). Re-measured on the owner's Mac for the family tier: five
+    photographs of about 5 MB each, a few seconds per photograph, and all five
+    completed with the tab intact. Uploading from Firefox is now supported in
+    both apps, and the add bar carries no Firefox note (family-tier.md #15).
 
 21. **Image processing is strictly serial; only uploads are concurrent.** The
     "three files in flight" queue was ambiguous about which stage it governed.
@@ -1446,3 +1453,58 @@ its ordering, and its URLs are unchanged.
     so a family app that uploaded fine in development would have failed in
     production with a console error and no upload. Both modes now get the
     admin's policy, and the gate test asserts the two are identical.
+
+    **Validation, on real devices (family-tier.md section 8).** The spec named
+    the pipeline harness, but that page is a Playwright shim with no file
+    picker, so the family app itself was the test: `npm run dev:display:lan`
+    serves it over a self-signed certificate, because the pipeline hashes with
+    `crypto.subtle` before it decodes and a phone reaching the Mac at
+    `http://<LAN IP>` is not a secure context. The owner's router isolates
+    Wi-Fi clients from each other, so the phone reached the Mac over the
+    phone's own Personal Hotspot.
+
+    - *Firefox on a Mac (item 3):* passed; see the amendment to #20.
+    - *iPhone 12, iOS 26.6.1, mobile Safari, unchanged accept list (item 1):*
+      the picker handed the page a **JPEG** for a HEIC in the camera roll (the
+      tile's filename ended `.jpeg`), and the capture date survived the
+      transcode. A 12 MP photograph and a 24 MP one (5664 × 4248, an upsampled
+      stand-in, since this phone takes neither 24 nor 48 MP) each finished. A
+      48 MP stand-in (8064 × 6048) did not: about eight seconds in, twice, the
+      page reloaded with no error and nothing uploaded. The phone's live log
+      shows why — `com.apple.WebKit.WebContent exceeded mem limit: ActiveSoft
+      1536 MB`, killed at 1,572,933 KB by jetsam, reason `highwater` — during
+      the full-resolution JPEG encode, the first of the four, when the decoded
+      pixels, the canvas they were read from, the encoder's own copy, and
+      mozjpeg's progressive coefficient buffers are all alive at once.
+    - *Item 2 was not run, and decision 14's narrowing is not applied.* Its
+      premise was that a HEIC might fail in the picker. It did not: the picker
+      already transcodes, and the 48 MP failure is memory, which a narrower
+      accept list cannot touch. #91 is what follows from it instead.
+
+## Phones and large photographs — 2026-09-14
+
+91. **A phone refuses a photograph over 30 MP before decoding it, and says
+    where it will work.** The measurement is #90's: Safari on an iPhone 12
+    allows a page 1,536 MB, a 24 MP photograph fits, and a 48 MP one is killed
+    mid-encode, which the family sees as the page silently reloading. So on a
+    phone or tablet, recognised by its user agent (and an iPadOS desktop-class
+    agent by its touchscreen), `validateSource` refuses anything above
+    `MAX_PHONE_SOURCE_PIXELS` from the header dimensions it already reads, and
+    the file's tile says: "This photo is 48.8 MP, too large to add from a
+    phone. It will work if you add it from a laptop, or email it in (ask the
+    site admin how)." The wording is the owner's: the photograph is fine, and
+    both routes work — a laptop has no such limit, and an emailed photograph
+    is processed on the administrator's laptop from the Inbox.
+
+    30 MP sits between the 24 MP phones save by default and the 48 MP some
+    take by choice. The rule applies to either app on a phone, the Inbox
+    included, and to nothing on a laptop, whose own limit stays
+    `MAX_SOURCE_PIXELS`.
+
+    Rejected for now: making a phone cope with 48 MP. Freeing the decode
+    canvas before the encode and lighter JPEG settings might get under the
+    limit on this phone and would not be known to on another; capping the
+    stored full-resolution copy for phone uploads would change what "full"
+    means for some photographs and not others. Either deserves its own spec.
+    Also rejected: detecting memory rather than the device, which no
+    browser in question exposes to a page.

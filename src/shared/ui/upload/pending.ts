@@ -64,7 +64,7 @@ export const PENDING_IMAGE = `data:image/svg+xml,${encodeURIComponent(
 /**
  * Project one queued file into a photo.
  *
- * What the administrator typed wins over what the file said about itself, and
+ * What the person adding it typed wins over what the file said about itself, and
  * wins as a whole: `edit` is the record of a save, so a cleared date is a
  * cleared date rather than a reason to fall back to EXIF.
  */

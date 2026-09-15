@@ -1,7 +1,8 @@
 /**
  * The browser image pipeline: one file in, four finished artifacts out.
  *
- * Everything here runs in the administrator's browser. The original source
+ * Everything here runs in the browser adding the photograph, in either app.
+ * The original source
  * file never leaves the machine — only the re-encoded artifacts are uploaded —
  * and because every artifact is re-encoded from decoded pixels, no EXIF or GPS
  * data survives into anything stored.
@@ -58,6 +59,8 @@ export interface ProcessOptions {
    * are merely expected to agree.
    */
   metadata?: SourceMetadata;
+  /** Added from a phone, so the lower pixel limit applies; see validate.ts. */
+  phone?: boolean;
 }
 
 /**
@@ -81,7 +84,7 @@ export async function processFile(
   const headerBytes = new Uint8Array(
     await file.slice(0, HEADER_PROBE_BYTES).arrayBuffer(),
   );
-  const validation = validateSource(file.size, headerBytes);
+  const validation = validateSource(file.size, headerBytes, { phone: options.phone });
   if (!validation.ok) return validation;
 
   // 2. Now that the size is known to be sane, read the whole file once and

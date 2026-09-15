@@ -131,6 +131,26 @@ button:disabled {
   display: none;
 }
 
+/* The words follow the shared 40rem breakpoint (family-tier.md #13). Narrow,
+   where there is nothing to drop from: "Add photos". Wide: "Drop photos here",
+   with the hint that it can be pressed too. */
+.drop-target__headline--wide,
+.drop-target__hint--wide {
+  display: none;
+}
+
+@media (min-width: 40rem) {
+  .drop-target__headline--wide,
+  .drop-target__hint--wide {
+    display: block;
+  }
+
+  .drop-target__headline--narrow,
+  .drop-target__hint--narrow {
+    display: none;
+  }
+}
+
 /* What is on its way in: the library's own grid, above the library. */
 .upload__pending {
   margin-bottom: calc(var(--space) * 2);
