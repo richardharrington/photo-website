@@ -43,7 +43,10 @@ export interface TrashBarState {
   deselectAll(): void;
 }
 
-/** The two halves of a permanent delete, which only the admin can call. */
+/**
+ * The two halves of a permanent delete. Both apps call them; through the family
+ * link they reach only what its browser added (family-own-trash.md 15).
+ */
 export interface PermanentDelete {
   preview(ids: string[]): Promise<PreviewResult>;
   confirm(preview: PreviewResult): Promise<unknown>;
@@ -81,7 +84,8 @@ function purgeDate(trashedAt: string): string {
  * trashed photo.
  *
  * One page for both apps (family-tier.md 7.7). The family's trash holds no
- * selection: a tap opens a photograph and Restore puts it back. It holds only
+ * selection: a tap opens a photograph, and Restore puts it back or Delete
+ * permanently removes it. It holds only
  * the photographs added from this browser, because that is all the server
  * lists for the family link (family-own-trash.md #6); nothing here filters. The admin
  * passes a selection, a bar that owns Restore and Delete permanently for it,
@@ -128,8 +132,7 @@ export function TrashPage({
   selection: ((ids: readonly string[]) => TrashSelection) | null;
   /**
    * The selection bar, or null. The admin passes its bar, which owns Restore
-   * and Delete permanently for a selection; the family app passes nothing,
-   * and restores from the lightbox.
+   * and Delete permanently for a selection; the family app passes nothing,\n\1* and restores and deletes permanently from the lightbox.
    */
   bar: ((state: TrashBarState) => ReactNode) | null;
   /** Null where permanent deletion is not offered at all. */
@@ -205,7 +208,8 @@ export function TrashPage({
 
   /**
    * Curation for trashed photographs: nothing that edits, downloads, or
-   * trashes, and Restore from the photo view. The capabilities are what tell
+   * trashes, and Restore from the photo view — and Delete permanently from it
+   * too, where the trash has no selection to act on (the family's). The capabilities are what tell
    * the shared photo view to show no form, no Download, and no Delete, so the
    * two callbacks for those are unreachable rather than merely unused. The
    * selection gestures are the admin's, where it passed a selection.
@@ -225,6 +229,7 @@ export function TrashPage({
       // where it came from is a library question.
       attribution: () => Promise.resolve(null),
       restore: (id) => void restore([id]),
+      purge: (id) => void startPermanentDelete([id]),
       // The server lists the family only what this browser added
       // (family-own-trash.md #6), so every photograph here was.
       addedHere: () => addedFrom,
@@ -234,6 +239,9 @@ export function TrashPage({
         trash: 'none',
         select: selection !== null,
         restore: true,
+        // The admin's bar deletes a selection permanently; a trash without one
+        // offers it in the photo view.
+        purge: permanentDelete !== null && selection === null,
         addedFrom,
         filename: filenames,
       },
@@ -241,7 +249,7 @@ export function TrashPage({
     // `restore` reads this render's `reload`, which is what `selection` stands
     // for; the selection is rebuilt from the listing on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selection, filenames, addedFrom],
+    [selection, filenames, addedFrom, permanentDelete],
   );
 
   if (resource.status === 'loading') {
@@ -281,7 +289,7 @@ export function TrashPage({
           <p className="trash__intro">
             Photos added from this device that have been deleted are kept here for{' '}
             {TRASH_RETENTION_DAYS} days, then removed automatically. Tap one to look at
-            it and restore it.
+            it and restore it, or delete it permanently.
           </p>
         )}
 

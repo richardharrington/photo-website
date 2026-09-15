@@ -783,9 +783,10 @@ test.describe('the family can curate', () => {
         page.getByRole('button', { name: 'Delete', exact: true }),
       ).toHaveCount(0);
       await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
+      // Restore, and Delete permanently, which the last test in this group uses.
       await expect(
         page.getByRole('button', { name: 'Delete permanently' }),
-      ).toHaveCount(0);
+      ).toHaveCount(1);
       await page.getByRole('button', { name: 'Restore' }).click();
 
       await expect(view).toHaveCount(0);
@@ -888,11 +889,7 @@ test.describe('the family can curate', () => {
     expect((await page.request.get(`${base}/api/emails`)).status()).toBe(404);
     expect(
       (
-        await page.request.post(`${base}/api/permanent-delete/preview`, {
-          data: {
-            selection: { kind: 'ids', photoIds: [FIXTURE_PHOTO_IDS['deleted-0']] },
-          },
-        })
+        await page.request.post(`${base}/api/captions`, { data: { changes: [] } })
       ).status(),
     ).toBe(404);
 
@@ -918,6 +915,55 @@ test.describe('the family can curate', () => {
     await expect(page.locator('.photo-grid__filename')).toHaveCount(0);
     for (const name of ['Emails', /^Inbox/, 'Export catalog']) {
       await expect(page.getByRole('link', { name })).toHaveCount(0);
+    }
+  });
+
+  test('deletes a photograph it added permanently from its trash, and nothing else', async ({
+    page,
+  }) => {
+    const base = familyBase();
+    const index = test.info().project.name === 'webkit' ? 1 : 0;
+    const id = FIXTURE_PHOTO_IDS[`deleted-${index}`]!;
+
+    // In the trash, but not this browser's: refused whatever the request says.
+    const stranger = FIXTURE_PHOTO_IDS['undated-b']!;
+    const trash = await page.request.post(`${adminApi()}/trash/preview`, {
+      data: { selection: { kind: 'ids', photoIds: [stranger] } },
+    });
+    await page.request.post(`${adminApi()}/trash/confirm`, {
+      data: await trash.json(),
+    });
+
+    try {
+      const refused = await page.request.post(`${base}/api/permanent-delete/preview`, {
+        headers: { 'x-photo-uploader': FIXTURE_UPLOADER_TOKEN },
+        data: { selection: { kind: 'ids', photoIds: [stranger] } },
+      });
+      expect(refused.status()).toBe(404);
+
+      await page.goto(`${base}/trash`);
+      const tile = page
+        .locator('.photo-grid__item')
+        .filter({ has: page.locator(`img[src*="${id}"]`) });
+      await tile.locator('.photo-grid__link').click();
+
+      await page.getByRole('button', { name: 'Delete permanently' }).click();
+      const confirm = page.getByRole('alertdialog');
+      await expect(confirm).toContainText('cannot be undone');
+      await confirm.getByRole('button', { name: 'Delete permanently' }).click();
+
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(tile).toHaveCount(0);
+
+      // Gone for good: there is nothing left for even the administrator to restore.
+      const restore = await page.request.post(`${adminApi()}/restore`, {
+        data: { photoIds: [id] },
+      });
+      expect(((await restore.json()) as { count: number }).count).toBe(0);
+    } finally {
+      await page.request.post(`${adminApi()}/restore`, {
+        data: { photoIds: [stranger] },
+      });
     }
   });
 });

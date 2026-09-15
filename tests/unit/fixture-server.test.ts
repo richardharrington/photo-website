@@ -87,6 +87,10 @@ const REACHING: Record<string, unknown> = {
   'POST /trash/preview': { selection: { kind: 'ids', photoIds: [OWNED_ID] } },
   'POST /trash/confirm': { photoIds: [] },
   'POST /restore': { photoIds: [] },
+  'POST /permanent-delete/preview': {
+    selection: { kind: 'ids', photoIds: [FIXTURE_PHOTO_IDS['deleted-0']] },
+  },
+  'POST /permanent-delete/confirm': { photoIds: [] },
 };
 
 describe('the fixture server', () => {
@@ -165,6 +169,67 @@ describe("the fixture server's family trash", () => {
         })
       ).status,
     ).toBe(404);
+  });
+
+  it('refuses a permanent delete of a photograph this browser did not add, or without a token', async () => {
+    const trashed = await call(
+      ADMIN_BASE,
+      'POST',
+      '/trash/preview',
+      preview([LIVE_ID]),
+    );
+    await call(ADMIN_BASE, 'POST', '/trash/confirm', JSON.parse(trashed.body));
+    try {
+      const refused = await call(
+        DISPLAY_BASE,
+        'POST',
+        '/permanent-delete/preview',
+        preview([LIVE_ID]),
+      );
+      const unknown = await call(
+        DISPLAY_BASE,
+        'POST',
+        '/no-such-route',
+        preview([LIVE_ID]),
+      );
+      expect(refused).toEqual(unknown);
+      expect(refused.status).toBe(404);
+
+      expect(
+        (
+          await call(
+            DISPLAY_BASE,
+            'POST',
+            '/permanent-delete/confirm',
+            { photoIds: [LIVE_ID] },
+            null,
+          )
+        ).status,
+      ).toBe(404);
+      // And a confirm naming it with a token deletes nothing.
+      const confirm = await call(DISPLAY_BASE, 'POST', '/permanent-delete/confirm', {
+        photoIds: [LIVE_ID],
+      });
+      expect(JSON.parse(confirm.body)).toEqual({ deleted: [], count: 0 });
+    } finally {
+      await call(ADMIN_BASE, 'POST', '/restore', { photoIds: [LIVE_ID] });
+    }
+  });
+
+  it('answers an admin restore of a photograph that no longer exists as the real Function does', async () => {
+    // Production passes the admin's list through and restores nothing; a 404
+    // here would be a dev server stricter than production in a way a test of
+    // permanent deletion trips over.
+    const gone = 'd'.repeat(32);
+    const response = await call(
+      ADMIN_BASE,
+      'POST',
+      '/restore',
+      { photoIds: [gone] },
+      null,
+    );
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({ restored: [], count: 0 });
   });
 
   it('refuses a restore of a photograph this browser did not add', async () => {

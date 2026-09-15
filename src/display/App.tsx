@@ -16,6 +16,8 @@ import { useLibrary } from '../shared/ui/library.ts';
 import { LibraryChrome } from '../shared/ui/LibraryChrome.tsx';
 import { UploadPanel, useUploads } from '../shared/ui/Upload.tsx';
 import { TrashPage } from '../shared/ui/TrashPage.tsx';
+import type { PermanentDelete } from '../shared/ui/TrashPage.tsx';
+import { curationApi } from '../shared/ui/curation-api.ts';
 import { getUploader } from '../shared/ui/uploader.ts';
 
 /**
@@ -28,6 +30,15 @@ const FAMILY_PAGES = ['trash'] as const;
 /** Nothing is ever selected here: the family app has no selection. */
 const NOTHING_SELECTED: ReadonlySet<string> = new Set();
 
+/**
+ * Deleting permanently from the family's trash. The server reaches only what
+ * this browser added, which is all its trash lists (family-own-trash.md 15).
+ */
+const PERMANENT_DELETE: PermanentDelete = {
+  preview: (ids) => curationApi.previewPermanentDelete(ids),
+  confirm: (preview) => curationApi.confirmPermanentDelete(preview),
+};
+
 /** Under the add bar when this browser cannot keep its uploader token. */
 const STORAGE_NOTE =
   "This browser can't remember your uploads after you close this page, so you won't be able to delete them after that.";
@@ -37,10 +48,10 @@ const STORAGE_NOTE =
  *
  * The display link is the family link (family-tier.md #1). Anyone holding it
  * can add photographs and correct any date, time, or caption, and can move to
- * the trash, and restore from it, the photographs added from this browser
- * (family-own-trash.md) — one photograph at a time, in the photo view. There is no selection: a tap on a tile opens it, exactly as it
- * always did (decision 5). What the administrator alone does — permanent
- * deletion, the Inbox, Emails, the export — is not here, and the server refuses
+ * the trash, restore from it, and delete from it permanently the photographs
+ * added from this browser (family-own-trash.md) — one photograph at a time, in the photo view. There is no selection: a tap on a tile opens it, exactly as it
+ * always did (decision 5). What the administrator alone does — bulk
+ * captions, the Inbox, Emails, the export — is not here, and the server refuses
  * it to this link regardless of what this page shows.
  *
  * Built on the admin App's shape, and on the same `useLibrary`, so the trash
@@ -84,6 +95,7 @@ export function App() {
       attribution: () => Promise.resolve(null),
       // The library holds no trashed photos; the trash page restores.
       restore: () => {},
+      purge: () => {},
       addedHere: (id) => getUploader().addedHere(id),
       can: {
         edit: true,
@@ -91,6 +103,7 @@ export function App() {
         trash: 'own',
         select: false,
         restore: false,
+        purge: false,
         addedFrom: true,
         filename: false,
       },
@@ -142,7 +155,7 @@ export function App() {
         revision={trashRevision}
         selection={null}
         bar={null}
-        permanentDelete={null}
+        permanentDelete={PERMANENT_DELETE}
         filenames={false}
         addedFrom
       />

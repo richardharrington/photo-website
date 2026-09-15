@@ -567,8 +567,9 @@ export function Lightbox({
           <div className="lightbox__actions">
             {/* A trashed photo shows enough to be identified and nothing
                 more: no download of any kind and no delete — only Restore,
-                which puts it back. Permanent deletion stays on the admin's
-                bar, for a selection. */}
+                which puts it back, and in the family's trash Delete
+                permanently. The admin deletes permanently from its bar, for a
+                selection. */}
             {curation && !curation.can.download ? null : (
               <button type="button" onClick={onDownload} disabled={downloading}>
                 {downloading ? 'Preparing download…' : 'Download'}
@@ -586,6 +587,15 @@ export function Lightbox({
             {curation?.can.restore ? (
               <button type="button" onClick={() => curation.restore(photo.id)}>
                 Restore
+              </button>
+            ) : null}
+            {curation?.can.purge ? (
+              <button
+                type="button"
+                className="admin-danger"
+                onClick={() => curation.purge(photo.id)}
+              >
+                Delete permanently
               </button>
             ) : null}
             <button

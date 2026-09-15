@@ -112,6 +112,8 @@ const REACHING: Record<string, { body?: unknown; status: number }> = {
   'POST /trash/preview': { body: {}, status: 400 },
   'POST /trash/confirm': { body: {}, status: 400 },
   'POST /restore': { body: {}, status: 400 },
+  'POST /permanent-delete/preview': { body: {}, status: 400 },
+  'POST /permanent-delete/confirm': { body: {}, status: 400 },
 };
 
 async function snapshot(response: Response) {
@@ -518,5 +520,142 @@ describe('in admin mode, nothing about the trash changed', () => {
       const listing = await admin(gated('admin', 'GET', '/trash', undefined, token));
       expect(((await listing.json()) as { items: unknown[] }).items).toHaveLength(3);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Permanent deletion (family-own-trash.md 15)
+// ---------------------------------------------------------------------------
+
+describe('permanent deletion', () => {
+  const objectsOf = (id: string) =>
+    RENDITIONS.map((rendition) => photoObjectKey(id, rendition));
+
+  beforeEach(() => {
+    for (const id of [TRASHED_ID, OTHER_TRASHED_ID, LIVE_ID, OWNED_ID]) {
+      for (const key of objectsOf(id)) store.seed(key, new Uint8Array([1]));
+    }
+  });
+
+  async function purgePreview(
+    mode: AccessMode,
+    body: unknown,
+    token: string | null = FIXTURE_UPLOADER_TOKEN,
+  ) {
+    return handlerFor(mode)(
+      gated(mode, 'POST', '/permanent-delete/preview', body, token),
+    );
+  }
+
+  async function purgeConfirm(
+    mode: AccessMode,
+    token: unknown,
+    uploader: string | null = FIXTURE_UPLOADER_TOKEN,
+  ) {
+    return handlerFor(mode)(
+      gated(mode, 'POST', '/permanent-delete/confirm', token, uploader),
+    );
+  }
+
+  const isGone = (id: string) =>
+    catalogInStore().photos[id] === undefined &&
+    objectsOf(id).every((key) => !store.has(key));
+
+  describe('in display mode', () => {
+    it('removes a trashed photograph this browser added, record and bytes, as display-api', async () => {
+      const preview = await purgePreview('display', previewOf([TRASHED_ID]));
+      expect(preview.status).toBe(200);
+
+      const confirm = await purgeConfirm('display', await preview.json());
+      expect(await confirm.json()).toEqual({ deleted: [TRASHED_ID], count: 1 });
+      expect(isGone(TRASHED_ID)).toBe(true);
+      expect(isGone(OTHER_TRASHED_ID)).toBe(false);
+
+      const listed = await store.list(R2_KEYS.auditPrefix);
+      const events = listed.map(({ key }) => store.readJson<AuditEvent>(key)!);
+      expect(events).toEqual([
+        expect.objectContaining({
+          action: 'permanent-delete',
+          via: 'display-api',
+          photoIds: [TRASHED_ID],
+        }),
+      ]);
+    });
+
+    it('of a trashed photograph this browser did not add is the plain 404', async () => {
+      await adminTrash(LIVE_ID);
+      await refusedLikeAnUnknownPath('/permanent-delete/preview', previewOf([LIVE_ID]));
+      expect(isGone(LIVE_ID)).toBe(false);
+    });
+
+    it('of a photograph this browser added that is not in the trash is the plain 404', async () => {
+      await refusedLikeAnUnknownPath(
+        '/permanent-delete/preview',
+        previewOf([OWNED_ID]),
+      );
+      expect(isGone(OWNED_ID)).toBe(false);
+    });
+
+    it('without a token is the plain 404, preview and confirm alike', async () => {
+      await refusedLikeAnUnknownPath(
+        '/permanent-delete/preview',
+        previewOf([TRASHED_ID]),
+        null,
+      );
+      const preview = await purgePreview('display', previewOf([TRASHED_ID]));
+      await refusedLikeAnUnknownPath(
+        '/permanent-delete/confirm',
+        await preview.json(),
+        null,
+      );
+      expect(isGone(TRASHED_ID)).toBe(false);
+    });
+
+    it('of anything but an explicit list is the plain 404', async () => {
+      await refusedLikeAnUnknownPath('/permanent-delete/preview', {
+        selection: { kind: 'day', year: 2026, month: 7, day: 4 },
+      });
+    });
+
+    it('cut to what this browser added when the list names both', async () => {
+      await adminTrash(LIVE_ID);
+      const preview = await purgePreview('display', previewOf([TRASHED_ID, LIVE_ID]));
+      expect(await preview.json()).toMatchObject({ photoIds: [TRASHED_ID], count: 1 });
+    });
+
+    it('deletes nothing once the photograph has stopped being this browser’s', async () => {
+      const preview = await purgePreview('display', previewOf([TRASHED_ID]));
+      setUploaderHash(TRASHED_ID, 'f'.repeat(64));
+
+      const confirm = await purgeConfirm('display', await preview.json());
+      expect(await confirm.json()).toEqual({ deleted: [], count: 0 });
+      expect(isGone(TRASHED_ID)).toBe(false);
+    });
+  });
+
+  describe('in admin mode, unchanged', () => {
+    it('removes any trashed photograph, whoever added it', async () => {
+      await adminTrash(LIVE_ID);
+      const preview = await purgePreview(
+        'admin',
+        previewOf([LIVE_ID, TRASHED_ID]),
+        null,
+      );
+      const confirm = await purgeConfirm('admin', await preview.json(), null);
+      expect(await confirm.json()).toEqual({
+        deleted: [LIVE_ID, TRASHED_ID],
+        count: 2,
+      });
+      expect(isGone(LIVE_ID)).toBe(true);
+    });
+
+    it('still explains a refused group selection, rather than hiding it', async () => {
+      const response = await purgePreview(
+        'admin',
+        { selection: { kind: 'day', year: 2026, month: 7, day: 4 } },
+        null,
+      );
+      expect(response.status).toBe(400);
+    });
   });
 });

@@ -43,17 +43,17 @@ trusted.
 - The display URL and admin URL are separate, independent, high-entropy paths.
   Neither can be derived from the other.
 - The display path is the family link and can be shared among family members.
-  Anyone holding it can view, add, and edit photographs, and trash and restore
-  the ones added from the same browser; the server enforces this by mode, not
-  the page. The admin
-  path is shared only with administrators and additionally allows permanent
-  deletion, the Inbox, the Emails page, and the catalog export.
+  Anyone holding it can view, add, and edit photographs, and trash, restore,
+  and permanently delete the ones added from the same browser; the server
+  enforces this by mode, not the page. The admin path is shared only with
+  administrators and additionally allows trashing and permanently deleting any
+  photograph, the Inbox, the Emails page, and the catalog export.
 - A family browser keeps a random uploader token in its local storage and
   sends it with every change it makes. A photograph added through the family
   link stores only the token's hash, which is never shown to viewers and never
   written to the audit log. It identifies a browser, not a person, and it is
-  what lets that browser alone trash and restore the photograph
-  (family-own-trash.md).
+  what lets that browser alone trash, restore, and permanently delete the
+  photograph (family-own-trash.md).
 - The audit log records which link an act came through (`display-api` or
   `admin-api`) and nothing about who; there are no accounts, so it makes no
   person-level claim.
@@ -373,18 +373,19 @@ is described under
 - **Trash** is a page of its own: the grid, headed "Trash" with a count, and
   one line above it: "Photos added from this device that have been deleted are
   kept here for 30 days, then removed automatically. Tap one to look at it and
-  restore it." It lists only the photographs added from this browser,
+  restore it, or delete it permanently." It lists only the photographs added from this browser,
   including one the administrator trashed, and Photo info on each says "Added
   from: This device". Each tile gives its original date, the date it was
   deleted, and "Will be purged" with the date it will be. Tapping a trashed
-  photograph opens
-  the photo view with **Restore** as its action — no download, no delete, no
-  edit form — and Restore puts it back, closes the view, and updates the
-  count.
+  photograph opens the photo view with **Restore** and **Delete permanently**
+  as its actions — no download, no plain delete, no edit form. Restore puts it
+  back, closes the view, and updates the count. Delete permanently asks first,
+  saying it cannot be undone, then removes the photograph and its files for
+  good.
 - What the family does not have: no selection or selection bar, no Select all
   on a day heading, no caption applied to many photographs at once, no delete
-  of a photograph added from another browser or by the administrator, no
-  permanent deletion, no Emails, no Inbox, no Export catalog, and no filename
+  or permanent delete of a photograph added from another browser or by the
+  administrator, no Emails, no Inbox, no Export catalog, and no filename
   on a library tile. The server refuses those routes to the family link; the
   page not showing them is not the reason they are unavailable.
 - **What counts as recently added** is a property of the photographs, not of
@@ -603,12 +604,13 @@ of the [family site](#family-site)'s rules.
   trash and restore are pure metadata changes.
 - Items are retained for 30 days, then automatically purged (objects deleted,
   records removed, audit retained).
-- The admin's trash provides an explicitly confirmed permanent-delete
-  action; the family's has none.
+- Both trashes provide an explicitly confirmed permanent-delete action: the
+  admin's for any selection, the family's one photograph at a time from the
+  photo view, and only for photographs added from the same browser.
 - The family's trash lists only the photographs added from the same browser,
   and a family member restores only those; the admin's lists everything.
-- A family member restores from the lightbox; an administrator can also
-  restore or permanently delete a selection.
+- A family member restores or permanently deletes from the lightbox; an
+  administrator restores or permanently deletes a selection.
 - A deleted photo can be restored during its retention period. Trashed photos
   cannot be downloaded, but the Trash shows them on the same grid and photo
   view as the library, with thumbnails, original date, and deletion date (and,

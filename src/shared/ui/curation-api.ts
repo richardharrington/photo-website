@@ -3,7 +3,7 @@
  *
  * Everything the family link may do, and so everything the admin does in
  * exactly the same way: the upload flow, editing, moving to the trash and
- * restoring, and the trash listing (family-tier.md #3). These are the routes
+ * restoring, deleting permanently from the trash, and the trash listing (family-tier.md #3). These are the routes
  * `netlify/functions/lib/curation-routes.ts` answers for both Functions.
  *
  * Like the read client, it builds every URL through `routes`, which resolves
@@ -177,4 +177,22 @@ export const curationApi = {
   /** Put trashed photos back: the Undo, and the trash's own Restore. */
   restore: (photoIds: string[]) =>
     post<{ restored: string[]; count: number }>('/restore', { photoIds }),
+
+  /**
+   * Both halves of a permanent delete, on the same preview/confirm token path
+   * as the trash (decisions.md #12). The token is bound to its kind, so a
+   * trash preview cannot confirm this. Through the family link they reach
+   * only what this browser added (family-own-trash.md 15).
+   */
+  previewPermanentDelete: (photoIds: string[]) =>
+    post<PreviewResult>('/permanent-delete/preview', {
+      selection: { kind: 'ids', photoIds },
+    }),
+
+  confirmPermanentDelete: (preview: PreviewResult) =>
+    post<{ deleted: string[]; count: number }>('/permanent-delete/confirm', {
+      photoIds: preview.photoIds,
+      expiresAt: preview.expiresAt,
+      token: preview.token,
+    }),
 };

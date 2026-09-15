@@ -237,6 +237,8 @@ export function App() {
       attribution: (id) => adminApi.attribution(id),
       // The library holds no trashed photos; the trash page restores.
       restore: () => {},
+      // Its trash page deletes permanently, from the selection bar.
+      purge: () => {},
       // The admin trashes anything, and never records what it added.
       addedHere: () => false,
       can: {
@@ -245,6 +247,7 @@ export function App() {
         trash: 'all',
         select: true,
         restore: false,
+        purge: false,
         // The admin records nothing about what it added; see `Capabilities`.
         addedFrom: false,
         filename: true,

@@ -31,6 +31,7 @@ const FAMILY_LIBRARY: Capabilities = {
   trash: 'own',
   select: false,
   restore: false,
+  purge: false,
   addedFrom: true,
   filename: false,
 };
@@ -40,6 +41,7 @@ const FAMILY_TRASH: Capabilities = {
   trash: 'none',
   select: false,
   restore: true,
+  purge: true,
   addedFrom: true,
   filename: false,
 };
@@ -49,6 +51,7 @@ const ADMIN_LIBRARY: Capabilities = {
   trash: 'all',
   select: true,
   restore: false,
+  purge: false,
   addedFrom: false,
   filename: true,
 };
@@ -58,6 +61,7 @@ const ADMIN_TRASH: Capabilities = {
   trash: 'none',
   select: true,
   restore: true,
+  purge: false,
   addedFrom: false,
   filename: true,
 };
@@ -73,6 +77,7 @@ function curationWith(can: Capabilities, addedHere = false): Curation {
     edit: vi.fn(() => Promise.reject(new Error('not in this test'))),
     attribution: vi.fn(() => Promise.resolve(null)),
     restore: vi.fn(),
+    purge: vi.fn(),
     addedHere: vi.fn(() => addedHere),
     can,
   };
@@ -139,12 +144,26 @@ describe('the lightbox', () => {
     expect(button('Restore')).toBeNull();
   });
 
-  it("under the admin's trash: Restore, which restores this photograph", () => {
+  it("under the admin's trash: Restore, which restores this photograph, and no Delete permanently here", () => {
     const curation = lightboxUnder(ADMIN_TRASH);
 
     fireEvent.click(button('Restore')!);
     expect(curation.restore).toHaveBeenCalledWith(photo.id);
     expect(button('Delete')).toBeNull();
+    // The admin's is on its selection bar.
+    expect(button('Delete permanently')).toBeNull();
+  });
+
+  it("under the family's trash: Delete permanently, which deletes this photograph", () => {
+    const curation = lightboxUnder(FAMILY_TRASH, true);
+
+    fireEvent.click(button('Delete permanently')!);
+    expect(curation.purge).toHaveBeenCalledWith(photo.id);
+  });
+
+  it("under the family's library: no Delete permanently", () => {
+    lightboxUnder(FAMILY_LIBRARY, true);
+    expect(button('Delete permanently')).toBeNull();
   });
 
   it('shows the family the filename in Photo info, and never who emailed it in', async () => {

@@ -1617,3 +1617,27 @@ its ordering, and its URLs are unchanged.
     reloading after every commit. A batch of a hundred would be a hundred
     reloads of the whole timeline where one at the end is enough.
 
+## The family deletes its own photographs permanently — 2026-09-15
+
+94. **A family browser can permanently delete what it added, from its trash**
+    (docs/specs/family-own-trash.md section 15). #92 gave the family the
+    trash and restore for its own uploads and kept permanent deletion for the
+    administrator, which left an accidental upload sitting in the trash for 30
+    days, or waiting on the administrator, when the person who added it wanted
+    it gone. The owner decided the family should be able to finish the job.
+
+    It is the same rule as #92, applied once more. The permanent-delete
+    preview and confirm moved from `admin.ts` into the curation routes. In
+    display mode they need the uploader token, accept only an explicit list,
+    reach only trashed photographs whose hash matches, and re-check ownership
+    inside the mutation callback; anything else is the plain 404. The family
+    already sees nothing else in its trash, and the server is what makes that
+    true of a hand-made request. Only trashed photographs can be deleted
+    permanently, so there is still no path from live to gone in one act.
+
+    The family has no selection, so it deletes permanently from the trash's
+    photo view, one photograph at a time, behind the confirmation the
+    administrator gets. The admin keeps its selection bar and nothing about
+    it changed; its audit events now record `via` like every other curation
+    act.
+

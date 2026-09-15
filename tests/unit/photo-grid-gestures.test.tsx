@@ -45,6 +45,7 @@ function harness(select: boolean, selected: readonly string[] = []) {
     edit: () => Promise.reject(new Error('not in this test')),
     attribution: () => Promise.resolve(null),
     restore: () => {},
+    purge: () => {},
     addedHere: () => false,
     can: {
       edit: true,
@@ -52,6 +53,7 @@ function harness(select: boolean, selected: readonly string[] = []) {
       trash: 'all',
       select,
       restore: false,
+      purge: false,
       addedFrom: false,
       filename: true,
     },

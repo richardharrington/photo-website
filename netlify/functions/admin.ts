@@ -3,8 +3,10 @@
  *
  * It answers everything the display API does — the read routes and the
  * curation routes in `lib/curation-routes.ts`, through the same code — plus
- * what only the administrator may do: permanent deletion, bulk captions, the
- * catalog export, attribution, the Emails page, and the Inbox. Those are
+ * what only the administrator may do: bulk captions, the catalog export,
+ * attribution, the Emails page, and the Inbox. Permanent deletion is a
+ * curation route now, which the family link reaches for what its own browser
+ * added (family-own-trash.md 15). Those are
  * handled in this file and nowhere else, which is what keeps them out of
  * display mode (family-tier.md #2, #4).
  *
@@ -21,13 +23,7 @@ import {
 } from '../../src/shared/constants.ts';
 import { getLivePhoto } from '../../src/shared/catalog.ts';
 import { loadCatalog, mutateCatalog } from '../../src/shared/catalog-repository.ts';
-import {
-  applyCaptions,
-  objectKeysFor,
-  permanentlyDeletePhotos,
-  resolveTrashedSelection,
-} from '../../src/shared/admin-operations.ts';
-import type { SelectionQuery } from '../../src/shared/admin-operations.ts';
+import { applyCaptions } from '../../src/shared/admin-operations.ts';
 import { makeAuditEvent, writeAuditEvent } from '../../src/shared/audit.ts';
 import { generateAuditId, isValidPhotoId } from '../../src/shared/ids.ts';
 import {
@@ -69,7 +65,6 @@ import type { ObjectStore } from '../../src/shared/store.ts';
 import { S3ObjectStore, s3Config } from './lib/s3-store.ts';
 import { readRoute } from './lib/read-routes.ts';
 import { curationRoute } from './lib/curation-routes.ts';
-import { issueConfirmation, readConfirmation } from './lib/confirmation.ts';
 import { presignedGetUrl } from './lib/presign.ts';
 import {
   badRequest,
@@ -145,10 +140,6 @@ export function createHandler(store: () => ObjectStore) {
       switch (path) {
         case '/captions':
           return await handleCaptions(request, store);
-        case '/permanent-delete/preview':
-          return await handlePermanentDeletePreview(request, store);
-        case '/permanent-delete/confirm':
-          return await handlePermanentDeleteConfirm(request, store);
         case '/emails/add':
           return await handleAddRecipient(request, store);
         case '/emails/remove':
@@ -246,67 +237,6 @@ async function handleCaptions(
 // ---------------------------------------------------------------------------
 // Permanent deletion: preview, then confirm against an explicit ID list
 // ---------------------------------------------------------------------------
-
-interface PreviewBody {
-  selection?: SelectionQuery;
-}
-
-/**
- * Resolve an explicit list of trashed photos and issue a token bound to it.
- *
- * The confirm step never re-runs the query, so the list confirmed is the list
- * the administrator looked at (decisions.md #12). The token is bound to
- * `permanent-delete`, so a token from the trash preview the family link may
- * call cannot confirm this (lib/confirmation.ts).
- */
-async function handlePermanentDeletePreview(
-  request: Request,
-  store: () => ObjectStore,
-): Promise<Response> {
-  const body = await readJson<PreviewBody>(request);
-  if (!body?.selection) return badRequest('A selection is required.');
-
-  // Permanent delete only ever acts on an explicit list from the trash view.
-  // A group query would be a way to destroy photos nobody looked at.
-  if (body.selection.kind !== 'ids') {
-    return badRequest('Permanent deletion requires an explicit list of photo IDs.');
-  }
-
-  const { catalog } = await loadCatalog(store(), nowIso);
-  return issueConfirmation(
-    'permanent-delete',
-    resolveTrashedSelection(catalog, body.selection.photoIds),
-  );
-}
-
-async function handlePermanentDeleteConfirm(
-  request: Request,
-  store: () => ObjectStore,
-): Promise<Response> {
-  const confirmation = await readConfirmation(request, 'permanent-delete');
-  if (confirmation instanceof Response) return confirmation;
-
-  const objectStore = store();
-  const auditId = generateAuditId();
-  const at = nowIso();
-
-  const outcome = await mutateCatalog(objectStore, { now: nowIso }, (catalog) =>
-    permanentlyDeletePhotos(catalog, confirmation.photoIds),
-  );
-
-  // Objects are deleted only after the catalog write succeeds. The other order
-  // would, on a lost race, leave a live record pointing at images that no
-  // longer exist.
-  if (outcome.affected.length > 0) {
-    await objectStore.delete(outcome.affected.flatMap(objectKeysFor));
-    await writeAuditEvent(
-      objectStore,
-      makeAuditEvent('permanent-delete', outcome.affected, { at, id: auditId }),
-    );
-  }
-
-  return json({ deleted: outcome.affected, count: outcome.affected.length });
-}
 
 /**
  * A short-lived signed URL for the full-resolution JPEG.

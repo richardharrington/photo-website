@@ -2,8 +2,9 @@
  * The curation routes: the mutations and listings both APIs answer.
  *
  * The display link is the family link (family-tier.md #1), so a display-mode
- * request may upload, edit, move to the trash, and restore, and the admin app
- * does all of the same through the same code. What neither Function may do is
+ * request may upload, edit, move to the trash, restore, and delete from the
+ * trash permanently, and the admin app does all of the same through the same
+ * code. What neither Function may do is
  * answer these from two copies: the list below is the tier. `display.ts`
  * dispatches to this module and to nothing admin-only, `admin.ts` dispatches
  * here and then to its own routes, and `tests/unit/curation-routes.test.ts`
@@ -20,14 +21,15 @@
  * never a second authorization check — `checkAccess` has already decided the
  * mode before either Function calls this.
  *
- * Except in one place. In display mode, trash and restore reach only the
- * photographs the requesting browser added (docs/specs/family-own-trash.md).
+ * Except in one place. In display mode, trash, restore, and permanent deletion
+ * reach only the photographs the requesting browser added
+ * (docs/specs/family-own-trash.md, and its section 15 for permanent deletion).
  * The family app sends a random token in `x-photo-uploader`; a display-mode
  * commit records its SHA-256 on the photograph, and a display-mode trash
- * preview, trash confirm, restore, trash listing, and trash count reach only
- * photographs whose recorded hash matches. Anything else is the plain 404 an
- * unknown photograph gets, and the trash preview accepts only an explicit ID
- * list, so a day or a month cannot be swept in (decision 13). Ownership is
+ * preview, trash confirm, restore, permanent-delete preview and confirm, trash
+ * listing, and trash count reach only photographs whose recorded hash matches. Anything else is the plain 404 an
+ * unknown photograph gets, and both previews accept only an explicit ID list,
+ * so a day or a month cannot be swept in (decision 13). Ownership is
  * re-checked inside each mutation callback, so a retry after a conflicting
  * write checks the catalog it is actually writing. Admin mode ignores the
  * header entirely and reaches everything, as it always did (decision 14).
@@ -54,7 +56,10 @@ import {
   beginBatch,
   commitPhoto,
   editPhotoMetadata,
+  objectKeysFor,
+  permanentlyDeletePhotos,
   resolveSelection,
+  resolveTrashedSelection,
   restorePhotos,
   trashPhotos,
 } from '../../../src/shared/admin-operations.ts';
@@ -123,6 +128,16 @@ const ROUTES: readonly Route[] = [
   { method: 'POST', path: '/trash/preview', handle: handleTrashPreview },
   { method: 'POST', path: '/trash/confirm', handle: handleTrashConfirm },
   { method: 'POST', path: '/restore', handle: handleRestore },
+  {
+    method: 'POST',
+    path: '/permanent-delete/preview',
+    handle: handlePermanentDeletePreview,
+  },
+  {
+    method: 'POST',
+    path: '/permanent-delete/confirm',
+    handle: handlePermanentDeleteConfirm,
+  },
 ];
 
 /** Every route this module answers, as data, for the whitelist test. */
@@ -572,6 +587,85 @@ async function handleRestore(context: CurationRequest): Promise<Response> {
   }
 
   return json({ restored: outcome.affected, count: outcome.affected.length });
+}
+
+/**
+ * Resolve an explicit list of trashed photos and issue a token bound to it.
+ *
+ * The confirm step never re-runs the query, so the list confirmed is the list
+ * that was looked at (decisions.md #12). The token is bound to
+ * `permanent-delete`, so a trash preview's token cannot confirm this
+ * (lib/confirmation.ts).
+ *
+ * In display mode the list is cut to the trashed photographs this browser
+ * added, and a request that reaches none of them is the plain 404, exactly as
+ * for the trash (family-own-trash.md 15). The family can see nothing else in
+ * the trash, so it can delete nothing else.
+ */
+async function handlePermanentDeletePreview(
+  context: CurationRequest,
+): Promise<Response> {
+  const reach = await reachOf(context);
+  if (reach === null) return notFound();
+
+  const body = await readJson<PreviewBody>(context.request);
+  if (!body?.selection) return badRequest('A selection is required.');
+
+  // Permanent delete only ever acts on an explicit list from the trash view.
+  // A group query would be a way to destroy photos nobody looked at.
+  const { selection } = body;
+  if (selection.kind !== 'ids') {
+    return reach.kind === 'all'
+      ? badRequest('Permanent deletion requires an explicit list of photo IDs.')
+      : notFound();
+  }
+  if (!Array.isArray(selection.photoIds)) return badRequest('photoIds is required.');
+
+  const { catalog } = await loadCatalog(context.store(), nowIso);
+  const ids = withinReach(
+    catalog,
+    resolveTrashedSelection(catalog, selection.photoIds),
+    reach,
+  );
+  if (reach.kind === 'owned' && ids.length === 0) return notFound();
+  return issueConfirmation('permanent-delete', ids);
+}
+
+async function handlePermanentDeleteConfirm(
+  context: CurationRequest,
+): Promise<Response> {
+  const { request, store, via } = context;
+  const reach = await reachOf(context);
+  if (reach === null) return notFound();
+
+  const confirmation = await readConfirmation(request, 'permanent-delete');
+  if (confirmation instanceof Response) return confirmation;
+
+  const objectStore = store();
+  const auditId = generateAuditId();
+  const at = nowIso();
+
+  // Ownership is re-checked against the catalog being written, as the trash
+  // confirm does: the token binds the list, and this is the write's own check.
+  const outcome = await mutateCatalog(objectStore, { now: nowIso }, (catalog) =>
+    permanentlyDeletePhotos(
+      catalog,
+      withinReach(catalog, confirmation.photoIds, reach),
+    ),
+  );
+
+  // Objects are deleted only after the catalog write succeeds. The other order
+  // would, on a lost race, leave a live record pointing at images that no
+  // longer exist.
+  if (outcome.affected.length > 0) {
+    await objectStore.delete(outcome.affected.flatMap(objectKeysFor));
+    await writeAuditEvent(
+      objectStore,
+      makeAuditEvent('permanent-delete', outcome.affected, { at, id: auditId, via }),
+    );
+  }
+
+  return json({ deleted: outcome.affected, count: outcome.affected.length });
 }
 
 // ---------------------------------------------------------------------------

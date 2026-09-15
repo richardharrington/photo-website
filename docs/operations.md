@@ -1415,12 +1415,13 @@ the photo ID the rest of that group uses.
 ### Telling the family
 
 The family link does more than it used to. Anyone holding it can add
-photographs, correct any date, time, or caption, move any photograph to the
-trash, and restore from the trash. Tell the family when this goes live.
-Anything trashed by mistake can be restored from **Trash** by anyone with the
-link for 30 days, after which the daily maintenance pass removes it for good.
-Permanent deletion, the Inbox, the Emails page, and the export still need the
-admin link. From a phone, a photograph over 30 MP is refused with a message
+photographs and correct any date, time, or caption. A photograph they added can
+be moved to the trash, restored, or deleted permanently from **Trash**, but
+only from the same browser it was added from: another phone, a laptop, or a
+browser that has lost its storage cannot touch it. Tell the family when this
+goes live. Anything left in the trash is removed for good by the daily
+maintenance pass after 30 days. Trashing or deleting anybody else's photograph,
+the Inbox, the Emails page, and the export still need the admin link. From a phone, a photograph over 30 MP is refused with a message
 saying so: it can be added from a laptop instead, or emailed in once that
 person's address is allowed to submit (see "Adding email submissions").
 

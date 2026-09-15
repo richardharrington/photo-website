@@ -65,6 +65,12 @@ export interface Curation {
    */
   restore(id: string): void;
   /**
+   * Delete a trashed photo permanently: preview, confirm, gone. Reachable only
+   * where `can.purge`; every other listing implements it as an unreachable
+   * no-op.
+   */
+  purge(id: string): void;
+  /**
    * This browser added the photograph. Only the family's listings can say yes,
    * and only where `can.addedFrom`; every other listing answers false. It
    * decides only what is shown — the server decides what may be trashed
@@ -78,17 +84,17 @@ export interface Curation {
 /**
  * What a context may do with the photographs it covers.
  *
- * Seven flags rather than one `readOnly` or `isAdmin`, because the six
+ * Eight flags rather than one `readOnly` or `isAdmin`, because the six
  * listings that provide a context do not agree along any single axis:
  *
- *   | Listing               | edit | download | trash  | select | restore | added from | filename |
- *   | --------------------- | ---- | -------- | ------ | ------ | ------- | ---------- | -------- |
- *   | Family library/recent | yes  | yes      | `own`  | no     | no      | yes        | no       |
- *   | Family uploading      | yes  | no       | `none` | no     | no      | yes        | yes      |
- *   | Family trash          | no   | no       | `none` | no     | yes     | yes        | no       |
- *   | Admin library/recent  | yes  | yes      | `all`  | yes    | no      | no         | yes      |
- *   | Admin uploading       | yes  | no       | `none` | no     | no      | no         | yes      |
- *   | Admin trash           | no   | no       | `none` | yes    | yes     | no         | yes      |
+ *   | Listing               | edit | download | trash  | select | restore | purge | added from | filename |
+ *   | --------------------- | ---- | -------- | ------ | ------ | ------- | ----- | ---------- | -------- |
+ *   | Family library/recent | yes  | yes      | `own`  | no     | no      | no    | yes        | no       |
+ *   | Family uploading      | yes  | no       | `none` | no     | no      | no    | yes        | yes      |
+ *   | Family trash          | no   | no       | `none` | no     | yes     | yes   | yes        | no       |
+ *   | Admin library/recent  | yes  | yes      | `all`  | yes    | no      | no    | no         | yes      |
+ *   | Admin uploading       | yes  | no       | `none` | no     | no      | no    | no         | yes      |
+ *   | Admin trash           | no   | no       | `none` | yes    | yes     | no    | no         | yes      |
  *
  * Both libraries edit and download. The admin's trashes any photograph and the
  * family's only one this browser added (`own`, decided per photograph by
@@ -102,7 +108,10 @@ export interface Curation {
  * to trash, and no bulk action to be selected for. A trashed photo has no
  * download of any kind and no edit, and can be restored from the photo view in
  * either app; the admin's trash also selects, because its bar's Restore and
- * Delete permanently act on a selection.
+ * Delete permanently act on a selection. The family's trash has no selection,
+ * so it deletes permanently from the photo view instead, one photograph at a
+ * time (`purge`, family-own-trash.md 15); the server lists it only what its
+ * browser added, so that is all it can delete.
  *
  * `select` is what decides a tile's gestures: where it is true a plain click
  * selects and a double-click opens, and where it is false a plain click opens,
@@ -110,7 +119,7 @@ export interface Curation {
  * photograph says whether it was added from this device or another, so a
  * missing Delete explains itself. The admin never records what it added, so
  * the line would say "Another device" of the administrator's own uploads, and
- * it is not shown there. None of the seven is optional, so adding one visits
+ * it is not shown there. None of the eight is optional, so adding one visits
  * every call site and no listing inherits a default.
  */
 export interface Capabilities {
@@ -124,6 +133,8 @@ export interface Capabilities {
   select: boolean;
   /** Restore from the trash. Only a trash listing says yes. */
   restore: boolean;
+  /** Delete permanently from the photo view. Only the family's trash. */
+  purge: boolean;
   /** Photo info's "Added from" line, answered by `addedHere`. The family's only. */
   addedFrom: boolean;
   /**

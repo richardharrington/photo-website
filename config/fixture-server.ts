@@ -695,7 +695,8 @@ async function handleInbox(
  * that list in both directions.
  *
  * It applies the same display-mode ownership rule too (family-own-trash.md
- * 6.5): the family's trash, count, preview, confirm, and restore reach only
+ * 6.5, 15): the family's trash, count, trash preview and confirm, restore, and
+ * permanent-delete preview and confirm reach only
  * photographs whose uploader hash matches the request's token, and a family
  * commit without a token is refused. A dev server that let the family trash
  * anything would hide exactly the bug that rule exists to prevent.
@@ -920,7 +921,11 @@ async function handleCuration(
       }
       const ids = (body['photoIds'] as string[]) ?? [];
       const outcome = await mutateCatalog(store, context, (catalog) => {
-        const permitted = ids.filter((id) => reaches(catalog.photos[id]));
+        // The admin's list goes through untouched, as the real Function's does:
+        // naming a photo that no longer exists restores nothing, and is not a
+        // 404. Only the family's is cut to what its browser can reach.
+        const permitted =
+          mode === 'admin' ? ids : ids.filter((id) => reaches(catalog.photos[id]));
         if (ids.length > 0 && permitted.length === 0) return abortMutation(null);
         return restorePhotos(catalog, permitted, now(), generateAuditId());
       });
@@ -930,6 +935,56 @@ async function handleCuration(
       }
       sendJson(res, 200, {
         restored: outcome.affected,
+        count: outcome.affected.length,
+      });
+      return true;
+    }
+
+    case '/permanent-delete/preview': {
+      const selection = body['selection'] as SelectionQuery;
+      if (tokenless || (mode === 'display' && selection?.kind !== 'ids')) {
+        sendNotFound(res);
+        return true;
+      }
+      const catalog = await currentCatalog();
+      const ids =
+        selection.kind === 'ids'
+          ? resolveTrashedSelection(catalog, selection.photoIds).filter((id) =>
+              reaches(catalog.photos[id]),
+            )
+          : [];
+      if (mode === 'display' && ids.length === 0) {
+        sendNotFound(res);
+        return true;
+      }
+      sendJson(res, 200, {
+        photoIds: ids,
+        count: ids.length,
+        expiresAt: Math.floor(Date.now() / 1000) + 600,
+        token: 'development-token',
+      });
+      return true;
+    }
+
+    case '/permanent-delete/confirm': {
+      if (tokenless) {
+        sendNotFound(res);
+        return true;
+      }
+      const ids = (body['photoIds'] as string[]) ?? [];
+      const outcome = await mutateCatalog(store, context, (catalog) =>
+        permanentlyDeletePhotos(
+          catalog,
+          ids.filter((id) => reaches(catalog.photos[id])),
+        ),
+      );
+      for (const id of outcome.affected) {
+        for (const rendition of Object.keys(RENDITION_SPECS)) {
+          uploadedObjects.delete(`${id}/${rendition}`);
+        }
+      }
+      sendJson(res, 200, {
+        deleted: outcome.affected,
         count: outcome.affected.length,
       });
       return true;
@@ -1013,38 +1068,6 @@ async function handleAdmin(
             skipped: outcome.skipped,
           });
         }
-        return true;
-      }
-
-      case '/permanent-delete/preview': {
-        const selection = body['selection'] as SelectionQuery;
-        const ids =
-          selection.kind === 'ids'
-            ? resolveTrashedSelection(await currentCatalog(), selection.photoIds)
-            : [];
-        sendJson(res, 200, {
-          photoIds: ids,
-          count: ids.length,
-          expiresAt: Math.floor(Date.now() / 1000) + 600,
-          token: 'development-token',
-        });
-        return true;
-      }
-
-      case '/permanent-delete/confirm': {
-        const ids = (body['photoIds'] as string[]) ?? [];
-        const outcome = await mutateCatalog(store, context, (catalog) =>
-          permanentlyDeletePhotos(catalog, ids),
-        );
-        for (const id of outcome.affected) {
-          for (const rendition of Object.keys(RENDITION_SPECS)) {
-            uploadedObjects.delete(`${id}/${rendition}`);
-          }
-        }
-        sendJson(res, 200, {
-          deleted: outcome.affected,
-          count: outcome.affected.length,
-        });
         return true;
       }
 

@@ -7,13 +7,14 @@
  * to the trash, restoring — is the shared curation client, also unchanged,
  * because the family link does all of that through the same routes
  * (family-tier.md #3). What this module adds is only what the administrator
- * alone may do: bulk captions, permanent deletion, the export, attribution,
- * the Emails page, and the Inbox.
+ * alone may do: bulk captions, the export, attribution, the Emails page, and
+ * the Inbox. Permanent deletion is in the shared client, because the family
+ * link deletes permanently what its own browser added (family-own-trash.md
+ * 15).
  */
 
 import { readApi, routes } from '../shared/ui/api.ts';
 import { curationApi, post, request } from '../shared/ui/curation-api.ts';
-import type { PreviewResult } from '../shared/ui/curation-api.ts';
 import type { PublicPhoto } from '../shared/display-api.ts';
 import type { CaptionChange } from '../shared/validation.ts';
 
@@ -172,23 +173,6 @@ export const adminApi = {
     post<{ updated: PublicPhoto[]; skipped: string[] }>('/captions', {
       changes,
       ...(options.undo ? { undo: true } : {}),
-    }),
-
-  /**
-   * Both halves of a permanent delete, on the same preview/confirm token path
-   * as the trash (decisions.md #12). The token is bound to its kind, so a
-   * trash preview cannot confirm this.
-   */
-  previewPermanentDelete: (photoIds: string[]) =>
-    post<PreviewResult>('/permanent-delete/preview', {
-      selection: { kind: 'ids', photoIds },
-    }),
-
-  confirmPermanentDelete: (preview: PreviewResult) =>
-    post<{ deleted: string[]; count: number }>('/permanent-delete/confirm', {
-      photoIds: preview.photoIds,
-      expiresAt: preview.expiresAt,
-      token: preview.token,
     }),
 
   exportUrl: () => routes.api('/export'),

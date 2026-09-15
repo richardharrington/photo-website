@@ -252,8 +252,9 @@ export function UploadPanel({
       },
       // A file on its way in has no catalog record to have arrived by email.
       attribution: () => Promise.resolve(null),
-      // Nothing here is in the trash to put back.
+      // Nothing here is in the trash to put back, or to delete permanently.
       restore: () => {},
+      purge: () => {},
       // Everything here is on its way in from this browser.
       addedHere: () => addedFrom,
       can: {
@@ -262,6 +263,7 @@ export function UploadPanel({
         trash: 'none',
         select: false,
         restore: false,
+        purge: false,
         addedFrom,
         // Before a thumbnail exists the filename is the only way to tell one
         // queued file from another, in either app (family-tier.md #12).

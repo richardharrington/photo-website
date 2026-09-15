@@ -7,11 +7,10 @@
  * sends back and acts on exactly that list, so a photo committed between
  * preview and confirm cannot be swept in unseen.
  *
- * Its own module because the two flows now live in different places: moving to
- * the trash is a curation route both Functions answer (curation-routes.ts),
- * while permanent deletion stays in `admin.ts`. The `action` a token is bound
- * to is what keeps them apart — a trash token cannot confirm a permanent
- * delete, whichever Function receives it.
+ * Its own module because the Functions share it: both destructive flows are
+ * curation routes now (curation-routes.ts), which both Functions answer. The
+ * `action` a token is bound to is what keeps the two apart — a trash token
+ * cannot confirm a permanent delete, whichever Function receives it.
  */
 
 import { isValidPhotoId } from '../../../src/shared/ids.ts';

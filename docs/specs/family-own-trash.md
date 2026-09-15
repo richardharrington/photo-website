@@ -7,6 +7,10 @@ interview's context. Where this spec and `family-tier.md` disagree, this spec
 wins, and section 11 amends that spec's text. Where it and the code disagree,
 the spec wins.
 
+Amended 2026-09-15 by section 15: the family also deletes permanently, from
+its trash, what it added from the same browser. Where section 15 and an earlier
+section disagree, section 15 wins.
+
 ## 1. Outcome
 
 A family member can move a photograph to the trash only if it was added from
@@ -624,3 +628,74 @@ back from production. Amend #90 with a pointer to #92.
 - The styling of `.drop-target__note`.
 - How the e2e init script learns the scratch-day IDs, for example by
   importing `FIXTURE_PHOTO_IDS` as the existing tests do.
+
+## 15. Amendment, 2026-09-15: the family deletes its own photographs permanently
+
+The owner decided that a family member should be able to permanently delete a
+photograph they added, not only move it to the trash, just as the
+administrator can. They still cannot touch anybody else's photograph, and they
+cannot see one in their trash to try.
+
+### 15.1 Decisions
+
+1. **Permanent deletion follows the same ownership rule as the trash.** A
+   family browser may permanently delete a trashed photograph whose
+   `uploaderHash` matches its token, and nothing else. That includes one of
+   its photographs the administrator trashed (decision 8).
+2. **Only from the trash.** A live photograph must be moved to the trash
+   first, as for the administrator: no path goes from live to gone in one act.
+3. **One photograph at a time, from the trash's photo view.** The family has
+   no selection (family-tier.md #5), so the trash's photo view offers
+   **Delete permanently** beside **Restore**, behind the same "cannot be
+   undone" confirmation the administrator gets. There is no Empty trash.
+4. **The admin link is unchanged.** It deletes permanently any trashed
+   photograph, from its selection bar.
+5. **Supersedes** the statements that permanent deletion is admin-only:
+   family-tier.md #4 and 5.4, and this spec's section 5 Trash page intro.
+
+### 15.2 Server
+
+`/permanent-delete/preview` and `/permanent-delete/confirm` move from
+`admin.ts` into `netlify/functions/lib/curation-routes.ts`, so both Functions
+answer them and `CURATION_ROUTES` lists them. Admin mode behaves exactly as
+before. In display mode, as for the trash (6.5):
+
+- `POST /permanent-delete/preview`: no valid token, 404. Selection not
+  `{ kind: 'ids' }`, 404. Resolve to trashed photographs and keep only owned
+  ones; if none remain, 404. Otherwise issue the token.
+- `POST /permanent-delete/confirm`: no valid token, 404. Filter the confirmed
+  IDs to owned photographs inside the `mutateCatalog` callback, then delete
+  the records, then the objects.
+
+The audit event records `via`. The fixture server applies the same rules.
+
+### 15.3 Client
+
+- `previewPermanentDelete` and `confirmPermanentDelete` move from `adminApi`
+  into `curationApi`, which `adminApi` spreads.
+- `Capabilities` gains `purge: boolean` and `Curation` gains `purge(id)`.
+  Only the family's trash says yes: `TrashPage` sets it where it has a
+  `permanentDelete` and no selection. The Lightbox shows **Delete
+  permanently** where `can.purge`.
+- The family App passes `TrashPage` a `permanentDelete` built on
+  `curationApi`.
+- The family Trash page intro reads: "Photos added from this device that have
+  been deleted are kept here for 30 days, then removed automatically. Tap one
+  to look at it and restore it, or delete it permanently."
+
+### 15.4 Tests
+
+- Route tests: display mode permanently deletes an owned trashed photograph,
+  record and objects, audited as `display-api`; refuses with the plain 404 an
+  unowned trashed photograph, an owned live one, a tokenless preview or
+  confirm, and a day selection; cuts a mixed list to the owned photographs;
+  and deletes nothing when ownership changed between preview and confirm.
+  Admin mode is unchanged.
+- The two routes leave the admin-only list, and the whitelist tests reach
+  them in both modes.
+- Component: Delete permanently appears under the family's trash and calls
+  `purge`, and not under the admin's trash or the family's library.
+- End to end: the family deletes its own trashed photograph permanently from
+  the trash's photo view, and a request naming a photograph it did not add is
+  refused.
+

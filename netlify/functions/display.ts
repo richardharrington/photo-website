@@ -2,9 +2,10 @@
  * The display API, which is the family's API (family-tier.md #1).
  *
  * It answers the read routes, `/download/<id>`, and the curation routes in
- * `lib/curation-routes.ts` — adding, editing, moving to the trash, and
- * restoring — and nothing else. Permanent deletion, the Inbox, Emails, and the
- * export live only in `admin.ts`, and nothing admin-only is imported here, so
+ * `lib/curation-routes.ts` — adding, editing, moving to the trash, restoring,
+ * and deleting permanently what this browser added — and nothing else. Bulk
+ * captions, the Inbox, Emails, and the export live only in `admin.ts`, and
+ * nothing admin-only is imported here, so
  * a display-mode request for one of them is the plain 404 by construction.
  *
  * Thin on purpose: the projection from catalog to response lives in

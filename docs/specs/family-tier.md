@@ -9,6 +9,9 @@ complete. Where this spec and the code disagree, the spec wins; where it and
 Decisions 3 and 6, the trash in sections 5.3 and 5.4, and the Trash link in
 5.1 are amended by `family-own-trash.md`: the family trashes, restores, and
 sees in the trash only photographs added from the same browser.
+Decision 4's permanent deletion is amended by section 15 of that spec: the
+family also deletes permanently, from its trash, what it added from the same
+browser.
 
 ## 1. Outcome
 
