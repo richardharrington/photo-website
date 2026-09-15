@@ -542,6 +542,37 @@
   object-fit: contain;
 }
 
+/*
+ * On a phone held upright, the picture takes the whole width, and previous and
+ * next sit together right under it, centred, and far enough apart to tell
+ * apart under a thumb. Beside the picture they cost it width, which for a
+ * picture bound by the screen's width is height too. The picture and the pair
+ * are centred as one group in the height the column leaves, so a picture that
+ * needs the height reaches up under the way back.
+ *
+ * Only upright. Held sideways — even a phone still narrower than 40rem — the
+ * picture is bound by the screen's height, and a line under it would make it
+ * smaller, so the arrows stay beside it (decisions.md #98).
+ */
+@media (orientation: portrait) and (width < 40rem) {
+  .lightbox__stage {
+    flex-wrap: wrap;
+    align-content: center;
+    justify-content: center;
+    gap: 0.75rem 4rem;
+  }
+
+  /* A line of its own, first, above the pair. Its box is the picture's height,
+     so the pair lands right under the picture whichever edge constrains it. */
+  .lightbox__image {
+    order: -1;
+    flex: 0 0 100%;
+    width: 100%;
+    /* The stage, less the pair's line (2.75rem) and the gap above it. */
+    max-height: calc(100% - 3.5rem);
+  }
+}
+
 .lightbox__nav {
   flex: none;
   width: 2.75rem;

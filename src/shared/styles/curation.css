@@ -413,6 +413,14 @@ button.photo-grid__link {
   }
 }
 
+/* The edit view has no arrows, so on a phone held upright the picture keeps
+   the line they would take under it (display.css). */
+@media (orientation: portrait) and (width < 40rem) {
+  .lightbox--editing .lightbox__image {
+    max-height: 100%;
+  }
+}
+
 /* Which file is on screen, without opening Photo info. Muted, and in the
    corner the back link does not use. */
 .lightbox__filename {

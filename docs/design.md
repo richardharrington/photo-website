@@ -452,7 +452,11 @@ is described under
   only on a second press, and clicking anywhere outside it closes it. Previous
   and
   next traverse the whole library in display order, stopping only at its two
-  ends, and prefetch their own neighbours. Labels use unambiguous text dates;
+  ends, and prefetch their own neighbours.
+  On a phone held upright they sit together right under the picture, centred
+  and well apart for a thumb, rather than either side of it, so the picture
+  can use the screen's whole width; held sideways they stay beside it, where
+  they cost the picture least. Labels use unambiguous text dates;
   viewer time presentation uses local-style hours/minutes, while admin
   information retains seconds/milliseconds.
 - Within a day, photos with capture times sort chronologically. Date-only

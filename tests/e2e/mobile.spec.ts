@@ -58,15 +58,33 @@ test('the photo view puts its controls below the photo, not over it', async ({
   expect(box?.width ?? 0).toBeGreaterThanOrEqual(40);
   expect(box?.height ?? 0).toBeGreaterThanOrEqual(40);
 
-  // The two buttons sit side by side in a footer row under the image rather
-  // than floating over a photo that spans the whole width of the screen.
+  // Held upright, previous and next sit together right under the picture,
+  // centred beneath it and well apart for a thumb, so the picture can take the
+  // whole width.
+  const back = (await page.locator('.lightbox__back').boundingBox())!;
   const image = (await page.locator('.lightbox__image').boundingBox())!;
+  const previous = (await page
+    .getByRole('button', { name: 'Previous photo' })
+    .boundingBox())!;
+  const nextBox = box!;
+  expect(previous.y).toBeGreaterThanOrEqual(image.y + image.height - 1);
+  expect(previous.y - (image.y + image.height)).toBeLessThan(24);
+  expect(Math.abs(previous.y - nextBox.y)).toBeLessThan(2);
+  expect(nextBox.x - (previous.x + previous.width)).toBeGreaterThanOrEqual(48);
+  const pairMiddle = (previous.x + nextBox.x + nextBox.width) / 2;
+  expect(Math.abs(pairMiddle - (image.x + image.width / 2))).toBeLessThan(2);
+  // This photograph is portrait, so it needs the height: it reaches up to
+  // just under the way back.
+  expect(image.y - (back.y + back.height)).toBeLessThanOrEqual(12);
+
+  // Download and Photo info sit side by side in a footer row under the arrows
+  // rather than floating over a photo that spans the whole width of the screen.
   const download = (await page
     .getByRole('button', { name: 'Download', exact: true })
     .boundingBox())!;
   const info = (await page.getByRole('button', { name: 'Photo info' }).boundingBox())!;
 
-  expect(download.y).toBeGreaterThanOrEqual(image.y + image.height - 1);
+  expect(download.y).toBeGreaterThanOrEqual(nextBox.y + nextBox.height - 1);
   expect(Math.abs(download.y - info.y)).toBeLessThan(2);
   expect(info.x).toBeGreaterThan(download.x);
   // Not a photograph this browser added, so nothing to edit or delete.
@@ -75,6 +93,27 @@ test('the photo view puts its controls below the photo, not over it', async ({
   await next.click();
   await expect(dialog).toBeVisible();
   expect(await overflows(page)).toBe(false);
+});
+
+/**
+ * Held sideways a phone's picture is bound by the screen's height, so a line of
+ * arrows under it would make it smaller: they stay beside it, even on a phone
+ * still narrower than 40rem (decisions.md #98).
+ */
+test('a phone held sideways keeps the arrows beside the photo', async ({ page }) => {
+  await page.setViewportSize({ width: 600, height: 340 });
+  await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['beach-early']}`);
+  await expect(page.locator('.lightbox__image')).toBeVisible();
+
+  const image = (await page.locator('.lightbox__image').boundingBox())!;
+  const previous = (await page
+    .getByRole('button', { name: 'Previous photo' })
+    .boundingBox())!;
+  const next = (await page.getByRole('button', { name: 'Next photo' }).boundingBox())!;
+
+  expect(previous.x + previous.width).toBeLessThanOrEqual(image.x + 1);
+  expect(next.x).toBeGreaterThanOrEqual(image.x + image.width - 1);
+  expect(Math.abs(previous.y - next.y)).toBeLessThan(2);
 });
 
 /** Open a portrait photograph this browser added, so it has Edit. */

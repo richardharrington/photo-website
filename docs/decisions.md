@@ -1749,3 +1749,22 @@ its ordering, and its URLs are unchanged.
     the Edit and Delete rules differ; and hiding the button while leaving the
     route open, which breaks the rule the trash follows.
 
+## Previous and next under the picture on a phone held upright — 2026-09-15
+
+98. **On a phone held upright the previous and next buttons sit together
+    under the picture, not either side of it** — below 40rem and in portrait
+    orientation. Two 2.75rem buttons and their gaps took about a quarter of a
+    phone's width from the picture, and so, for a picture bound by the
+    screen's width, a quarter of its height, while the column left empty space
+    above and below it. The owner wants the picture as large as it can be in
+    the read view: it now takes the whole width, reaches up under the way back
+    when it needs the height, and the pair sits right under it, centred, 4rem
+    apart so a thumb can tell them apart. The picture and the pair are centred
+    together in the height the column leaves. The edit view hides the arrows
+    (#96), so the picture keeps that line there.
+
+    Held sideways the arrows stay beside the picture, even on a phone still
+    narrower than 40rem: there the picture is bound by the screen's height,
+    and a line under it would make it smaller, the opposite of the point. At
+    40rem and above nothing changes either; the corner layout's margins have
+    room for them.
