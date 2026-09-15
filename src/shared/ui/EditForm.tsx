@@ -39,7 +39,7 @@ interface EditFormProps {
  * Escape — once no field has focus and Photo info is shut — will not leave
  * while `onDirtyChange` has reported true. Either would throw the typing away
  * while leaving the reader on the same photograph, and a caption dropped that
- * way is worse than a key that does nothing; "Unsaved changes" beside Save is
+ * way is worse than a key that does nothing; "Unsaved changes" under Save is
  * the explanation. Closing the photograph still discards, because that reads
  * as leaving.
  *
@@ -193,6 +193,13 @@ export function EditForm({
         <button type="button" onClick={onCancel}>
           Cancel
         </button>
+      </div>
+
+      {/* A line of its own, there whether or not it says anything, so the
+          message coming and going as the fields change moves nothing: the
+          photo view anchors this form at the bottom, and a line appearing
+          would lift the whole of it. */}
+      <div className="edit-form__status">
         {error ? (
           <span className="admin-error" role="alert">
             {error}

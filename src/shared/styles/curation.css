@@ -383,9 +383,24 @@ button.photo-grid__link {
   gap: 0.5rem 0.75rem;
 }
 
+/* One line, always held, for "Unsaved changes" or an error; see EditForm. */
+.edit-form__status {
+  min-height: 1.25rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
 .edit-form__unsaved {
   color: var(--fg-muted);
   font-size: 0.875rem;
+}
+
+/* The editing stack takes its column's whole width rather than the width of
+   whatever it holds at the moment. The stack is otherwise sized to its
+   content, and the form is 100% of the stack, so a status message widening
+   the button row widened the whole form while it was being typed in. */
+.lightbox--editing .lightbox__bottom {
+  align-self: stretch;
 }
 
 /* Under the read view's actions for a few seconds after a save returned

@@ -175,6 +175,31 @@ test('opening Edit focuses no field, so no keyboard comes up over the form', asy
   expect(['INPUT', 'TEXTAREA', 'BODY']).not.toContain(focused);
 });
 
+/**
+ * Typing must not move the form. "Unsaved changes" appears with the first
+ * keystroke, and it once widened the stack sideways and, by taking a line of
+ * its own, lifted the bottom-anchored form. Runs at both layouts: the phone's
+ * column under the picture, and the desktop projects' gutter beside it.
+ */
+test('the edit form stays where it is while it is typed in', async ({ page }) => {
+  await openOwned(page);
+  await page.getByRole('button', { name: 'Edit', exact: true }).click();
+  const form = page.locator('.edit-form');
+  await expect(form).toBeVisible();
+  const before = (await form.boundingBox())!;
+
+  await page
+    .getByRole('textbox', { name: 'Caption', exact: true })
+    .fill('A caption long enough to be worth typing, and then some more of it.');
+  await expect(page.getByText('Unsaved changes')).toBeVisible();
+  const after = (await form.boundingBox())!;
+
+  expect(Math.abs(after.x - before.x)).toBeLessThan(1);
+  expect(Math.abs(after.y - before.y)).toBeLessThan(1);
+  expect(Math.abs(after.width - before.width)).toBeLessThan(1);
+  expect(Math.abs(after.height - before.height)).toBeLessThan(1);
+});
+
 test('closing the photo view returns to its tile at phone width', async ({ page }) => {
   const id = FIXTURE_PHOTO_IDS['snowdrops']!;
   await page.goto(`${BASE}/photo/${id}`);
