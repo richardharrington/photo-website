@@ -54,6 +54,9 @@ interface LightboxProps {
   photoHref?: (id: string) => string;
 }
 
+/** How long "Saved" stays under the actions once a save is back in the read view. */
+const SAVED_NOTE_MS = 3000;
+
 /**
  * Neighbour images already asked for, kept alive so the browser cannot collect
  * a request that has not finished — and so arrowing back and forth over the
@@ -82,17 +85,20 @@ function captureLine(photo: PublicPhoto): string | null {
  * in one ordered list, a position within it says nothing useful, and every
  * pixel of chrome is a pixel not showing the photograph. What is left sits in
  * the corners — the way back at the top left, and at the bottom left a stack
- * of caption, date, and the two actions — with the photo's box running exactly
+ * of date, caption, and actions — with the photo's box running exactly
  * between them. The filename and the capture *time* live one click away, in
  * the info panel.
  *
- * This is also the editing view, and the whole of it, under any context with
- * `edit`: the bottom-left stack holds the date, time, and caption as fields
- * with a Save button, and the action row gains Delete where the context can
- * trash this photograph and Restore where it can restore. Where the context shows filenames —
- * the admin's listings and the files still uploading — the filename is at the
- * top right. There is no side panel and no separate enlarged preview, because
- * this is the enlarged preview.
+ * It opens to read, in every context and at every width
+ * (read-first-photo-view.md): the date, or "Undated"; the caption, clamped
+ * with More when it runs long; and Download, Edit where the context can edit
+ * this photograph, Delete where it can trash it, Restore and Delete
+ * permanently in a trash, and Photo info. Edit puts the edit form in place of
+ * the date and caption, hides Download and the arrows, and on a wide screen
+ * slides the picture over to make room; Save or Cancel comes back. Where the
+ * context shows filenames — the admin's listings and the files still
+ * uploading — the filename is at the top right. There is no side panel and no
+ * separate enlarged preview, because this is the enlarged preview.
  */
 export function Lightbox({
   photo,
@@ -110,6 +116,8 @@ export function Lightbox({
   const stageRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const captionRef = useRef<HTMLParagraphElement>(null);
+  const editButtonRef = useRef<HTMLButtonElement>(null);
   /** The info panel and its toggle, so a pointer outside both can dismiss it. */
   const infoRef = useRef<HTMLDListElement>(null);
   const infoButtonRef = useRef<HTMLButtonElement>(null);
@@ -123,6 +131,37 @@ export function Lightbox({
    */
   const [infoFor, setInfoFor] = useState<string | null>(null);
   const showInfo = infoFor === photo.id;
+
+  /**
+   * Which photo the edit view is open for, by the same arithmetic.
+   *
+   * Every arrival — a step after Save or Cancel, the advance after a delete,
+   * reopening a photograph — is in the read view, with no effect resetting a
+   * flag (read-first-photo-view.md #17).
+   */
+  const [editingFor, setEditingFor] = useState<string | null>(null);
+  const editing = editable && editingFor === photo.id;
+
+  /**
+   * Which photo "Saved" is showing for. An object rather than the ID, so a
+   * second save of the same photograph restarts the note's clock.
+   */
+  const [savedFor, setSavedFor] = useState<{ id: string } | null>(null);
+  const showSaved = savedFor?.id === photo.id && !editing;
+
+  /** Which photo's caption is expanded past its clamp; stepping collapses it. */
+  const [expandedFor, setExpandedFor] = useState<string | null>(null);
+  const expanded = expandedFor === photo.id;
+  /** Whether the collapsed caption is actually cut short, so More means something. */
+  const [clamped, setClamped] = useState(false);
+
+  /**
+   * Where focus goes once the view has switched, because the button that
+   * switched it has just unmounted: into the dialog on entering the edit view
+   * — never a field, which on a phone raises the keyboard over a form not yet
+   * seen — and back to Edit on leaving it.
+   */
+  const focusAfterSwitch = useRef<'dialog' | 'edit' | null>(null);
 
   /**
    * Who emailed this photograph in, asked for only when the panel is open.
@@ -160,8 +199,8 @@ export function Lightbox({
    * Whether the edit form is holding something that has not been saved.
    *
    * The form reports it, because only the form knows; the view acts on it,
-   * because the controls that would throw the edit away are the view's. See
-   * the guard in `step` below.
+   * because Escape is the view's, and will not leave the edit view while this
+   * is true. See the key handler below.
    */
   const [dirty, setDirty] = useState(false);
 
@@ -171,15 +210,14 @@ export function Lightbox({
   /**
    * Move by one position from wherever the current photo is.
    *
-   * Refused outright while the form holds an unsaved change. Arrowing away
-   * remounts the form on the next photo, which discards what was typed — and
-   * a caption typed into a photograph and then silently dropped is worse than
-   * an arrow key that does nothing. The two arrow buttons are disabled for the
-   * same reason, and the form says why.
+   * Refused outright in the edit view, where the arrows are not rendered
+   * either. Stepping would leave the form behind on the photograph it was
+   * for, and a caption typed into a photograph and then silently dropped is
+   * worse than an arrow key that does nothing. Save or Cancel, then step.
    */
   const step = useCallback(
     (delta: number) => {
-      if (dirty) return;
+      if (editing) return;
       const currentId = onStep
         ? photo.id
         : (window.location.pathname.split('/').pop() ?? '');
@@ -190,20 +228,45 @@ export function Lightbox({
       if (onStep) onStep(target);
       else navigate(photoHref(target));
     },
-    [orderedIds, onStep, photo.id, dirty, photoHref],
+    [orderedIds, onStep, photo.id, editing, photoHref],
   );
 
   const currentPosition = orderedIds.indexOf(photo.id);
-  const hasPrevious = currentPosition > 0 && !dirty;
-  const hasNext =
-    currentPosition !== -1 && currentPosition < orderedIds.length - 1 && !dirty;
-  const heldBack = dirty ? 'Save or discard your changes first' : undefined;
+  const hasPrevious = currentPosition > 0;
+  const hasNext = currentPosition !== -1 && currentPosition < orderedIds.length - 1;
+
+  function openEditor() {
+    focusAfterSwitch.current = 'dialog';
+    setEditingFor(photo.id);
+  }
+
+  /** Back to the read view, from Cancel or from a save that succeeded. */
+  function closeEditor(saved: boolean) {
+    focusAfterSwitch.current = 'edit';
+    setEditingFor(null);
+    if (saved) setSavedFor({ id: photo.id });
+  }
 
   // Move focus into the dialog when it opens, so a keyboard user is not left
   // behind on the timeline.
   useLayoutEffect(() => {
     dialogRef.current?.focus();
   }, [photo.id]);
+
+  // And wherever the switch between reading and editing asked for, before
+  // paint, so focus never rests on `body`.
+  useLayoutEffect(() => {
+    const target = focusAfterSwitch.current;
+    focusAfterSwitch.current = null;
+    if (target === 'edit') editButtonRef.current?.focus();
+    else if (target === 'dialog') dialogRef.current?.focus();
+  }, [editing]);
+
+  useEffect(() => {
+    if (savedFor === null) return;
+    const timer = window.setTimeout(() => setSavedFor(null), SAVED_NOTE_MS);
+    return () => window.clearTimeout(timer);
+  }, [savedFor]);
 
   /**
    * Where the picture's left edge actually is, in pixels, published to CSS as
@@ -235,11 +298,32 @@ export function Lightbox({
 
     // Watch the stage rather than the image: a picture constrained by the
     // window's height keeps its size when the window widens and only moves,
-    // which an observer on the image itself would never hear about.
+    // which an observer on the image itself would never hear about. It is
+    // also what lets the stack follow the picture frame by frame while the
+    // stage slides back from the edit view.
     const observer = new ResizeObserver(measure);
     observer.observe(stage);
     return () => observer.disconnect();
   }, [photo.id, aspect]);
+
+  /*
+   * Whether the caption is cut short by its clamp, so More appears only when
+   * there is more.
+   *
+   * Measured only while collapsed — expanded, it is not clamped, and Less
+   * stays — and re-measured by an observer on the caption itself, because the
+   * clamp's line count changes at the breakpoint and the column's width with
+   * the window.
+   */
+  useLayoutEffect(() => {
+    const caption = captionRef.current;
+    if (!caption || expanded) return;
+    const measure = () => setClamped(caption.scrollHeight > caption.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(caption);
+    return () => observer.disconnect();
+  }, [photo.id, photo.caption, expanded, editing]);
 
   // A layout effect, not a passive one. Passive effects run *after* paint, so
   // with useEffect the dialog is on screen and looks interactive for a frame
@@ -255,8 +339,9 @@ export function Lightbox({
        * This is a correctness rule rather than a preference: the handler is on
        * `window`, so without it ArrowLeft would change photo while the caret
        * was meant to move, and Backspace would delete the photograph instead
-       * of a character. Escape leaves the field; a second Escape, with focus
-       * outside the form, closes the view.
+       * of a character. Escape leaves the field — or Save or Cancel, which are
+       * in the form too; the next Escape, with focus outside the form, is
+       * handled below.
        */
       if (active && formRef.current?.contains(active)) {
         if (event.key === 'Escape') {
@@ -278,10 +363,21 @@ export function Lightbox({
       switch (event.key) {
         case 'Escape':
           event.preventDefault();
-          // Escape dismisses the innermost thing that is open, as it already
-          // does for the edit form above: the panel first, the view second.
-          if (showInfo) setInfoFor(null);
-          else onClose();
+          // Escape dismisses the innermost thing that is open: the panel, then
+          // the edit view, then the photograph. It never leaves the edit view
+          // over unsaved typing, which would drop it while leaving the reader
+          // on the same photograph; "Unsaved changes" says why nothing
+          // happened (read-first-photo-view.md #15).
+          if (showInfo) {
+            setInfoFor(null);
+          } else if (editing) {
+            if (!dirty) {
+              focusAfterSwitch.current = 'edit';
+              setEditingFor(null);
+            }
+          } else {
+            onClose();
+          }
           break;
         case 'ArrowLeft':
           event.preventDefault();
@@ -307,7 +403,7 @@ export function Lightbox({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose, step, curation, photo.id, showInfo]);
+  }, [onClose, step, curation, photo.id, showInfo, editing, dirty]);
 
   /*
    * The info panel is a layer, so a pointer outside it dismisses it.
@@ -413,9 +509,9 @@ export function Lightbox({
 
   return (
     <div
-      // The form needs room the viewer's narrow caption column does not, so
-      // the stage makes way for it; see admin.css.
-      className={editable ? 'lightbox lightbox--editing' : 'lightbox'}
+      // The form needs room the read view's narrow caption column does not,
+      // so while editing the stage makes way for it; see curation.css.
+      className={editing ? 'lightbox lightbox--editing' : 'lightbox'}
       role="dialog"
       aria-modal="true"
       aria-label={alt}
@@ -443,16 +539,19 @@ export function Lightbox({
       ) : null}
 
       <div className="lightbox__stage" ref={stageRef}>
-        <button
-          type="button"
-          className="lightbox__nav lightbox__nav--previous"
-          onClick={() => step(-1)}
-          disabled={!hasPrevious}
-          title={heldBack}
-          aria-label="Previous photo"
-        >
-          <span aria-hidden="true">&#8249;</span>
-        </button>
+        {/* Absent in the edit view rather than disabled: to move on, Save or
+            Cancel, then step (read-first-photo-view.md #14). */}
+        {editing ? null : (
+          <button
+            type="button"
+            className="lightbox__nav lightbox__nav--previous"
+            onClick={() => step(-1)}
+            disabled={!hasPrevious}
+            aria-label="Previous photo"
+          >
+            <span aria-hidden="true">&#8249;</span>
+          </button>
+        )}
 
         <img
           className="lightbox__image"
@@ -477,16 +576,17 @@ export function Lightbox({
           decoding="async"
         />
 
-        <button
-          type="button"
-          className="lightbox__nav lightbox__nav--next"
-          onClick={() => step(1)}
-          disabled={!hasNext}
-          title={heldBack}
-          aria-label="Next photo"
-        >
-          <span aria-hidden="true">&#8250;</span>
-        </button>
+        {editing ? null : (
+          <button
+            type="button"
+            className="lightbox__nav lightbox__nav--next"
+            onClick={() => step(1)}
+            disabled={!hasNext}
+            aria-label="Next photo"
+          >
+            <span aria-hidden="true">&#8250;</span>
+          </button>
+        )}
       </div>
 
       <div className="lightbox__foot">
@@ -500,8 +600,8 @@ export function Lightbox({
             <dd>{photo.originalFilename}</dd>
             {curation?.can.addedFrom ? (
               <>
-                {/* On every photograph the family sees, so a missing Delete
-                    explains itself (family-own-trash.md #4). */}
+                {/* On every photograph the family sees, so a missing Edit and
+                    Delete explain themselves (family-own-trash.md #4). */}
                 <dt>Added from</dt>
                 <dd>
                   {curation.addedHere(photo.id) ? 'This device' : 'Another device'}
@@ -532,31 +632,58 @@ export function Lightbox({
           </dl>
         ) : null}
 
-        {/* Caption, date, and the actions are one stack, ordered by how much
+        {/* Date, caption, and the actions are one stack, ordered by how much
             they say about the photograph. On a wide screen they share a right
             edge, which is the only alignment in the view that the photo's own
-            box does not provide. Where the context edits, the caption and
-            date are the edit form's own fields, in the same place. */}
+            box does not provide. In the edit view the form takes the date's
+            and caption's place. */}
         <div className="lightbox__bottom">
-          {editable && curation ? (
+          {editing && curation ? (
             <EditForm
               ref={formRef}
-              // Remounted per photo, so no edit can survive an arrow press.
+              // Remounted per photo, so no edit can survive onto another.
               key={photo.id}
               photo={photo}
               onSave={(edit) => curation.edit(photo.id, edit)}
+              onSaved={() => closeEditor(true)}
+              onCancel={() => closeEditor(false)}
               onDirtyChange={setDirty}
             />
-          ) : photo.caption || dateLine ? (
+          ) : (
             <div className="lightbox__meta">
+              {/* First in the document, so a screen reader hears one order;
+                  the wide layout lifts the caption above it with `order`. */}
+              <p className="lightbox__date">{dateLine ?? 'Undated'}</p>
               {/* The only hand-written words about a photograph; they stay on
                   screen while everything else moves behind a button. */}
               {photo.caption ? (
-                <p className="lightbox__caption">{photo.caption}</p>
+                <div className="lightbox__caption-block">
+                  <p
+                    ref={captionRef}
+                    id="photo-caption"
+                    className={
+                      expanded
+                        ? 'lightbox__caption lightbox__caption--expanded'
+                        : 'lightbox__caption'
+                    }
+                  >
+                    {photo.caption}
+                  </p>
+                  {clamped || expanded ? (
+                    <button
+                      type="button"
+                      className="lightbox__more"
+                      aria-expanded={expanded}
+                      aria-controls="photo-caption"
+                      onClick={() => setExpandedFor(expanded ? null : photo.id)}
+                    >
+                      {expanded ? 'Less' : 'More'}
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
-              {dateLine ? <p className="lightbox__date">{dateLine}</p> : null}
             </div>
-          ) : null}
+          )}
 
           {downloadError ? (
             <p className="lightbox__error" role="alert">
@@ -569,12 +696,17 @@ export function Lightbox({
                 more: no download of any kind and no delete — only Restore,
                 which puts it back, and in the family's trash Delete
                 permanently. The admin deletes permanently from its bar, for a
-                selection. */}
-            {curation && !curation.can.download ? null : (
+                selection. The edit view has no Download either. */}
+            {editing || (curation && !curation.can.download) ? null : (
               <button type="button" onClick={onDownload} disabled={downloading}>
                 {downloading ? 'Preparing download…' : 'Download'}
               </button>
             )}
+            {editable && !editing ? (
+              <button type="button" ref={editButtonRef} onClick={openEditor}>
+                Edit
+              </button>
+            ) : null}
             {curation && canTrash(curation, photo.id) ? (
               <button
                 type="button"
@@ -608,6 +740,14 @@ export function Lightbox({
               Photo info
             </button>
           </div>
+
+          {/* Here rather than in the form, which is gone by the time a save
+              has succeeded. */}
+          {showSaved ? (
+            <p className="lightbox__saved" role="status">
+              Saved
+            </p>
+          ) : null}
         </div>
       </div>
     </div>

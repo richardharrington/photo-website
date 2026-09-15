@@ -378,14 +378,39 @@ button.photo-grid__link {
 
 .edit-form__actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem 0.75rem;
 }
 
-.edit-form__saved,
 .edit-form__unsaved {
   color: var(--fg-muted);
   font-size: 0.875rem;
+}
+
+/* Under the read view's actions for a few seconds after a save returned
+   there. Below 40rem a line of its own; at 40rem and above, see below. */
+.lightbox__saved {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 0.875rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lightbox__saved {
+    animation: lightbox-saved 3s ease-in forwards;
+  }
+}
+
+@keyframes lightbox-saved {
+  80% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
 }
 
 /* Which file is on screen, without opening Photo info. Muted, and in the
@@ -408,22 +433,44 @@ button.photo-grid__link {
   }
 
   /*
-   * The picture makes room for the form.
+   * In the edit view the picture makes room for the form.
    *
-   * In the viewer the bottom-left stack lives in whatever margin a centred
+   * In the read view the bottom-left stack lives in whatever margin a centred
    * photograph happens to leave, which for a caption is enough and for a
    * landscape photograph on a wide window is about a hundred pixels. A form
-   * cannot wrap into that. So the stage starts clear of a fixed gutter and the
-   * picture centres in what is left.
+   * cannot wrap into that. So while editing the stage starts clear of a fixed
+   * gutter and the picture centres in what is left.
    *
    * The stack takes that gutter outright rather than hanging off
-   * `--photo-left` as it does in the viewer: the previous-photo button lives
-   * at the stage's own left edge, which is exactly where a stack measured from
-   * the picture would end. A fixed line is also the better edge for a column
-   * of fields, which have one of their own already.
+   * `--photo-left` as it does in the read view: a fixed line is the better
+   * edge for a column of fields, which have one of their own already.
    */
   .lightbox--editing .lightbox__stage {
     left: 21rem;
+  }
+
+  /* The picture slides over when Edit opens and back when it closes. The
+     stack follows it back frame by frame, because the component measures
+     `--photo-left` off the stage as it resizes. */
+  @media (prefers-reduced-motion: no-preference) {
+    .lightbox__stage {
+      transition: left 200ms ease;
+    }
+  }
+
+  /* Out of flow, in the page margin under Photo info, so its coming and going
+     cannot move the stack the picture's bottom edge is aligned to. */
+  .lightbox__bottom {
+    position: relative;
+  }
+
+  .lightbox__saved {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 0.125rem;
+    line-height: 1;
+    white-space: nowrap;
   }
 
   .lightbox--editing .lightbox__foot {

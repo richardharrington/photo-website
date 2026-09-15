@@ -575,7 +575,9 @@
   gap: 0.5rem var(--space);
 }
 
+/* A line of its own above the actions, however short the date. */
 .lightbox__meta {
+  flex-basis: 100%;
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
@@ -610,6 +612,21 @@
   cursor: default;
 }
 
+.lightbox__caption-block {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+/*
+ * Clamped, so a long caption cannot take its height out of the picture's; the
+ * component shows More only when the clamp has cut something off. Expanded, it
+ * is capped at half the viewport and scrolls inside its own box, so the
+ * picture keeps at least half the screen and the buttons stay in view — on a
+ * short laptop window as much as on a phone.
+ */
 .lightbox__caption {
   margin: 0;
   color: var(--fg-muted);
@@ -618,6 +635,31 @@
   /* Captions are plain text with line breaks; preserve them without
      interpreting any markup. */
   white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
+}
+
+.lightbox__caption.lightbox__caption--expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: none;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+/* A link in the caption's voice, not a fifth button in the action row. */
+.lightbox__more {
+  font: inherit;
+  font-size: 0.875rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg);
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .lightbox__error {
@@ -678,10 +720,10 @@
     z-index: 2;
   }
 
-  /* Caption, date, Download, Photo info: one column whose items share a right
-     edge, so the stack ends on a clean line rather than a ragged one. Download
-     is above Photo info so the button the photo's bottom edge is aligned to is
-     the lower of the two. */
+  /* Caption, date, Download, Edit, Delete, Photo info: one column whose items
+     share a right edge, so the stack ends on a clean line rather than a ragged
+     one. Photo info is lowest, so the button the photo's bottom edge is
+     aligned to is always the same one. */
   .lightbox__foot,
   .lightbox__bottom,
   .lightbox__actions {
@@ -694,15 +736,23 @@
     flex-wrap: nowrap;
   }
 
-  /* Between the date and Download; the two buttons stay a pair. */
+  /* Between the date and the buttons; the buttons stay together. */
   .lightbox__bottom {
     gap: 3.625rem;
   }
 
   .lightbox__meta {
+    flex-basis: auto;
     align-items: flex-end;
     text-align: right;
     gap: 1.125rem;
+  }
+
+  /* Caption above date here, as the corner stack has always read; the date
+     stays first in the document (read-first-photo-view.md #5). */
+  .lightbox__caption-block {
+    order: -1;
+    align-items: flex-end;
   }
 
   .lightbox__caption,
@@ -714,6 +764,18 @@
      photograph rather than a line running away from it. */
   .lightbox__caption {
     max-width: 9.5rem;
+    /* The column is narrow, so more lines hold about as many words. */
+    -webkit-line-clamp: 10;
+    line-clamp: 10;
+  }
+
+  .lightbox__caption.lightbox__caption--expanded {
+    -webkit-line-clamp: unset;
+    line-clamp: none;
+  }
+
+  .lightbox__more {
+    font-size: 0.9375rem;
   }
 
   .lightbox__actions button {

@@ -8,12 +8,16 @@ interface EditFormProps {
   photo: PublicPhoto;
   /** Resolves with the stored photo; rejects with a message to show. */
   onSave: (edit: PhotoEdit) => Promise<PublicPhoto>;
+  /** Called once a save has resolved, and only then: the view leaves the form. */
+  onSaved: () => void;
+  /** Discard whatever was typed, without asking, and leave the form. */
+  onCancel: () => void;
   /**
    * Told whenever the fields start or stop differing from what is stored.
    *
    * Only this component can know — the values are its own state — and only
-   * the view can act on it, because the controls that would discard an edit
-   * are the view's own arrows.
+   * the view can act on it, because Escape, which would leave the form, is
+   * the view's.
    */
   onDirtyChange?: (dirty: boolean) => void;
   /** The lightbox holds this to tell whether a field owns the keyboard. */
@@ -21,32 +25,41 @@ interface EditFormProps {
 }
 
 /**
- * The admin's caption and date, in place of the viewer's caption and date.
+ * A photograph's date, time, and caption as fields, in the corner of the photo
+ * view where its read view shows them as text.
  *
- * Where the photo view shows what a photograph says about itself, the admin
- * shows the same three facts as fields, in the same corner. There is no Edit
- * toggle: editing is what an administrator is here for, and a toggle would put
- * a click in front of every correction.
+ * Reached by the view's Edit button, and left by Save changes or Cancel
+ * (read-first-photo-view.md). Nothing is sent until Save, which stays disabled
+ * until a field differs from what is stored. A save that succeeds hands back
+ * through `onSaved`, and the view returns to reading and says "Saved" there;
+ * one that fails stays here, with the message and everything typed. Cancel
+ * discards without asking.
  *
- * Nothing is sent until Save, and the lightbox keys this component on the
- * photo's ID, so moving to another photograph remounts it with that one's
- * stored values. Which is why an unsaved edit holds the arrows: the view
- * refuses to step while `onDirtyChange` has reported true, because the step
- * would be the thing that threw the edit away. Escape and close still leave,
- * as they always have — those are asking to go.
+ * While the form is up the view hides its arrows and refuses to step, and
+ * Escape — once no field has focus and Photo info is shut — will not leave
+ * while `onDirtyChange` has reported true. Either would throw the typing away
+ * while leaving the reader on the same photograph, and a caption dropped that
+ * way is worse than a key that does nothing; "Unsaved changes" beside Save is
+ * the explanation. Closing the photograph still discards, because that reads
+ * as leaving.
  *
- * Keyed on the ID alone, and deliberately not on the metadata as well — a
- * save comes back with the updated record, and remounting on that would wipe
- * the "Saved" confirmation the user was meant to see.
- *
- * So the stored record can change under a mounted form without a save: the
- * undo banner sits above the photo view, and undoing a bulk caption changes
- * the caption of the photo on screen. A field still showing what was stored
- * follows the new value; a field the administrator has typed in keeps what
- * they typed. Without that an untouched form would read as "Unsaved changes"
- * and lock the arrows over an edit nobody made (decisions.md #89).
+ * The lightbox keys this component on the photo's ID alone, and deliberately
+ * not on the metadata as well, because the stored record can change under a
+ * mounted form without a save: the undo banner sits above the photo view, and
+ * undoing a bulk caption changes the caption of the photo on screen. A field
+ * still showing what was stored follows the new value; a field the
+ * administrator has typed in keeps what they typed. Without that an untouched
+ * form would read as "Unsaved changes" and refuse Escape over an edit nobody
+ * made (decisions.md #89).
  */
-export function EditForm({ photo, onSave, onDirtyChange, ref }: EditFormProps) {
+export function EditForm({
+  photo,
+  onSave,
+  onSaved,
+  onCancel,
+  onDirtyChange,
+  ref,
+}: EditFormProps) {
   const record = {
     date: photo.captureDate ?? '',
     time: photo.captureTime ?? '',
@@ -57,7 +70,6 @@ export function EditForm({ photo, onSave, onDirtyChange, ref }: EditFormProps) {
   const [caption, setCaption] = useState(record.caption);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
 
   // The record as this form last saw it, adjusted during render rather than
   // in an effect, so there is never a painted frame reporting a stale edit.
@@ -75,25 +87,28 @@ export function EditForm({ photo, onSave, onDirtyChange, ref }: EditFormProps) {
 
   /**
    * Compared against the record rather than tracked as a flag, so typing a
-   * character and deleting it again leaves nothing behind — and so a save
-   * clears it by arithmetic, as soon as the stored photo comes back.
+   * character and deleting it again leaves nothing behind.
    */
   const dirty =
     date !== record.date || time !== record.time || caption !== record.caption;
 
   useEffect(() => {
     onDirtyChange?.(dirty);
-    // Whatever the fields held, an unmounted form is holding nothing.
+    // Whatever the fields held, an unmounted form is holding nothing. This is
+    // also what clears the view's copy after Cancel and after a save.
     return () => onDirtyChange?.(false);
   }, [dirty, onDirtyChange]);
 
   async function save() {
+    // Save is disabled with nothing to send, and the keyboard shortcut
+    // follows the button.
+    if (saving || !dirty) return;
+
     // The same validator the API runs. Checking here too means an obvious
     // mistake is caught without a round trip, not that the server trusts it.
     const validated = validatePhotoEdit({ date, time, caption });
     if (!validated.ok) {
       setError(validated.error);
-      setSaved(false);
       return;
     }
 
@@ -106,12 +121,11 @@ export function EditForm({ photo, onSave, onDirtyChange, ref }: EditFormProps) {
         caption: validated.value.caption,
       });
       // Clearing the date clears the time, and a caption is stored trimmed:
-      // reflect what was actually stored rather than what was typed. Anything
-      // else and the fields would still read as unsaved after a save.
+      // reflect what was actually stored rather than what was typed.
       setDate(stored.captureDate ?? '');
       setTime(stored.captureTime ?? '');
       setCaption(stored.caption ?? '');
-      setSaved(true);
+      onSaved();
     } catch (cause) {
       setError(
         cause instanceof Error ? cause.message : 'That change could not be saved.',
@@ -131,7 +145,7 @@ export function EditForm({ photo, onSave, onDirtyChange, ref }: EditFormProps) {
       }}
     >
       <label className="edit-form__field">
-        <span>Capture date</span>
+        <span>Date</span>
         <input
           type="text"
           inputMode="numeric"
@@ -142,7 +156,7 @@ export function EditForm({ photo, onSave, onDirtyChange, ref }: EditFormProps) {
       </label>
 
       <label className="edit-form__field">
-        <span>Capture time</span>
+        <span>Time</span>
         <input
           type="text"
           placeholder="HH:MM"
@@ -173,20 +187,21 @@ export function EditForm({ photo, onSave, onDirtyChange, ref }: EditFormProps) {
       </label>
 
       <div className="edit-form__actions">
-        <button type="submit" disabled={saving}>
+        <button type="submit" disabled={saving || !dirty}>
           {saving ? 'Saving…' : 'Save changes'}
+        </button>
+        <button type="button" onClick={onCancel}>
+          Cancel
         </button>
         {error ? (
           <span className="admin-error" role="alert">
             {error}
           </span>
         ) : dirty ? (
-          /* The arrows are disabled while this shows, and this is where the
-             reason has to be — a disabled button cannot be hovered for a
-             tooltip on every platform, and cannot be focused for a label. */
+          /* Escape will not leave the form while this shows, and this is
+             where the reason has to be: nothing else on screen changes when
+             the key is refused. */
           <span className="edit-form__unsaved">Unsaved changes</span>
-        ) : saved ? (
-          <span className="edit-form__saved">Saved</span>
         ) : null}
       </div>
     </form>

@@ -112,11 +112,11 @@ afterEach(() => {
 });
 
 describe('the lightbox', () => {
-  it("under the family's library, on a photograph added here: the form and every action but Restore, no filename", () => {
+  it("under the family's library, on a photograph added here: the read view with Edit and every action but Restore, no filename", () => {
     lightboxUnder(FAMILY_LIBRARY, true);
 
-    expect(form()).not.toBeNull();
-    expect(button('Save changes') ?? button('Save')).not.toBeNull();
+    expect(form()).toBeNull();
+    expect(button('Edit')).not.toBeNull();
     expect(button('Download')).not.toBeNull();
     expect(button('Delete')).not.toBeNull();
     expect(button('Photo info')).not.toBeNull();
@@ -137,7 +137,8 @@ describe('the lightbox', () => {
   it("under the admin's library: unchanged, and no Restore", () => {
     lightboxUnder(ADMIN_LIBRARY);
 
-    expect(form()).not.toBeNull();
+    expect(form()).toBeNull();
+    expect(button('Edit')).not.toBeNull();
     expect(button('Download')).not.toBeNull();
     expect(button('Delete')).not.toBeNull();
     expect(filenameCorner()?.textContent).toBe('IMG_0001.HEIC');

@@ -27,6 +27,8 @@ function mount() {
     <EditForm
       photo={current}
       onSave={async () => current}
+      onSaved={() => {}}
+      onCancel={() => {}}
       onDirtyChange={onDirtyChange}
     />
   );
@@ -35,7 +37,7 @@ function mount() {
     onDirtyChange,
     update: (next: PublicPhoto) => rerender(form(next)),
     caption: () => screen.getByLabelText('Caption') as HTMLTextAreaElement,
-    date: () => screen.getByLabelText('Capture date') as HTMLInputElement,
+    date: () => screen.getByLabelText('Date') as HTMLInputElement,
   };
 }
 
