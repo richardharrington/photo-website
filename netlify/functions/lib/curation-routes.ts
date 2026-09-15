@@ -21,18 +21,20 @@
  * never a second authorization check — `checkAccess` has already decided the
  * mode before either Function calls this.
  *
- * Except in one place. In display mode, trash, restore, and permanent deletion
- * reach only the photographs the requesting browser added
- * (docs/specs/family-own-trash.md, and its section 15 for permanent deletion).
- * The family app sends a random token in `x-photo-uploader`; a display-mode
- * commit records its SHA-256 on the photograph, and a display-mode trash
- * preview, trash confirm, restore, permanent-delete preview and confirm, trash
- * listing, and trash count reach only photographs whose recorded hash matches. Anything else is the plain 404 an
- * unknown photograph gets, and both previews accept only an explicit ID list,
- * so a day or a month cannot be swept in (decision 13). Ownership is
- * re-checked inside each mutation callback, so a retry after a conflicting
- * write checks the catalog it is actually writing. Admin mode ignores the
- * header entirely and reaches everything, as it always did (decision 14).
+ * Except in one place. In display mode, editing, trash, restore, and permanent
+ * deletion reach only the photographs the requesting browser added
+ * (docs/specs/family-own-trash.md, its section 15 for permanent deletion, and
+ * docs/specs/read-first-photo-view.md #24 for editing). The family app sends a
+ * random token in `x-photo-uploader`; a display-mode commit records its
+ * SHA-256 on the photograph, and a display-mode edit, trash preview, trash
+ * confirm, restore, permanent-delete preview and confirm, trash listing, and
+ * trash count reach only photographs whose recorded hash matches. Anything
+ * else is the plain 404 an unknown photograph gets, and both previews accept
+ * only an explicit ID list, so a day or a month cannot be swept in (decision
+ * 13). Ownership is re-checked inside each mutation callback, so a retry after
+ * a conflicting write checks the catalog it is actually writing. Admin mode
+ * ignores the header entirely and reaches everything, as it always did
+ * (decision 14).
  */
 
 import {
@@ -170,7 +172,7 @@ export async function curationRoute(
 }
 
 // ---------------------------------------------------------------------------
-// Which photographs a trash or restore may reach
+// Which photographs an edit, trash, or restore may reach
 // ---------------------------------------------------------------------------
 
 /**
@@ -444,19 +446,35 @@ interface EditBody {
   caption?: string | null;
 }
 
-async function handleEdit({ request, store, via }: CurationRequest): Promise<Response> {
+/**
+ * In display mode an edit reaches only a photograph this browser added, by
+ * the same rule as the trash (read-first-photo-view.md #24).
+ *
+ * Ownership is checked before the edit is validated, so an invalid date sent
+ * for someone else's photograph is the plain 404 rather than a 400 that would
+ * tell a prober the photograph was reached. And it is checked inside the
+ * mutation callback, so a retry re-checks the catalog it writes.
+ */
+async function handleEdit(context: CurationRequest): Promise<Response> {
+  const { request, store, via } = context;
+  const reach = await reachOf(context);
+  if (reach === null) return notFound();
+
   const body = await readJson<EditBody>(request);
   if (!body?.photoId || !isValidPhotoId(body.photoId)) return notFound();
+  const photoId = body.photoId;
 
   const objectStore = store();
   const auditId = generateAuditId();
   const at = nowIso();
 
-  const outcome = await mutateCatalog(objectStore, { now: nowIso }, (catalog) =>
-    editPhotoMetadata(catalog, body.photoId!, body, at, auditId),
-  );
+  const outcome = await mutateCatalog(objectStore, { now: nowIso }, (catalog) => {
+    const photo = catalog.photos[photoId];
+    if (photo === undefined || !reaches(reach, photo)) return abortMutation(null);
+    return editPhotoMetadata(catalog, photoId, body, at, auditId);
+  });
 
-  if (outcome.status === 'not-found') return notFound();
+  if (outcome === null || outcome.status === 'not-found') return notFound();
   if (outcome.status === 'invalid') return badRequest(outcome.error);
 
   await writeAuditEvent(

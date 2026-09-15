@@ -694,8 +694,9 @@ async function handleInbox(
  * that list in both directions.
  *
  * It applies the same display-mode ownership rule too (family-own-trash.md
- * 6.5, 15): the family's trash, count, trash preview and confirm, restore, and
- * permanent-delete preview and confirm reach only
+ * 6.5, 15, read-first-photo-view.md #24): the family's edit, trash, count,
+ * trash preview and confirm, restore, and permanent-delete preview and confirm
+ * reach only
  * photographs whose uploader hash matches the request's token, and a family
  * commit without a token is refused. A dev server that let the family trash
  * anything would hide exactly the bug that rule exists to prevent.
@@ -855,16 +856,16 @@ async function handleCuration(
     }
 
     case '/edit': {
+      const photoId = String(body['photoId']);
+      // Ownership before validation, inside the callback, as the real
+      // Function checks it: someone else's photograph with an invalid date is
+      // the plain 404, not a 400.
       const outcome = await mutateCatalog(store, context, (catalog) =>
-        editPhotoMetadata(
-          catalog,
-          String(body['photoId']),
-          body as never,
-          now(),
-          generateAuditId(),
-        ),
+        reaches(catalog.photos[photoId])
+          ? editPhotoMetadata(catalog, photoId, body as never, now(), generateAuditId())
+          : abortMutation(null),
       );
-      if (outcome.status === 'not-found') sendNotFound(res);
+      if (outcome === null || outcome.status === 'not-found') sendNotFound(res);
       else if (outcome.status === 'invalid') sendBadRequest(res, outcome.error);
       else sendJson(res, 200, { photo: toPublicPhoto(outcome.photo) });
       return true;

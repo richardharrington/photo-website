@@ -108,7 +108,7 @@ const REACHING: Record<string, { body?: unknown; status: number }> = {
   'POST /begin-batch': { status: 200 },
   'POST /prepare': { body: {}, status: 400 },
   'POST /commit': { body: {}, status: 400 },
-  'POST /edit': { body: { photoId: LIVE_ID, date: 'not a date' }, status: 400 },
+  'POST /edit': { body: { photoId: OWNED_ID, date: 'not a date' }, status: 400 },
   'POST /trash/preview': { body: {}, status: 400 },
   'POST /trash/confirm': { body: {}, status: 400 },
   'POST /restore': { body: {}, status: 400 },
@@ -222,7 +222,7 @@ describe('the audit log', () => {
 
   it('records a display-mode edit as display-api', async () => {
     const response = await handlerFor('display')(
-      gated('display', 'POST', '/edit', { photoId: LIVE_ID, caption: 'At the beach' }),
+      gated('display', 'POST', '/edit', { photoId: OWNED_ID, caption: 'At the beach' }),
     );
     expect(response.status).toBe(200);
     expect(await auditEvents()).toEqual([
@@ -480,6 +480,100 @@ describe("in display mode, the family's trash", () => {
     it('are empty without a token, rather than refused', async () => {
       expect(await listed('display', null)).toEqual({ ids: [], count: 0 });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The family edits only what it added (read-first-photo-view.md #24)
+// ---------------------------------------------------------------------------
+
+describe('an edit', () => {
+  const captionOf = (id: string) => catalogInStore().photos[id]!.caption;
+  const auditCount = async () => (await store.list(R2_KEYS.auditPrefix)).length;
+
+  it('in display mode, of a photograph this browser added, is stored and audited as display-api', async () => {
+    const response = await handlerFor('display')(
+      gated('display', 'POST', '/edit', { photoId: OWNED_ID, caption: 'Edited here' }),
+    );
+    expect(response.status).toBe(200);
+    expect(captionOf(OWNED_ID)).toBe('Edited here');
+    const listed = await store.list(R2_KEYS.auditPrefix);
+    expect(listed.map(({ key }) => store.readJson<AuditEvent>(key))).toEqual([
+      expect.objectContaining({ action: 'metadata-change', via: 'display-api' }),
+    ]);
+  });
+
+  it.each([
+    ['added by nobody', LIVE_ID, { caption: 'Not mine' }, FIXTURE_UPLOADER_TOKEN],
+    [
+      'added by nobody, with an invalid date',
+      LIVE_ID,
+      { date: 'not a date' },
+      FIXTURE_UPLOADER_TOKEN,
+    ],
+    ['added here, with no token', OWNED_ID, { caption: 'No token' }, null],
+    [
+      'added here, but trashed',
+      TRASHED_ID,
+      { caption: 'Trashed' },
+      FIXTURE_UPLOADER_TOKEN,
+    ],
+    [
+      'that does not exist',
+      'd'.repeat(32),
+      { caption: 'Nobody' },
+      FIXTURE_UPLOADER_TOKEN,
+    ],
+    ['with a malformed ID', 'not-an-id', { caption: 'Nobody' }, FIXTURE_UPLOADER_TOKEN],
+  ] as const)(
+    'in display mode, of a photograph %s, is the plain 404 and changes nothing',
+    async (_name, photoId, fields, token) => {
+      const before = catalogInStore();
+      await refusedLikeAnUnknownPath('/edit', { photoId, ...fields }, token);
+      expect(catalogInStore()).toEqual(before);
+      expect(await auditCount()).toBe(0);
+    },
+  );
+
+  it('in display mode, of a photograph added from another browser, is the plain 404', async () => {
+    setUploaderHash(OWNED_ID, 'f'.repeat(64));
+    await refusedLikeAnUnknownPath('/edit', { photoId: OWNED_ID, caption: 'Theirs' });
+    expect(captionOf(OWNED_ID)).toBe('First rocket up.');
+  });
+
+  it('in display mode, re-checks ownership when a conflicting write forces a retry', async () => {
+    store.onBeforeConditionalWrite = () => {
+      store.onBeforeConditionalWrite = null;
+      setUploaderHash(OWNED_ID, 'f'.repeat(64));
+    };
+
+    const response = await handlerFor('display')(
+      gated('display', 'POST', '/edit', { photoId: OWNED_ID, caption: 'Too late' }),
+    );
+    expect(response.status).toBe(404);
+    expect(captionOf(OWNED_ID)).toBe('First rocket up.');
+    expect(await auditCount()).toBe(0);
+  });
+
+  it('in admin mode, of a photograph nobody added, is stored as before', async () => {
+    const response = await handlerFor('admin')(
+      gated(
+        'admin',
+        'POST',
+        '/edit',
+        { photoId: LIVE_ID, caption: 'By the admin' },
+        null,
+      ),
+    );
+    expect(response.status).toBe(200);
+    expect(captionOf(LIVE_ID)).toBe('By the admin');
+  });
+
+  it('in admin mode, still explains an invalid date', async () => {
+    const response = await handlerFor('admin')(
+      gated('admin', 'POST', '/edit', { photoId: LIVE_ID, date: 'not a date' }, null),
+    );
+    expect(response.status).toBe(400);
   });
 });
 

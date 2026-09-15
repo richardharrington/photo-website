@@ -83,7 +83,7 @@ const REACHING: Record<string, unknown> = {
       RENDITIONS.map((rendition) => [rendition, { width: 10, height: 10, bytes: 10 }]),
     ),
   },
-  'POST /edit': { photoId: LIVE_ID, caption: 'At the beach' },
+  'POST /edit': { photoId: OWNED_ID, caption: 'First rocket up.' },
   'POST /trash/preview': { selection: { kind: 'ids', photoIds: [OWNED_ID] } },
   'POST /trash/confirm': { photoIds: [] },
   'POST /restore': { photoIds: [] },
@@ -230,6 +230,47 @@ describe("the fixture server's family trash", () => {
     );
     expect(response.status).toBe(200);
     expect(JSON.parse(response.body)).toEqual({ restored: [], count: 0 });
+  });
+
+  it('edits a photograph this browser added, and refuses any other as an unknown path', async () => {
+    const owned = await call(DISPLAY_BASE, 'POST', '/edit', {
+      photoId: OWNED_ID,
+      caption: 'First rocket up.',
+    });
+    expect(owned.status, owned.body).toBe(200);
+
+    for (const body of [
+      { photoId: LIVE_ID, caption: 'Not mine' },
+      // Before validation: a 400 here would say the photograph was reached.
+      { photoId: LIVE_ID, date: 'not a date' },
+    ]) {
+      const refused = await call(DISPLAY_BASE, 'POST', '/edit', body);
+      const unknown = await call(DISPLAY_BASE, 'POST', '/no-such-route', body);
+      expect(refused).toEqual(unknown);
+      expect(refused.status).toBe(404);
+    }
+  });
+
+  it('refuses an edit without a token, and lets the admin edit anything', async () => {
+    expect(
+      (
+        await call(
+          DISPLAY_BASE,
+          'POST',
+          '/edit',
+          { photoId: OWNED_ID, caption: 'First rocket up.' },
+          null,
+        )
+      ).status,
+    ).toBe(404);
+    const admin = await call(
+      ADMIN_BASE,
+      'POST',
+      '/edit',
+      { photoId: LIVE_ID, caption: 'First one down to the beach.' },
+      null,
+    );
+    expect(admin.status, admin.body).toBe(200);
   });
 
   it('refuses a restore of a photograph this browser did not add', async () => {
