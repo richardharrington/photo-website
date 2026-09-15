@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page } from '@playwright/test';
-import { FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
+import { FIXTURE_PHOTO_IDS, FIXTURE_UPLOADER_TOKEN } from '../../fixtures/catalog.ts';
 
 /**
  * The family app on a phone: responsive on current mobile Safari/Chrome, and
@@ -154,6 +154,12 @@ test("the add bar's words follow the breakpoint, and it opens the picker", async
 });
 
 test('the trash fits the viewport', async ({ page }) => {
+  // The family's trash lists only what this browser added
+  // (family-own-trash.md #6), so this browser is the one that added the two
+  // trashed scratch-day photographs.
+  await page.addInitScript((token) => {
+    window.localStorage.setItem('photo-uploader-token', token);
+  }, FIXTURE_UPLOADER_TOKEN);
   await page.goto(`${BASE}/trash`);
   await expect(page.locator('.trash__intro')).toBeVisible();
   await expect(page.locator('.photo-grid__item')).toHaveCount(2);
