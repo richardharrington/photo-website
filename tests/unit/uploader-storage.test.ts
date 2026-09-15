@@ -131,3 +131,62 @@ describe('getUploader', () => {
     expect(uploader.addedHere(PHOTO)).toBe(true);
   });
 });
+
+/**
+ * Several tabs of the family app in one browser. Each `loadPage()` is a new
+ * module instance over the same storage, so an earlier result stands for a tab
+ * that is still open.
+ */
+describe('several tabs of one browser', () => {
+  it('keeps what each tab added, whichever wrote last', async () => {
+    const tabA = await loadPage();
+    const tabB = await loadPage();
+    expect(tabB.token).toBe(tabA.token);
+
+    tabA.remember(PHOTO);
+    tabB.remember(OTHER);
+
+    // Each open tab sees the other's upload without a reload…
+    expect(tabA.addedHere(OTHER)).toBe(true);
+    expect(tabB.addedHere(PHOTO)).toBe(true);
+
+    // …and so does the next page load.
+    const reloaded = await loadPage();
+    expect(reloaded.addedHere(PHOTO)).toBe(true);
+    expect(reloaded.addedHere(OTHER)).toBe(true);
+  });
+
+  it("adopts a token another tab's first visit put in storage, and drops what the old one added", async () => {
+    const tabA = await loadPage();
+    const oldToken = tabA.token;
+    tabA.remember(PHOTO);
+
+    // Another tab that read storage before this one wrote, as two tabs opening
+    // a browser's very first visit at the same moment can.
+    realStorage.removeItem(TOKEN_KEY);
+    const tabB = await loadPage();
+    expect(tabB.token).not.toBe(oldToken);
+
+    expect(tabA.token).toBe(tabB.token);
+    expect(tabA.addedHere(PHOTO)).toBe(false);
+
+    tabA.remember(OTHER);
+    expect(tabB.addedHere(OTHER)).toBe(true);
+  });
+
+  it('puts its token and its uploads back when storage loses them', async () => {
+    const tab = await loadPage();
+    const token = tab.token;
+    tab.remember(PHOTO);
+
+    realStorage.clear();
+
+    expect(tab.token).toBe(token);
+    expect(realStorage.getItem(TOKEN_KEY)).toBe(token);
+    expect(JSON.parse(realStorage.getItem(IDS_KEY) ?? '[]')).toEqual([PHOTO]);
+
+    const reloaded = await loadPage();
+    expect(reloaded.token).toBe(token);
+    expect(reloaded.addedHere(PHOTO)).toBe(true);
+  });
+});
