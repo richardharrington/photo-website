@@ -4,7 +4,7 @@ import { altTextFor } from '../validation.ts';
 import { derivativeSrcSet, derivativeUrl } from '../urls.ts';
 import { formatCaptureDate, formatCaptureTimeForViewer } from '../datetime.ts';
 import { readApi, routes } from './api.ts';
-import { canTrash, useCuration } from './curation.ts';
+import { canEdit, canTrash, useCuration } from './curation.ts';
 import { EditForm } from './EditForm.tsx';
 import type { PublicPhoto } from '../display-api.ts';
 
@@ -104,7 +104,7 @@ export function Lightbox({
   photoHref = routes.photo,
 }: LightboxProps) {
   const curation = useCuration();
-  const editable = curation?.can.edit ?? false;
+  const editable = curation ? canEdit(curation, photo.id) : false;
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);

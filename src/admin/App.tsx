@@ -242,7 +242,7 @@ export function App() {
       // The admin trashes anything, and never records what it added.
       addedHere: () => false,
       can: {
-        edit: true,
+        edit: 'all',
         download: true,
         trash: 'all',
         select: true,

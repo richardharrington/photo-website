@@ -278,7 +278,10 @@ export function UploadPanel({
       // Everything here is on its way in from this browser.
       addedHere: () => addedFrom,
       can: {
-        edit: true,
+        // Unconditionally, and not through `addedHere`, which is false in the
+        // admin: everything here is this browser's in either app
+        // (read-first-photo-view.md #23).
+        edit: 'all',
         download: false,
         trash: 'none',
         select: false,

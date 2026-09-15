@@ -26,7 +26,7 @@ const photo = toPublicPhoto(
 );
 
 const FAMILY_LIBRARY: Capabilities = {
-  edit: true,
+  edit: 'own',
   download: true,
   trash: 'own',
   select: false,
@@ -36,7 +36,7 @@ const FAMILY_LIBRARY: Capabilities = {
   filename: false,
 };
 const FAMILY_TRASH: Capabilities = {
-  edit: false,
+  edit: 'none',
   download: false,
   trash: 'none',
   select: false,
@@ -46,7 +46,7 @@ const FAMILY_TRASH: Capabilities = {
   filename: false,
 };
 const ADMIN_LIBRARY: Capabilities = {
-  edit: true,
+  edit: 'all',
   download: true,
   trash: 'all',
   select: true,
@@ -56,7 +56,7 @@ const ADMIN_LIBRARY: Capabilities = {
   filename: true,
 };
 const ADMIN_TRASH: Capabilities = {
-  edit: false,
+  edit: 'none',
   download: false,
   trash: 'none',
   select: true,

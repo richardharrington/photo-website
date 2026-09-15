@@ -48,7 +48,7 @@ function harness(select: boolean, selected: readonly string[] = []) {
     purge: () => {},
     addedHere: () => false,
     can: {
-      edit: true,
+      edit: 'all',
       download: true,
       trash: 'all',
       select,

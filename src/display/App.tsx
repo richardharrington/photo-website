@@ -98,7 +98,8 @@ export function App() {
       purge: () => {},
       addedHere: (id) => getUploader().addedHere(id),
       can: {
-        edit: true,
+        // Edit and Delete follow one rule (read-first-photo-view.md #22).
+        edit: 'own',
         download: true,
         trash: 'own',
         select: false,

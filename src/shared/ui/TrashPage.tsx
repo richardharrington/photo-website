@@ -234,7 +234,7 @@ export function TrashPage({
       // (family-own-trash.md #6), so every photograph here was.
       addedHere: () => addedFrom,
       can: {
-        edit: false,
+        edit: 'none',
         download: false,
         trash: 'none',
         select: selection !== null,
