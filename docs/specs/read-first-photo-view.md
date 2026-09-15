@@ -3,37 +3,55 @@
 Spec, 2026-09-15. Written after a design interview; the decisions below are
 settled unless marked "implementer's discretion". A separate agent implements
 this, without the interview's context. Where this spec and the code disagree,
-the spec wins. Where it and `docs/design.md`, `docs/decisions.md`, or
-`docs/specs/family-tier.md` disagree, this spec wins and section 9 amends
-them.
+the spec wins. Where it and `docs/design.md`, `docs/decisions.md`,
+`docs/specs/family-tier.md`, or `docs/specs/family-own-trash.md` disagree,
+this spec wins and section 9 amends them.
 
 ## 1. Outcome
 
-Opening a photograph shows it with as little around it as possible: its date,
-its caption, and a row of buttons. Nothing is a field. One of the buttons is
-**Edit**, and it brings up the editing view that exists today — the date,
-time, and caption fields with Save — minus Download.
+Two changes, shipped together.
 
-This holds at every screen width, in both apps, for every listing that can
-edit (both libraries, both Recently added views, and the files still
-uploading in both apps). The trash cannot edit and is unchanged except for the
-date line (decision 3).
+**The photo view opens to read.** Opening a photograph shows it with as little
+around it as possible: its date, its caption, and a row of buttons. Nothing is
+a field. One of the buttons is **Edit**, and it brings up the editing view
+that exists today — the date, time, and caption fields with Save — minus
+Download. This holds at every screen width, in both apps.
 
 Reason: on a phone the edit form sits between the picture and the buttons and
 takes its height straight out of the picture's, so photographs are too small.
 More broadly, the owner misses the plain view the site had before the family
 could edit (family-tier.md): the view people see most of the time should be
 mostly read-only, because it is cleaner to look at. Editing becomes a
-deliberate step.
+deliberate step. This reverses decisions.md #41, which put the form in the
+photo view "always" with "no Edit toggle: editing is what an administrator is
+there for, and a toggle puts a click in front of every correction." The owner
+accepts that click, for the administrator too.
 
-This reverses decisions.md #41, which put the form in the photo view "always"
-with "no Edit toggle: editing is what an administrator is there for, and a
-toggle puts a click in front of every correction." The owner accepts that
-click, for the administrator too.
+**The family edits only what it added.** Edit follows exactly the rule Delete
+already follows: in the family app it is offered, and the server allows it,
+only for a photograph added through the family link from the same browser.
+The administrator edits everything, as today. This reverses
+family-own-trash.md #7 ("Editing is unchanged. Anyone with the family link can
+edit any photograph's date, time, and caption").
+
+What the second change deliberately gives up, accepted by the owner:
+
+- The family can never edit anything already in the library before uploader
+  tokens existed, anything the administrator uploaded, or anything accepted
+  from the Inbox — including a photograph a family member emailed in
+  themselves. Adding from the Inbox happens in the admin app, which never
+  records an uploader, and nothing links an email sender to a browser.
+- A photograph added from one device cannot be edited from another, or after
+  the browser's storage is cleared.
+- Nobody but the administrator can date an undated photograph they did not
+  add. design.md's "Anyone with the family link can later assign or correct a
+  date" goes.
 
 ## 2. Where things stand today
 
 Line numbers are approximate; search for the quoted text.
+
+### 2.1 The photo view
 
 - **One photo view for everything.** `src/shared/ui/Lightbox.tsx` is rendered
   by `PhotoPage.tsx` (library and Recently added, one route per photo),
@@ -41,12 +59,24 @@ Line numbers are approximate; search for the quoted text.
   uploading, local state, no route). Both apps use it.
 - **What it may do comes from the curation context,** `src/shared/ui/curation.ts`.
   `Capabilities` has eight flags; the table in its doc comment (~line 63)
-  lists them per listing. This spec uses `edit`, `download`, `trash` (via
-  `canTrash`), `restore`, `purge`, and `filename`. It adds no flag.
-- **`editable`** (`Lightbox.tsx` ~line 107, `curation?.can.edit ?? false`)
-  decides two things today: the root class `lightbox lightbox--editing`
-  (~line 418), and whether the bottom stack renders `<EditForm>` or the
-  read-only `.lightbox__meta` block (~lines 541–559).
+  lists them per listing. `edit` is a boolean. `trash` is
+  `'all' | 'own' | 'none'`, decided per photograph by
+  `canTrash(curation, photoId)` (~line 121), which for `'own'` asks
+  `curation.addedHere(photoId)`.
+- **`addedHere`** in the family app is `getUploader().addedHere(id)`
+  (`src/display/App.tsx` ~line 99; `src/shared/ui/uploader.ts` ~line 49): the
+  IDs this browser committed, kept in local storage. The admin's answers
+  false. The upload panel's (`Upload.tsx` ~line 276) answers the app's
+  `addedFrom` flag, because everything in it is on its way in from this
+  browser.
+- **Where each listing sets `can.edit: true`:** `src/display/App.tsx`
+  ~line 101, `src/admin/App.tsx` ~line 245, `src/shared/ui/Upload.tsx`
+  ~line 280. `TrashPage.tsx` ~line 237 sets `false`. The only reader is
+  `Lightbox.tsx` ~line 107: `const editable = curation?.can.edit ?? false`.
+- **`editable`** decides two things today: the root class
+  `lightbox lightbox--editing` (~line 418), and whether the bottom stack
+  renders `<EditForm>` or the read-only `.lightbox__meta` block
+  (~lines 541–559).
 - **The read-only block exists already** and is what the trash shows: caption
   paragraph (`.lightbox__caption`) then date paragraph (`.lightbox__date`,
   `formatCaptureDate`, no time), each omitted when absent, and the whole
@@ -81,45 +111,72 @@ Line numbers are approximate; search for the quoted text.
   `.lightbox--editing`: the stage starts at `left: 21rem`, the foot takes a
   fixed 20rem gutter, and the action row goes horizontal.
 
+### 2.2 The server
+
+- **`netlify/functions/lib/curation-routes.ts`** answers the curation routes
+  for both Functions. Ownership for trash, restore, and permanent delete is
+  `reachOf(context)` (~line 187: `{ kind: 'all' }` in admin mode,
+  `{ kind: 'owned', hash }` in display mode with a valid `x-photo-uploader`
+  token, `null` without one) and `reaches(reach, photo)` (~line 193). The
+  check runs **inside** the `mutateCatalog` callback so a conflict retry
+  re-checks against the reloaded catalog; see `handleRestore` (~line 559),
+  which returns `abortMutation(null)` and then the plain 404.
+- **`handleEdit`** (~line 447) does no ownership check: any valid photo ID
+  from either mode is edited through `editPhotoMetadata`
+  (`src/shared/admin-operations.ts` ~line 160).
+- **The dev fixture server** (`config/fixture-server.ts`) does not call
+  `curation-routes.ts`; `handleCuration` (~line 703) reimplements each route
+  over the real mutation functions, with its own `reaches` (~line 717). Its
+  `/edit` branch (~line 857) has no ownership check either.
+- **Fixtures.** `fixtures/catalog.ts`: only the scratch-day photographs
+  (July 4th and 5th, 2026, ~line 63) carry `FIXTURE_UPLOADER_HASH`; every
+  other fixture photograph is owned by nobody.
+
 ## 3. Vocabulary
 
 - **Photo view** — the `Lightbox` component, whatever it is showing.
-- **Editing listing** — a listing whose context has `can.edit`. Today: both
-  libraries and Recently added views, and both apps' files still uploading.
-- **Read view** — what an editing listing's photo view shows on opening: date
-  line, caption, action row. No fields.
+- **Owned** — added through the family link from this browser: the server's
+  `reaches`, the page's `addedHere`. In the admin every photograph counts as
+  reachable; nothing is "owned".
+- **Editable photograph** — one the context can edit: `canEdit(curation, id)`
+  (section 6.4). Every photograph in the admin's library and Recently added;
+  owned photographs in the family's; every file still uploading, in both
+  apps; nothing in either trash.
+- **Read view** — what the photo view shows on opening: date line, caption,
+  action row. No fields.
 - **Edit view** — the form, reached by Edit.
 - **Unsaved** — the form's existing `dirty`: a field differs from the stored
   record.
 - **Narrow / wide** — below / at or above the existing 40rem breakpoint.
-  Nothing in this spec *behaves* differently by width; only layout,
+  Nothing in this spec _behaves_ differently by width; only layout,
   caption order, and the clamp's line count do.
 
 ## 4. Decisions
 
-1. **Every editing listing opens in the read view, at every width, in both
+### 4.1 The read view and the edit view
+
+1. **Every photo view opens in the read view, at every width, in both
    apps.** Supersedes decisions.md #41's "always" and "No Edit toggle".
 
    Rejected: narrow screens only. An iPhone in landscape is wider than 40rem
    (844px for an iPhone 12, 667px for an SE), so a phone would switch
    behaviours on rotation, and the owner wants the clean view on laptops too.
-   Rejected: by device (`isPhoneBrowser()`). Rejected: family only, which
-   would have needed a ninth capability.
+   Rejected: by device (`isPhoneBrowser()`). Rejected: family only.
 
 2. **The read view's action row is Download, Edit, Delete, Photo info**, each
-   as today's capabilities allow, in that order. Edit appears only in an
-   editing listing. So:
+   as the capabilities allow, in that order. Edit appears exactly where
+   `canEdit` is true (decision 22). So:
 
-   | Listing                          | Read view row                             |
-   | -------------------------------- | ----------------------------------------- |
-   | Family library / Recently added  | Download, Edit, Delete (added here only), Photo info |
-   | Admin library / Recently added   | Download, Edit, Delete, Photo info        |
-   | Either app's files uploading     | Edit, Photo info                          |
-   | Either trash                     | Unchanged: Restore, Delete permanently where `can.purge`, Photo info |
+   | Listing                         | Read view row                                                 |
+   | ------------------------------- | ------------------------------------------------------------- |
+   | Family library / Recently added | Owned: Download, Edit, Delete, Photo info. Otherwise: Download, Photo info |
+   | Admin library / Recently added  | Download, Edit, Delete, Photo info                            |
+   | Either app's files uploading    | Edit, Photo info                                              |
+   | Either trash                    | Unchanged: Restore, Delete permanently where `can.purge`, Photo info |
 
-   Photo info stays in the read view because "Added from" exists to explain a
-   missing Delete (family-own-trash.md #4), and that question is asked in the
-   read view.
+   Photo info stays in the read view because "Added from" exists to explain
+   a missing Delete (family-own-trash.md #4) — and now a missing Edit — and
+   that question is asked in the read view.
 
 3. **The date line is the date alone, and "Undated" when there is none.**
    `formatCaptureDate(photo.captureDate)`, never the time; the time stays in
@@ -238,9 +295,9 @@ Line numbers are approximate; search for the quoted text.
     view uses today's editing gutter, and the switch is animated.** The
     `lightbox--editing` class is applied only while in the edit view. The
     read view's stack hangs off `--photo-left` like the trash's does today,
-    with four buttons in its vertical column, Photo info still lowest. The
-    picture slides right when Edit opens (the stage's `left` goes from the
-    page margin to 21rem) and back on return: transition it, about 200ms
+    with up to four buttons in its vertical column, Photo info still lowest.
+    The picture slides right when Edit opens (the stage's `left` goes from
+    the page margin to 21rem) and back on return: transition it, about 200ms
     (implementer's discretion), and not at all under
     `prefers-reduced-motion: reduce`.
 
@@ -253,24 +310,77 @@ Line numbers are approximate; search for the quoted text.
     while editing; that is accepted, since editing is now brief and
     deliberate.
 
+### 4.2 Who may edit
+
+22. **Edit is offered exactly where Delete is, in the family's library and
+    Recently added.** `Capabilities.edit` becomes `'all' | 'own' | 'none'`,
+    with a `canEdit(curation, photoId)` beside `canTrash` that answers the
+    same way. Values:
+
+    | Listing                         | `edit` (was)    | `trash` (unchanged) |
+    | ------------------------------- | --------------- | ------------------- |
+    | Family library / Recently added | `own` (`true`)  | `own`               |
+    | Family uploading                | `all` (`true`)  | `none`              |
+    | Family trash                    | `none` (`false`)| `none`              |
+    | Admin library / Recently added  | `all` (`true`)  | `all`               |
+    | Admin uploading                 | `all` (`true`)  | `none`              |
+    | Admin trash                     | `none` (`false`)| `none`              |
+
+23. **Files still uploading stay editable, in both apps.** Every one of them
+    is on its way in from this browser, so the ownership rule is met; Delete
+    is missing there for a different reason (no catalog record yet). This
+    keeps typing a date or caption while the phone is still uploading. A
+    correction made after that file's commit is an ordinary `/edit` on a
+    photograph whose commit recorded this browser's hash, so the server
+    allows it (decision 24).
+
+    Rejected: no Edit there either, which would have applied "the same rule
+    as Delete" literally and lost the feature.
+
+24. **The server enforces it.** In display mode, `/edit` reaches only an
+    owned photograph, through the same `reachOf` / `reaches` check as trash
+    and restore, run inside the `mutateCatalog` callback. A display-mode edit
+    with no valid token, or of a photograph not owned — live, trashed,
+    unknown, or malformed — is the same plain 404. The ownership check comes
+    **before** body validation, so an invalid date on someone else's
+    photograph is a 404, not a 400: a distinguishable response would be a
+    probe oracle. Admin mode is unchanged. The page hiding Edit is not the
+    reason an edit is refused.
+
+    Rejected: hiding the button only, leaving the route open to a hand-made
+    request. It breaks the rule the trash follows.
+
+25. **What the family cannot edit, it cannot edit anywhere.** Emailed
+    submissions, the pre-token library, admin uploads, and another device's
+    uploads are the administrator's alone to correct (section 1). There is no
+    "unclaimed photographs are editable" exception.
+
+    Rejected: letting the family edit photographs with no uploader hash while
+    protecting other browsers' uploads. The Edit and Delete rules would then
+    differ, which is what the owner asked to avoid.
+
 ## 5. Scenarios
 
-**A family member on an iPhone taps a photo in the library.** The photo fills
+**A family member on an iPhone taps a photo they added.** The photo fills
 most of the screen. Under it: "August 2, 2026", the caption clamped to four
-lines with More if it runs longer, and one row: Download, Edit, Delete (only
-if this phone added it), Photo info. Next/previous arrows are either side of
-the picture. They tap Edit: the picture shrinks, and the form appears with
-Date, Time, Caption, **Save changes** (disabled), **Cancel**, and below it
-Delete and Photo info; the arrows are gone; no keyboard pops up. They tap the
-caption, type, tap Save. The read view returns with the new caption and
-"Saved" under the buttons for a few seconds. They tap next: the next photo,
-read view, no "Saved".
+lines with More if it runs longer, and one row: Download, Edit, Delete, Photo
+info. Next/previous arrows are either side of the picture. They tap Edit: the
+picture shrinks, and the form appears with Date, Time, Caption, **Save
+changes** (disabled), **Cancel**, and below it Delete and Photo info; the
+arrows are gone; no keyboard pops up. They tap the caption, type, tap Save.
+The read view returns with the new caption and "Saved" under the buttons for
+a few seconds. They tap next: the next photo, read view, no "Saved".
+
+**The same person taps a photo someone else added, or one they emailed in.**
+The read view has Download and Photo info only. Photo info says "Added from:
+Another device". A hand-made `/edit` request for it gets the plain 404.
 
 **The same person taps Edit, types, then swipes back.** The photo closes and
 the typing is lost, as today.
 
 **An undated photo with no caption.** The read view shows "Undated" and the
-row; nothing else.
+row; nothing else. In the family app, if this browser did not add it, nobody
+there can date it.
 
 **The administrator on a laptop double-clicks a tile.** The corner layout: the
 filename at the top right, and at the bottom left, right-aligned beside the
@@ -282,7 +392,8 @@ nothing happens, "Unsaved changes" is showing. They click Cancel: the picture
 slides back, the old caption shows. Escape now closes the photo.
 
 **A file still uploading.** Its read view offers Edit and Photo info. Edit
-behaves as above; a date typed there is carried into the commit as today.
+behaves as above; a date typed there is carried into the commit as today, or
+saved as an ordinary edit once the file has committed.
 
 **A photo in either trash.** Exactly as today — Restore, Delete permanently in
 the family's, Photo info — except a photo with no date now says "Undated", and
@@ -290,12 +401,12 @@ narrow puts the date above the caption.
 
 **Keyboard, with focus outside the form:**
 
-| Key                  | Read view                                     | Edit view                                          |
-| -------------------- | --------------------------------------------- | -------------------------------------------------- |
-| Escape               | Close info panel, else close photo            | Close info panel, else nothing if unsaved, else read view |
-| ArrowLeft/Right      | Step (read view on arrival)                   | Nothing                                            |
-| Delete/Backspace     | Delete where `canTrash`                       | Delete where `canTrash`; next photo in read view   |
-| ⌘/Ctrl+Enter         | —                                             | In the caption: Save, if enabled                   |
+| Key              | Read view                          | Edit view                                                 |
+| ---------------- | ---------------------------------- | --------------------------------------------------------- |
+| Escape           | Close info panel, else close photo | Close info panel, else nothing if unsaved, else read view |
+| ArrowLeft/Right  | Step (read view on arrival)        | Nothing                                                   |
+| Delete/Backspace | Delete where `canTrash`            | Delete where `canTrash`; next photo in read view          |
+| ⌘/Ctrl+Enter     | —                                  | In the caption: Save, if enabled                          |
 
 There is no keyboard shortcut for Edit; the owner declined one.
 
@@ -305,6 +416,7 @@ There is no keyboard shortcut for Edit; the owner declined one.
 
 - New state, each keyed by photo ID: `editingFor` (decision 17),
   `savedFor` with its timer (decision 10), `expandedFor` (decision 6).
+  `const editable = curation ? canEdit(curation, photo.id) : false;`
   `const editing = editable && editingFor === photo.id`.
 - Root class: `lightbox--editing` only when `editing`.
 - Bottom stack: `editing ? <EditForm …/> : <read-only block>`. The read-only
@@ -355,6 +467,47 @@ There is no keyboard shortcut for Edit; the owner declined one.
 - The comments on `.lightbox__foot` / `.lightbox__bottom` in the wide rule
   ("Caption, date, Download, Photo info: one column…") gain Edit.
 
+### 6.4 Capabilities, `src/shared/ui/curation.ts`
+
+- `edit: 'all' | 'own' | 'none'`, documented like `trash`.
+- `export function canEdit(curation: Curation, photoId: string): boolean`,
+  the same shape as `canTrash`: `'all'` → true, `'own'` →
+  `curation.addedHere(photoId)`, `'none'` → false. Whether the two share a
+  helper is implementer's discretion.
+- Update the doc comment's table and prose (decision 22), including "Both
+  libraries edit and download".
+- Set the values at `src/display/App.tsx`, `src/admin/App.tsx`,
+  `src/shared/ui/Upload.tsx`, and `TrashPage.tsx` per decision 22. The
+  upload panel's `'all'` is unconditional; do not route it through its
+  `addedHere`, which is false in the admin.
+- The `Curation.edit` implementations do not change; the server refuses.
+
+### 6.5 Server, `netlify/functions/lib/curation-routes.ts`
+
+`handleEdit` takes the whole `CurationRequest`, like `handleRestore`:
+
+1. `const reach = await reachOf(context); if (reach === null) return notFound();`
+2. Read the body; a missing or malformed `photoId` stays the plain 404.
+3. Inside the `mutateCatalog` callback, before `editPhotoMetadata`: if
+   `!reaches(reach, catalog.photos[photoId])`, `return abortMutation(null)`.
+   After the call, `null` → `notFound()`. The check must be inside the
+   callback so a conflict retry re-checks the reloaded catalog.
+4. Validation errors (400) only for a photograph the request reaches.
+
+Update the module's header comment (~line 27), which describes what an
+uploader token reaches, and the `reachOf` section heading ("Which photographs
+a trash or restore may reach").
+
+`CLAUDE.md` is also affected; see section 9.
+
+### 6.6 Fixture server, `config/fixture-server.ts`
+
+The `/edit` branch (~line 857) gets the same rule with the fixture server's
+own `reaches` (~line 717): a tokenless display request or an unowned
+photograph is `sendNotFound`, checked inside the mutation callback and before
+validation. The fixture server must answer exactly what the real Function
+answers (CLAUDE.md, "Local development fake").
+
 ## 7. Traps
 
 - **Two "Cancel" buttons.** The confirm dialog (`Confirm.tsx`) has a Cancel.
@@ -377,24 +530,43 @@ There is no keyboard shortcut for Edit; the owner declined one.
   existing comment ~line 236 explains why).
 - **Captions are plain text.** The clamp must not change how they render:
   no markup, line breaks kept.
+- **The whitelist tests use an unowned photograph for `/edit`.**
+  `tests/unit/curation-routes.test.ts` ~line 111 posts an invalid date for
+  `LIVE_ID` ("Live, and added by nobody") and expects 400 as proof display
+  mode reaches the route; ~line 225 records a display-mode edit of `LIVE_ID`.
+  `tests/unit/fixture-server.test.ts` ~line 86 does the same. After decision
+  24 those are 404s. Switch them to `OWNED_ID` (`scratch-0-a`), which the
+  unit test file already defines, or the equivalent in the fixture test.
+- **The family's e2e edits use unowned photographs.** `display.spec.ts`
+  ~line 696 edits `market`. Family edits must move to the scratch days, and
+  the page must know it added them: see the `addInitScript` that seeds
+  `photo-uploader-token` and `photo-uploaded-ids` (~line 586). Tests on
+  `BASE` (the plain dev display server) that only *read* a caption or date
+  need no ownership, because the read view has no fields.
 - **Fixture counts.** If a test needs a long caption, prefer typing one
-  through the form and restoring it over adding a fixture photo; several
-  tests assert per-day tile counts (e.g. `display.spec.ts`
-  `#d-2026-08-02 .photo-grid__item` toHaveCount(6)).
+  through the form on an owned photograph and restoring it over adding a
+  fixture photograph; several tests assert per-day tile counts (e.g.
+  `display.spec.ts` `#d-2026-08-02 .photo-grid__item` toHaveCount(6)).
 
 ## 8. Tests
 
 ### 8.1 Unit and component (`@vitest-environment happy-dom`)
 
-Extend `tests/unit/curation-capabilities.test.tsx`, or add
-`tests/unit/lightbox-modes.test.tsx` beside it:
+Extend `tests/unit/curation-capabilities.test.tsx` (its capability constants
+change type with decision 22), or add `tests/unit/lightbox-modes.test.tsx`
+beside it:
 
-- Under the family library (added here): no form on opening; Download, Edit,
-  Delete, Photo info present; date line and caption as text. After Edit: the
-  form, no Download, Delete and Photo info present, no Previous/Next
-  buttons.
-- Under the files uploading: read view has Edit and Photo info only.
+- Under the family library, owned (`addedHere` true): no form on opening;
+  Download, Edit, Delete, Photo info present; date line and caption as text.
+  After Edit: the form, no Download, Delete and Photo info present, no
+  Previous/Next buttons.
+- Under the family library, not owned: Download and Photo info; no Edit, no
+  Delete, no form.
+- Under the admin library with `addedHere` false: Edit and Delete present.
+- Under the files uploading, in both apps (including the admin's, where
+  `addedHere` is false): read view has Edit and Photo info only.
 - Under both trashes: no Edit, no form, unchanged actions.
+- `canEdit` for each of `'all'`, `'own'` (both answers), `'none'`.
 - The date line reads "Undated" for a photo with no date; no caption element
   for a photo with none.
 - Save disabled until a field changes; enabled after; disabled again when the
@@ -412,6 +584,22 @@ Extend `tests/unit/curation-capabilities.test.tsx`, or add
 - ArrowRight in the edit view does not call `onStep`.
 - Entering Edit does not focus a field.
 
+`tests/unit/curation-routes.test.ts`, following the trash and restore tests
+(~lines 387–450):
+
+- Display mode edits an owned photograph: 200, stored, audited `display-api`.
+- Display mode, unowned live photograph: 404, catalog unchanged, no audit.
+- Display mode, unowned photograph with an invalid date: 404, not 400.
+- Display mode, no token: 404.
+- Display mode, a photograph that stops being owned between the first read
+  and the conditional write: 404 (the retry re-checks), as the trash test
+  "trashes nothing once the photograph has stopped being owned" does.
+- Admin mode edits an unowned photograph: 200.
+- The whitelist entry and the display-api audit test switched to `OWNED_ID`.
+
+`tests/unit/fixture-server.test.ts`: the same owned/unowned/tokenless cases
+for `/edit`, and its whitelist body switched to an owned photograph.
+
 `tests/unit/edit-form.test.tsx`: `getByLabelText('Capture date')` →
 `'Date'`. `tests/unit/lightbox-info.test.tsx` renders with no context and
 should pass unchanged; confirm it does.
@@ -421,32 +609,38 @@ The clamp's More button cannot be tested under happy-dom (no layout, so
 
 ### 8.2 End to end
 
-`tests/e2e/display.spec.ts`, "the photo view":
+`tests/e2e/display.spec.ts`, "the photo view" (on `BASE`):
 
 - "arrows across day, month, and year boundaries": read `.lightbox__date`
   text ("August 15, 2026" → "August 2, 2026") instead of the field.
 - "keeps the caption visible…": the caption as `.lightbox__caption` text in
   the read view.
 - "puts the chrome in the corners…": split in two. Read view: the corner
-  stack (caption, date, Download, Edit, Photo info) shares a right edge and
-  ends at least 15px short of the picture's derived left edge. Edit view
-  (click Edit): today's assertions — stage below the back link, form above a
-  row of Delete and Photo info, whole stack clear of the picture — plus no
-  Download.
-- "corrects a caption, and it stays corrected": Edit, fill, Save, the read
-  view shows the new caption and "Saved"; reload, read-view caption text.
+  stack (caption, date, Download, Photo info, and Edit where shown) shares a
+  right edge and ends at least 15px short of the picture's derived left
+  edge. Edit view, on an owned scratch photograph with the uploader seeded:
+  today's assertions — stage below the back link, form above a row of Delete
+  and Photo info, whole stack clear of the picture — plus no Download.
+
+`tests/e2e/display.spec.ts`, the family block (`familyBase()`):
+
+- "corrects a caption, and it stays corrected": on an owned scratch
+  photograph. Edit, fill, Save, the read view shows the new caption and
+  "Saved"; reload, read-view caption text. Restore the caption.
+- New: an unowned photograph (`market`) shows no Edit and no Delete, and a
+  `/edit` POST for it with the fixture token is a 404.
 - New: a long caption shows More, clamps, expands to Less, and the expanded
   caption's height is at most half the viewport; stepping and back collapses
   it. Restore the caption afterwards.
-- New: Escape ladder in a real browser, including "unsaved, Escape does
+- New: the Escape ladder in a real browser, including "unsaved, Escape does
   nothing".
 
 `tests/e2e/mobile.spec.ts`:
 
-- "the photo view puts its controls below the photo": Download, Edit, Photo
-  info in one row under the image.
+- "the photo view puts its controls below the photo": Download and Photo
+  info in one row under the image (plus Edit on an owned photograph).
 - New: the picture is taller in the read view than in the edit view on the
-  same photograph — the point of this change.
+  same owned photograph — the point of this change.
 - New: after Edit, no field is focused (`document.activeElement` is not an
   input or textarea).
 
@@ -469,6 +663,7 @@ The clamp's More button cannot be tested under happy-dom (no layout, so
   Download or Delete; Edit, fill, Save.
 - "opens a photo on the signed preview, with no way to edit it": add no Edit
   button.
+- New: the admin sees Edit on a photograph no browser owns (e.g. `market`).
 
 Run `npm run check` and `npm run test:e2e` (all three projects).
 
@@ -478,56 +673,92 @@ Make these in the same change.
 
 ### 9.1 `docs/design.md`
 
+- **Access and privacy model** (~line 46): "Anyone holding it can view, add,
+  and edit photographs, and trash, restore, …" becomes: anyone holding it
+  can view and add photographs, and edit, trash, restore, and permanently
+  delete the photographs added from their own browser.
+- **Family site** intro (~line 281): "add to it, correct it, and move the
+  photographs added from their own browser to the trash and back" becomes
+  "add to it, and correct, trash, and restore the photographs added from
+  their own browser".
+- **Family site**, the in-flight tiles bullet (~line 342): unchanged in
+  substance; a file on its way in is still editable.
 - **Family site**, the bullet beginning "A plain click or tap on a photograph
   opens it" (~line 353): the photo view opens to its date (or "Undated"),
-  its caption clamped with More, and **Download**, **Edit**, **Delete** (only
-  on a photograph added from this browser), and **Photo info**. **Edit**
-  brings up the form — date, time, caption, **Save changes** and **Cancel** —
-  with Delete and Photo info beneath and no Download, and hides previous and
-  next. Save is available once something has changed and returns to the
-  photograph with "Saved"; Cancel discards. Escape leaves a field, then the
-  info panel, then does nothing while an edit is unsaved, then leaves Edit.
-  Closing the photograph still discards. Keep the Delete, Photo info
-  "Added from", and keyboard-ownership sentences.
+  its caption clamped with More, and **Download**, **Edit** and **Delete**
+  (both only on a photograph added from this browser), and **Photo info**.
+  **Edit** brings up the form — date, time, caption, **Save changes** and
+  **Cancel** — with Delete and Photo info beneath and no Download, and hides
+  previous and next. Save is available once something has changed and
+  returns to the photograph with "Saved"; Cancel discards. Escape leaves a
+  field, then the info panel, then does nothing while an edit is unsaved,
+  then leaves Edit. Closing the photograph still discards. "So a missing
+  Delete explains itself" becomes "so a missing Edit and Delete explain
+  themselves". Keep the keyboard-ownership sentences.
 - **Family site**, the bullet beginning "Selecting a photo opens it
   full-size" (~line 440): "the stack described above: the edit form, then
   the actions" becomes "the date, the caption, and the actions; the form
   only after Edit".
+- **Family site**, Undated (~line 458): "Anyone with the family link can
+  later assign or correct a date" becomes "The administrator, or whoever
+  added the photograph from the same browser, can later assign a date."
+- **Family site**, "What the family does not have": add editing a
+  photograph added from another browser, by email, or by the administrator.
 - **Admin site**: no change needed beyond what the family site now says; it
-  is the same photo view.
+  is the same photo view, and the administrator edits everything.
 
 ### 9.2 `docs/decisions.md`
 
-New heading "## The photo view opens to read — 2026-09-15" and entry **96**,
-citing this spec: the owner's reason (section 1), that it reverses #41's
-"always" and "No Edit toggle" at every width in both apps, and the rejected
-alternatives from decisions 1, 6, 13, 14, and 20. Note that #42's "discarded
-silently on … Escape" no longer holds inside the edit view (decision 15).
-Mark #41 and #42 as amended by #96 if the file has a convention for that;
-otherwise the new entry is enough.
+New heading "## The photo view opens to read, and the family edits only what
+it added — 2026-09-15", with two entries citing this spec:
 
-### 9.3 `docs/specs/family-tier.md`
+- **96** — the read view: the owner's reason (section 1), that it reverses
+  #41's "always" and "No Edit toggle" at every width in both apps, and the
+  rejected alternatives from decisions 1, 6, 13, 14, and 20. Note that #42's
+  "discarded silently on … Escape" no longer holds inside the edit view
+  (decision 15).
+- **97** — editing narrowed to ownership: it reverses family-own-trash.md
+  #7, the server enforces it (decision 24, including the check before
+  validation), files uploading stay editable (decision 23), and what the
+  family gives up, including emailed submissions (decision 25).
 
-At the top of section 5.3, one line: "Amended by
-`docs/specs/read-first-photo-view.md`: the lightbox opens read-only, and the
-form is behind Edit."
+Mark #41, #42, and #92 as amended if the file has a convention for that;
+otherwise the new entries are enough.
 
-### 9.4 Code comments
+### 9.3 Specs
 
-The header comments of `Lightbox.tsx` and `EditForm.tsx` (sections 6.1, 6.2),
-and the two CSS comments in section 6.3.
+- `docs/specs/family-tier.md`, top of section 5.3: "Amended by
+  `docs/specs/read-first-photo-view.md`: the lightbox opens read-only, the
+  form is behind Edit, and the family edits only what it added."
+- `docs/specs/family-own-trash.md`: after decision 7, "(Reversed by
+  `docs/specs/read-first-photo-view.md` #22–25: the family edits only what
+  it added.)"; in section 13, strike "Narrowing who may edit" with the same
+  pointer.
+
+### 9.4 `CLAUDE.md`
+
+The paragraph "In display mode a trash, restore, or permanent delete reaches
+only photographs whose `uploaderHash` matches…" gains edit: "an edit, trash,
+restore, or permanent delete".
+
+### 9.5 Code comments
+
+The header comments of `Lightbox.tsx` and `EditForm.tsx` (sections 6.1,
+6.2), the `Capabilities` doc comment (6.4), the `curation-routes.ts` comments
+(6.5), and the two CSS comments in section 6.3.
 
 ## 10. What does not change
 
-- No server, route, Function, Worker, or fixture-server change. Nothing about
-  what may be edited, trashed, or restored.
-- `Capabilities` keeps its eight flags.
+- No new route, and no change to what admin mode may do. No Worker change.
+- `Capabilities` keeps eight flags; only `edit`'s type changes.
+- The upload flow, including a commit's recorded uploader hash and the
+  queue's carry-into-commit edit.
 - Tile gestures in both apps (click-to-select, double-click to open in the
   admin; tap to open in the family app).
 - Photo info's contents, including "Capture date", "Added from", and
   "Emailed by".
-- The confirm dialog, Undo, the advance-after-delete order, and the bulk
-  caption bar.
+- The confirm dialog, Undo, the advance-after-delete order, and the admin's
+  bulk caption bar.
 - The edit form's behaviour when the stored record changes under it
   (decisions.md #89, `edit-form.test.tsx`).
 - The trash's actions.
