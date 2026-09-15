@@ -78,6 +78,56 @@ function captureLine(photo: PublicPhoto): string | null {
   return captureTime ? `${date} at ${formatCaptureTimeForViewer(captureTime)}` : date;
 }
 
+/** The wide read view's caption clamp, when nothing is in its way. */
+const WIDE_CAPTION_LINES = 10;
+/** Never fewer, however little room the previous-photo button leaves. */
+const MIN_CAPTION_LINES = 2;
+/** Space kept between the caption and the previous-photo button, in pixels. */
+const ARROW_CLEARANCE = 8;
+
+/**
+ * How many lines the collapsed caption may show on a wide screen, or null
+ * below the breakpoint, where the stylesheet's own clamp applies.
+ *
+ * The caption column hangs off the picture's left edge in the same margin as
+ * the previous-photo button, which sits halfway down the stage, and the stack
+ * grows upward from the bottom. Where the column reaches sideways under the
+ * button, the caption stops short of it — but always shows two lines, because
+ * on a typical laptop window there is room for none (decisions.md #96). The
+ * caption block's bottom edge does not move as lines come and go, since the
+ * stack is anchored below it, so this settles in one measurement.
+ */
+function captionLinesFor(caption: HTMLElement, dialog: HTMLElement): number | null {
+  if (
+    typeof window.matchMedia !== 'function' ||
+    !window.matchMedia('(min-width: 40rem)').matches
+  ) {
+    return null;
+  }
+  const arrow = dialog.querySelector('.lightbox__nav--previous');
+  const block = caption.parentElement;
+  const foot = caption.closest('.lightbox__foot');
+  if (!arrow || !block || !foot) return WIDE_CAPTION_LINES;
+
+  const style = getComputedStyle(caption);
+  const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5;
+  const arrowBox = arrow.getBoundingClientRect();
+
+  // The column is right-aligned to the stack and at most its max-width wide.
+  const columnLeft = foot.getBoundingClientRect().right - parseFloat(style.maxWidth);
+  if (!(columnLeft < arrowBox.right + ARROW_CLEARANCE)) return WIDE_CAPTION_LINES;
+
+  // A line's worth is kept for More, which sits under the caption in the block.
+  const room =
+    block.getBoundingClientRect().bottom -
+    lineHeight -
+    (arrowBox.bottom + ARROW_CLEARANCE);
+  return Math.min(
+    WIDE_CAPTION_LINES,
+    Math.max(MIN_CAPTION_LINES, Math.floor(room / lineHeight)),
+  );
+}
+
 /**
  * A single photo, filling the screen over the timeline.
  *
@@ -328,20 +378,31 @@ export function Lightbox({
 
   /*
    * Whether the caption is cut short by its clamp, so More appears only when
-   * there is more.
+   * there is more — and, on a wide screen, how many lines the clamp allows.
    *
    * Measured only while collapsed — expanded, it is not clamped, and Less
-   * stays — and re-measured by an observer on the caption itself, because the
-   * clamp's line count changes at the breakpoint and the column's width with
-   * the window.
+   * stays. Re-measured by an observer on the caption, because the clamp's line
+   * count changes at the breakpoint and the column's width with the window, and
+   * on the stage, because the room under the previous-photo button changes
+   * with the window's height. The stage's own observer above is created first,
+   * so `--photo-left` is current by the time this one reads the stack.
    */
   useLayoutEffect(() => {
     const caption = captionRef.current;
-    if (!caption || expanded) return;
-    const measure = () => setClamped(caption.scrollHeight > caption.clientHeight + 1);
+    const dialog = dialogRef.current;
+    const stage = stageRef.current;
+    if (!caption || !dialog || !stage || expanded) return;
+
+    const measure = () => {
+      const lines = captionLinesFor(caption, dialog);
+      if (lines === null) caption.style.removeProperty('--caption-lines');
+      else caption.style.setProperty('--caption-lines', String(lines));
+      setClamped(caption.scrollHeight > caption.clientHeight + 1);
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(caption);
+    observer.observe(stage);
     return () => observer.disconnect();
   }, [photo.id, photo.caption, expanded, editing]);
 

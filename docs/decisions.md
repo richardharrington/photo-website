@@ -1698,6 +1698,16 @@ its ordering, and its URLs are unchanged.
     half the viewport. On a wide screen the picture slides over when Edit
     opens and back when it closes.
 
+    Found in the implementation: on a wide screen the corner stack shares the
+    margin with the previous-photo button, and with four buttons it grew up
+    over the button and took its clicks. The stack's empty space now lets
+    clicks through, and where the caption column reaches sideways under the
+    button the wide clamp stops short of it. It never drops below two lines,
+    by the owner's choice: beside a landscape photograph on a 1280×800 or
+    1440×780 window there is room for none or one, and a strict rule would
+    have put nearly every caption behind More. Those two lines can still
+    cover the button on such a window; the arrow keys step regardless.
+
     Rejected: the read view on narrow screens only, because an iPhone in
     landscape is wider than 40rem and would switch behaviour on rotation; by
     device; and family only. Rejected for long captions: showing them whole,

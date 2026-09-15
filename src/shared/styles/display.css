@@ -782,9 +782,11 @@
      photograph rather than a line running away from it. */
   .lightbox__caption {
     max-width: 9.5rem;
-    /* The column is narrow, so more lines hold about as many words. */
-    -webkit-line-clamp: 10;
-    line-clamp: 10;
+    /* The column is narrow, so more lines hold about as many words: up to
+       ten, and fewer where the component finds the caption would otherwise
+       reach the previous-photo button in the same margin. */
+    -webkit-line-clamp: var(--caption-lines, 10);
+    line-clamp: var(--caption-lines, 10);
   }
 
   .lightbox__caption.lightbox__caption--expanded {

@@ -871,6 +871,61 @@ test.describe('the family can curate', () => {
     }
   });
 
+  test('keeps a long caption beside a landscape photo clear of the previous-photo button', async ({
+    page,
+  }) => {
+    const base = familyBase();
+    // The scratch day's first photograph is landscape, so on these windows the
+    // caption column beside it reaches sideways under the button.
+    const id = scratch().live[0]!;
+    const edit = (caption: string) =>
+      page.request.post(`${base}/api/edit`, {
+        headers: { 'x-photo-uploader': FIXTURE_UPLOADER_TOKEN },
+        data: {
+          photoId: id,
+          date: scratch().path.replaceAll('/', '-'),
+          time: '21:03:11',
+          caption,
+        },
+      });
+    const long = Array.from(
+      { length: 30 },
+      (_, index) => `Line ${index + 1} of a caption beside a landscape photo.`,
+    ).join('\n');
+    expect((await edit(long)).status()).toBe(200);
+
+    try {
+      const caption = page.locator('.lightbox__caption');
+      const previous = page.getByRole('button', { name: 'Previous photo' });
+      const lines = () =>
+        caption.evaluate((node) =>
+          Math.round(
+            node.getBoundingClientRect().height /
+              parseFloat(getComputedStyle(node).lineHeight),
+          ),
+        );
+
+      // Tall enough for a few lines under the button: fewer than ten, and all
+      // of them below it.
+      await page.setViewportSize({ width: 1600, height: 1000 });
+      await page.goto(`${base}/photo/${id}`);
+      await expect(page.locator('.lightbox__more')).toHaveText('More');
+      const shown = await lines();
+      expect(shown).toBeGreaterThan(2);
+      expect(shown).toBeLessThan(10);
+      const arrow = (await previous.boundingBox())!;
+      expect((await caption.boundingBox())!.y).toBeGreaterThanOrEqual(
+        arrow.y + arrow.height,
+      );
+
+      // A laptop-height window has room for none, and still shows two.
+      await page.setViewportSize({ width: 1280, height: 700 });
+      await expect.poll(lines).toBe(2);
+    } finally {
+      expect((await edit('First rocket up.')).status()).toBe(200);
+    }
+  });
+
   test('unwinds Escape one layer at a time, and never over unsaved typing', async ({
     page,
   }) => {
