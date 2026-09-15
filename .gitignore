@@ -17,3 +17,6 @@ dist/
 .DS_Store
 test-results/
 playwright-report/
+
+# local handoff documents and other llm stuff
+docs/specs/.local/
