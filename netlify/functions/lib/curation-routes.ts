@@ -19,6 +19,18 @@
  * (family-tier.md #9); nothing relies on `makeAuditEvent`'s default. It is
  * never a second authorization check — `checkAccess` has already decided the
  * mode before either Function calls this.
+ *
+ * Except in one place. In display mode, trash and restore reach only the
+ * photographs the requesting browser added (docs/specs/family-own-trash.md).
+ * The family app sends a random token in `x-photo-uploader`; a display-mode
+ * commit records its SHA-256 on the photograph, and a display-mode trash
+ * preview, trash confirm, restore, trash listing, and trash count reach only
+ * photographs whose recorded hash matches. Anything else is the plain 404 an
+ * unknown photograph gets, and the trash preview accepts only an explicit ID
+ * list, so a day or a month cannot be swept in (decision 13). Ownership is
+ * re-checked inside each mutation callback, so a retry after a conflicting
+ * write checks the catalog it is actually writing. Admin mode ignores the
+ * header entirely and reaches everything, as it always did (decision 14).
  */
 
 import {
@@ -28,8 +40,16 @@ import {
 } from '../../../src/shared/constants.ts';
 import type { Rendition } from '../../../src/shared/constants.ts';
 import { findByContentHash, trashedPhotos } from '../../../src/shared/catalog.ts';
-import type { DerivativeDescriptor } from '../../../src/shared/catalog.ts';
-import { loadCatalog, mutateCatalog } from '../../../src/shared/catalog-repository.ts';
+import type {
+  Catalog,
+  DerivativeDescriptor,
+  PhotoRecord,
+} from '../../../src/shared/catalog.ts';
+import {
+  abortMutation,
+  loadCatalog,
+  mutateCatalog,
+} from '../../../src/shared/catalog-repository.ts';
 import {
   beginBatch,
   commitPhoto,
@@ -58,6 +78,12 @@ import {
   loadSubmission,
 } from '../../../src/shared/inbox-repository.ts';
 import type { ObjectStore } from '../../../src/shared/store.ts';
+import {
+  UPLOADER_HEADER,
+  hashUploaderToken,
+  isOwnedBy,
+  isUploaderToken,
+} from '../../../src/shared/uploader.ts';
 import { s3Config } from './s3-store.ts';
 import { presignedUploadUrls } from './presign.ts';
 import { issueConfirmation, readConfirmation } from './confirmation.ts';
@@ -75,6 +101,8 @@ import type { AccessMode } from './http.ts';
 interface CurationRequest {
   request: Request;
   store: () => ObjectStore;
+  /** Which link the gate decided this is; `checkAccess` has verified it. */
+  mode: AccessMode;
   /** The link the request came through, for the audit log. */
   via: AuditEvent['via'];
 }
@@ -121,7 +149,55 @@ export async function curationRoute(
   return route.handle({
     request,
     store,
+    mode,
     via: mode === 'admin' ? 'admin-api' : 'display-api',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Which photographs a trash or restore may reach
+// ---------------------------------------------------------------------------
+
+/**
+ * The request's uploader hash in display mode; null in admin mode or when the
+ * header is absent or malformed. The admin link never records or presents one
+ * (family-own-trash.md #3), whatever header arrives.
+ */
+async function uploaderHashOf({
+  request,
+  mode,
+}: CurationRequest): Promise<string | null> {
+  if (mode !== 'display') return null;
+  const token = request.headers.get(UPLOADER_HEADER);
+  return isUploaderToken(token) ? hashUploaderToken(token) : null;
+}
+
+/**
+ * Every photograph in admin mode; in display mode, those this browser added.
+ * Null for a display-mode request with no valid token, which reaches nothing.
+ */
+type Reach = { kind: 'all' } | { kind: 'owned'; hash: string };
+
+async function reachOf(context: CurationRequest): Promise<Reach | null> {
+  if (context.mode === 'admin') return { kind: 'all' };
+  const hash = await uploaderHashOf(context);
+  return hash === null ? null : { kind: 'owned', hash };
+}
+
+function reaches(reach: Reach | null, photo: PhotoRecord): boolean {
+  if (reach === null) return false;
+  return reach.kind === 'all' || isOwnedBy(photo, reach.hash);
+}
+
+/**
+ * The IDs among `ids` that `reach` covers in this catalog. Called inside a
+ * mutation callback, so a retry re-checks against the reloaded catalog.
+ */
+function withinReach(catalog: Catalog, ids: readonly string[], reach: Reach): string[] {
+  if (reach.kind === 'all') return [...ids];
+  return ids.filter((id) => {
+    const photo = catalog.photos[id];
+    return photo !== undefined && reaches(reach, photo);
   });
 }
 
@@ -206,11 +282,16 @@ const TIMESTAMP_SOURCES = new Set([
   'none',
 ]);
 
-async function handleCommit({
-  request,
-  store,
-  via,
-}: CurationRequest): Promise<Response> {
+async function handleCommit(context: CurationRequest): Promise<Response> {
+  const { request, store, mode, via } = context;
+
+  // A family commit is what makes a photograph trashable from its browser, so
+  // one without a token is refused rather than stored unowned by mistake.
+  const uploaderHash = await uploaderHashOf(context);
+  if (mode === 'display' && uploaderHash === null) {
+    return badRequest('An uploader token is required.');
+  }
+
   const body = await readJson<CommitBody>(request);
   if (!body?.photoId || !isValidPhotoId(body.photoId)) {
     return badRequest('A valid photoId is required.');
@@ -278,6 +359,7 @@ async function handleCommit({
         timestampSource: body.timestampSource as never,
         caption: body.caption ?? null,
         submittedBy,
+        uploaderHash,
         batchSeq: body.batchSeq!,
         selectionIndex: body.selectionIndex!,
         derivatives,
@@ -390,23 +472,35 @@ interface PreviewBody {
  *
  * The confirm step never re-runs the query, so a photo committed between
  * preview and confirm cannot be swept in unseen (decisions.md #12).
+ *
+ * In display mode only an explicit ID list is accepted, and the list is cut
+ * to the photographs this browser added; a request that reaches none of them
+ * is the plain 404 (family-own-trash.md #12, #13).
  */
-async function handleTrashPreview({
-  request,
-  store,
-}: CurationRequest): Promise<Response> {
-  const body = await readJson<PreviewBody>(request);
+async function handleTrashPreview(context: CurationRequest): Promise<Response> {
+  const reach = await reachOf(context);
+  if (reach === null) return notFound();
+
+  const body = await readJson<PreviewBody>(context.request);
   if (!body?.selection) return badRequest('A selection is required.');
 
-  const { catalog } = await loadCatalog(store(), nowIso);
-  return issueConfirmation('trash', resolveSelection(catalog, body.selection));
+  const { catalog } = await loadCatalog(context.store(), nowIso);
+  if (reach.kind === 'all') {
+    return issueConfirmation('trash', resolveSelection(catalog, body.selection));
+  }
+
+  const { selection } = body;
+  if (selection.kind !== 'ids' || !Array.isArray(selection.photoIds)) return notFound();
+  const owned = withinReach(catalog, resolveSelection(catalog, selection), reach);
+  if (owned.length === 0) return notFound();
+  return issueConfirmation('trash', owned);
 }
 
-async function handleTrashConfirm({
-  request,
-  store,
-  via,
-}: CurationRequest): Promise<Response> {
+async function handleTrashConfirm(context: CurationRequest): Promise<Response> {
+  const { request, store, via } = context;
+  const reach = await reachOf(context);
+  if (reach === null) return notFound();
+
   const confirmation = await readConfirmation(request, 'trash');
   if (confirmation instanceof Response) return confirmation;
 
@@ -414,8 +508,15 @@ async function handleTrashConfirm({
   const auditId = generateAuditId();
   const at = nowIso();
 
+  // The token already binds the list to what the preview allowed. This is the
+  // write's own check, against the catalog it is writing.
   const outcome = await mutateCatalog(objectStore, { now: nowIso }, (catalog) =>
-    trashPhotos(catalog, confirmation.photoIds, at, auditId),
+    trashPhotos(
+      catalog,
+      withinReach(catalog, confirmation.photoIds, reach),
+      at,
+      auditId,
+    ),
   );
 
   if (outcome.affected.length > 0) {
@@ -435,12 +536,16 @@ interface RestoreBody {
 /**
  * Restore is not gated behind a confirmation: it is the *undo*, and it only
  * ever puts photos back.
+ *
+ * In display mode it reaches only photographs this browser added, including
+ * one the administrator trashed (family-own-trash.md #8). A request naming
+ * photographs of which it reaches none is the plain 404.
  */
-async function handleRestore({
-  request,
-  store,
-  via,
-}: CurationRequest): Promise<Response> {
+async function handleRestore(context: CurationRequest): Promise<Response> {
+  const { request, store, via } = context;
+  const reach = await reachOf(context);
+  if (reach === null) return notFound();
+
   const body = await readJson<RestoreBody>(request);
   if (!Array.isArray(body?.photoIds)) return badRequest('photoIds is required.');
   if (!body.photoIds.every((id) => typeof id === 'string' && isValidPhotoId(id))) {
@@ -451,10 +556,14 @@ async function handleRestore({
   const auditId = generateAuditId();
   const at = nowIso();
 
-  const outcome = await mutateCatalog(objectStore, { now: nowIso }, (catalog) =>
-    restorePhotos(catalog, body.photoIds!, at, auditId),
-  );
+  const requested = body.photoIds;
+  const outcome = await mutateCatalog(objectStore, { now: nowIso }, (catalog) => {
+    const permitted = withinReach(catalog, requested, reach);
+    if (requested.length > 0 && permitted.length === 0) return abortMutation(null);
+    return restorePhotos(catalog, permitted, at, auditId);
+  });
 
+  if (outcome === null) return notFound();
   if (outcome.affected.length > 0) {
     await writeAuditEvent(
       objectStore,
@@ -476,9 +585,13 @@ async function handleRestore({
  * access to a trashed photo: the thumbnail for the grid, and a `display-1280`
  * preview so the trash's photo view has something to show. It never signs a
  * full-resolution URL for one — a trashed photo must not be downloadable.
+ *
+ * In display mode it lists only the photographs this browser added, and an
+ * empty listing without a token (family-own-trash.md #6).
  */
-async function listTrash({ store }: CurationRequest): Promise<Response> {
-  const { catalog } = await loadCatalog(store(), nowIso);
+async function listTrash(context: CurationRequest): Promise<Response> {
+  const reach = await reachOf(context);
+  const { catalog } = await loadCatalog(context.store(), nowIso);
   const key = requiredEnv('ASSET_SIGNING_KEY');
   const workerBase = requiredEnv('WORKER_BASE_URL').replace(/\/+$/, '');
   const expiresAt = nowSeconds() + SIGNED_URL_TTL_SECONDS;
@@ -489,7 +602,7 @@ async function listTrash({ store }: CurationRequest): Promise<Response> {
   };
 
   const items = await Promise.all(
-    trashedPhotos(catalog).map(async (photo) => ({
+    visibleTrash(catalog, reach).map(async (photo) => ({
       photo: toPublicPhoto(photo),
       trashedAt: photo.trashedAt,
       thumbnailUrl: await signedUrl(photo.id, 'thumb'),
@@ -505,9 +618,15 @@ async function listTrash({ store }: CurationRequest): Promise<Response> {
  * Just the number, for the persistent Trash navigation link.
  *
  * Separate from listTrash so the header does not mint a signed thumbnail URL
- * per trashed photo on every page view.
+ * per trashed photo on every page view. Answered rather than refused without
+ * a token, because the family app asks for it on every page load.
  */
-async function trashCount({ store }: CurationRequest): Promise<Response> {
-  const { catalog } = await loadCatalog(store(), nowIso);
-  return json({ count: trashedPhotos(catalog).length });
+async function trashCount(context: CurationRequest): Promise<Response> {
+  const reach = await reachOf(context);
+  const { catalog } = await loadCatalog(context.store(), nowIso);
+  return json({ count: visibleTrash(catalog, reach).length });
+}
+
+function visibleTrash(catalog: Catalog, reach: Reach | null): PhotoRecord[] {
+  return trashedPhotos(catalog).filter((photo) => reaches(reach, photo));
 }

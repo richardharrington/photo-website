@@ -22,7 +22,23 @@ interface Spec {
   landscape?: boolean;
   trashed?: string | null;
   source?: PhotoRecord['timestampSource'];
+  uploaderHash?: string;
 }
+
+/**
+ * The uploader token the family e2e tests put in local storage, so the
+ * scratch-day photographs are theirs to trash and restore
+ * (family-own-trash.md 6.7).
+ */
+export const FIXTURE_UPLOADER_TOKEN = 'feedface'.repeat(8);
+
+/**
+ * `hashUploaderToken(FIXTURE_UPLOADER_TOKEN)`, written out because the digest
+ * is asynchronous and this module is loaded synchronously by the dev server
+ * and by Playwright; `tests/unit/uploader.test.ts` holds the two together.
+ */
+export const FIXTURE_UPLOADER_HASH =
+  '7ea769a144be632425a028cf1e506dc94b0bf376993c2de90641aa6370a2b370';
 
 /**
  * The scratch days: July 4th and 5th, 2026 exist to be broken.
@@ -37,6 +53,10 @@ interface Spec {
  * Three live photos each, so a bulk delete can take some and leave some, plus
  * a trashed one, so each project has something in the trash to restore that no
  * other project will restore out from under it.
+ *
+ * All four were added by the fixture uploader, so the family's tests can trash
+ * and restore them; no other fixture photograph has an uploader hash, which is
+ * the state of everything already in a real library.
  */
 export const SCRATCH_DAYS = ['2026-07-04', '2026-07-05'] as const;
 
@@ -52,6 +72,7 @@ const SCRATCH_SPECS: Spec[] = SCRATCH_DAYS.flatMap((date, day) =>
     caption: index === 0 ? 'First rocket up.' : null,
     // The fourth is trashed: in the catalog, out of every display route.
     trashed: index === 3 ? '2026-08-20T12:00:00.000Z' : null,
+    uploaderHash: FIXTURE_UPLOADER_HASH,
   })),
 );
 
@@ -212,6 +233,7 @@ function toRecord(spec: Spec): PhotoRecord {
     batchSeq: spec.batch,
     selectionIndex: spec.index,
     trashedAt: spec.trashed ?? null,
+    uploaderHash: spec.uploaderHash ?? null,
     createdAt: FIXTURE_UPLOADED_AT,
     updatedAt: FIXTURE_UPLOADED_AT,
     width,

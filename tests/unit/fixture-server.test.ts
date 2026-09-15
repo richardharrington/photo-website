@@ -3,7 +3,7 @@ import type { ServerResponse } from 'node:http';
 import { dispatchApi } from '../../config/fixture-server.ts';
 import type { Body } from '../../config/fixture-server.ts';
 import { CURATION_ROUTES } from '../../netlify/functions/lib/curation-routes.ts';
-import { FIXTURE_PHOTO_IDS } from '../../fixtures/catalog.ts';
+import { FIXTURE_PHOTO_IDS, FIXTURE_UPLOADER_TOKEN } from '../../fixtures/catalog.ts';
 import { RENDITIONS } from '../../src/shared/constants.ts';
 import { ADMIN_ONLY_ROUTES } from './admin-only-routes.ts';
 
@@ -22,7 +22,10 @@ import { ADMIN_ONLY_ROUTES } from './admin-only-routes.ts';
 
 const DISPLAY_BASE = 'dev-display-path';
 const ADMIN_BASE = process.env.ADMIN_PATH || 'dev-admin-path';
+/** Live, and added by nobody. */
 const LIVE_ID = FIXTURE_PHOTO_IDS['beach-early']!;
+/** Live, and added by the fixture uploader. */
+const OWNED_ID = FIXTURE_PHOTO_IDS['scratch-0-a']!;
 
 function fakeResponse() {
   const captured = { status: 0, headers: {} as Record<string, string>, body: '' };
@@ -40,7 +43,14 @@ function fakeResponse() {
   return { res: res as unknown as ServerResponse, captured };
 }
 
-async function call(base: string, method: string, path: string, body: unknown = {}) {
+/** A request carrying the fixture uploader's token unless told otherwise. */
+async function call(
+  base: string,
+  method: string,
+  path: string,
+  body: unknown = {},
+  uploaderToken: string | null = FIXTURE_UPLOADER_TOKEN,
+) {
   const url = new URL(`http://localhost/${base}/api${path}`);
   const { res, captured } = fakeResponse();
   await dispatchApi(
@@ -50,6 +60,7 @@ async function call(base: string, method: string, path: string, body: unknown = 
     body as Body,
     url,
     res,
+    uploaderToken,
   );
   return captured;
 }
@@ -73,7 +84,7 @@ const REACHING: Record<string, unknown> = {
     ),
   },
   'POST /edit': { photoId: LIVE_ID, caption: 'At the beach' },
-  'POST /trash/preview': { selection: { kind: 'ids', photoIds: [LIVE_ID] } },
+  'POST /trash/preview': { selection: { kind: 'ids', photoIds: [OWNED_ID] } },
   'POST /trash/confirm': { photoIds: [] },
   'POST /restore': { photoIds: [] },
 };
@@ -114,5 +125,96 @@ describe('the fixture server', () => {
     expect((await call(ADMIN_BASE, 'GET', '/export')).status).toBe(200);
     expect((await call(ADMIN_BASE, 'GET', '/emails')).status).toBe(200);
     expect((await call(ADMIN_BASE, 'GET', '/inbox/count')).status).toBe(200);
+  });
+});
+
+/**
+ * The family's trash reaches only what its browser added, here as in the real
+ * Function (family-own-trash.md 6.6). The fixture is the more permissive twin
+ * that has hidden bugs before, so it gets the same refusals asserted.
+ */
+describe("the fixture server's family trash", () => {
+  const preview = (ids: string[]) => ({ selection: { kind: 'ids', photoIds: ids } });
+
+  it('refuses a preview of a photograph this browser did not add, as an unknown path', async () => {
+    const refused = await call(
+      DISPLAY_BASE,
+      'POST',
+      '/trash/preview',
+      preview([LIVE_ID]),
+    );
+    const unknown = await call(
+      DISPLAY_BASE,
+      'POST',
+      '/no-such-route',
+      preview([LIVE_ID]),
+    );
+    expect(refused).toEqual(unknown);
+    expect(refused.status).toBe(404);
+  });
+
+  it('refuses a preview without a token, and a day even when it is all owned', async () => {
+    expect(
+      (await call(DISPLAY_BASE, 'POST', '/trash/preview', preview([OWNED_ID]), null))
+        .status,
+    ).toBe(404);
+    expect(
+      (
+        await call(DISPLAY_BASE, 'POST', '/trash/preview', {
+          selection: { kind: 'day', year: 2026, month: 7, day: 4 },
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  it('refuses a restore of a photograph this browser did not add', async () => {
+    expect(
+      (await call(DISPLAY_BASE, 'POST', '/restore', { photoIds: [LIVE_ID] })).status,
+    ).toBe(404);
+  });
+
+  it('refuses a family commit without a token', async () => {
+    const response = await call(DISPLAY_BASE, 'POST', '/commit', {}, null);
+    expect(response.status).toBe(400);
+    expect(JSON.parse(response.body)).toEqual({
+      error: 'An uploader token is required.',
+    });
+  });
+
+  it('filters the listing and the count to what this browser added', async () => {
+    const ids = async (base: string, token: string | null) => {
+      const listing = await call(base, 'GET', '/trash', undefined, token);
+      const count = await call(base, 'GET', '/trash/count', undefined, token);
+      return {
+        ids: (JSON.parse(listing.body) as { items: { photo: { id: string } }[] }).items
+          .map((item) => item.photo.id)
+          .sort(),
+        count: (JSON.parse(count.body) as { count: number }).count,
+      };
+    };
+
+    // Put something nobody added in the trash, through the admin base, and
+    // take it out again afterwards: this store is shared by the whole file.
+    const trashed = await call(
+      ADMIN_BASE,
+      'POST',
+      '/trash/preview',
+      preview([LIVE_ID]),
+    );
+    await call(ADMIN_BASE, 'POST', '/trash/confirm', JSON.parse(trashed.body));
+    try {
+      const family = await ids(DISPLAY_BASE, FIXTURE_UPLOADER_TOKEN);
+      const admin = await ids(ADMIN_BASE, null);
+
+      expect(family.ids).not.toContain(LIVE_ID);
+      expect(family.count).toBe(family.ids.length);
+      expect(admin.ids).toContain(LIVE_ID);
+      expect(admin.ids).toEqual(expect.arrayContaining(family.ids));
+      expect(admin.count).toBe(family.count + 1);
+
+      expect(await ids(DISPLAY_BASE, null)).toEqual({ ids: [], count: 0 });
+    } finally {
+      await call(ADMIN_BASE, 'POST', '/restore', { photoIds: [LIVE_ID] });
+    }
   });
 });

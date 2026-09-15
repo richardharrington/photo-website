@@ -6,6 +6,10 @@ import {
 } from '../../src/shared/uploader.ts';
 import { generateUploaderToken } from '../../src/shared/ids.ts';
 import { makePhoto } from '../../fixtures/photos.ts';
+import {
+  FIXTURE_UPLOADER_HASH,
+  FIXTURE_UPLOADER_TOKEN,
+} from '../../fixtures/catalog.ts';
 
 /**
  * The rules that decide which browser added a photograph
@@ -47,6 +51,11 @@ describe('generateUploaderToken', () => {
 describe('hashUploaderToken', () => {
   it('is the SHA-256 of the token, in lowercase hex', async () => {
     expect(await hashUploaderToken(TOKEN)).toBe(TOKEN_HASH);
+  });
+
+  it("matches the fixture's written-out hash of its token", async () => {
+    expect(isUploaderToken(FIXTURE_UPLOADER_TOKEN)).toBe(true);
+    expect(await hashUploaderToken(FIXTURE_UPLOADER_TOKEN)).toBe(FIXTURE_UPLOADER_HASH);
   });
 });
 

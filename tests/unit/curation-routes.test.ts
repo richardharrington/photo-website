@@ -8,10 +8,17 @@ import {
 } from '../../netlify/functions/lib/http.ts';
 import type { AccessMode } from '../../netlify/functions/lib/http.ts';
 import { InMemoryObjectStore } from '../../fixtures/in-memory-store.ts';
-import { FIXTURE_PHOTO_IDS, fixtureCatalog } from '../../fixtures/catalog.ts';
-import { R2_KEYS } from '../../src/shared/constants.ts';
+import {
+  FIXTURE_PHOTO_IDS,
+  FIXTURE_UPLOADER_HASH,
+  FIXTURE_UPLOADER_TOKEN,
+  fixtureCatalog,
+} from '../../fixtures/catalog.ts';
+import { R2_KEYS, RENDITIONS, photoObjectKey } from '../../src/shared/constants.ts';
 import { encodeJson } from '../../src/shared/store.ts';
 import type { AuditEvent } from '../../src/shared/audit.ts';
+import type { Catalog } from '../../src/shared/catalog.ts';
+import { UPLOADER_HEADER } from '../../src/shared/uploader.ts';
 import { ADMIN_ONLY_ROUTES as ADMIN_ONLY } from './admin-only-routes.ts';
 
 /**
@@ -30,8 +37,13 @@ import { ADMIN_ONLY_ROUTES as ADMIN_ONLY } from './admin-only-routes.ts';
  */
 
 const GATE_SECRET = 'test-gate-secret';
+/** Live, and added by nobody: no uploader hash. */
 const LIVE_ID = FIXTURE_PHOTO_IDS['beach-early']!;
+/** Live, and added by the fixture uploader. */
+const OWNED_ID = FIXTURE_PHOTO_IDS['scratch-0-a']!;
+/** Trashed, and added by the fixture uploader. */
 const TRASHED_ID = FIXTURE_PHOTO_IDS['deleted-0']!;
+const OTHER_TRASHED_ID = FIXTURE_PHOTO_IDS['deleted-1']!;
 
 let store: InMemoryObjectStore;
 
@@ -61,11 +73,17 @@ function handlerFor(mode: AccessMode) {
     : createAdminHandler(() => store);
 }
 
+/**
+ * A request as the gate forwards it. It carries the fixture uploader's token
+ * unless told otherwise, as the family app always does; the admin link
+ * ignores it.
+ */
 function gated(
   mode: AccessMode,
   method: string,
   path: string,
   body?: unknown,
+  uploaderToken: string | null = FIXTURE_UPLOADER_TOKEN,
 ): Request {
   return new Request(`https://photos.example.test/.netlify/functions/${mode}${path}`, {
     method,
@@ -73,6 +91,7 @@ function gated(
       [ACCESS_MODE_HEADER]: mode,
       [INTERNAL_SECRET_HEADER]: GATE_SECRET,
       'content-type': 'application/json',
+      ...(uploaderToken === null ? {} : { [UPLOADER_HEADER]: uploaderToken }),
     },
     body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
   });
@@ -162,9 +181,10 @@ describe('display mode', () => {
     const handler = handlerFor('display');
     const preview = await handler(
       gated('display', 'POST', '/trash/preview', {
-        selection: { kind: 'ids', photoIds: [LIVE_ID] },
+        selection: { kind: 'ids', photoIds: [OWNED_ID] },
       }),
     );
+    expect(preview.status).toBe(200);
     const token = await preview.json();
 
     const admin = handlerFor('admin');
@@ -206,5 +226,297 @@ describe('the audit log', () => {
     expect(await auditEvents()).toEqual([
       expect.objectContaining({ action: 'metadata-change', via: 'display-api' }),
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The family trashes only what it added (family-own-trash.md 6.5, 11.1)
+// ---------------------------------------------------------------------------
+
+function catalogInStore(): Catalog {
+  return store.readJson<Catalog>(R2_KEYS.catalog)!;
+}
+
+function setUploaderHash(id: string, uploaderHash: string | null): void {
+  const catalog = catalogInStore();
+  catalog.photos[id] = { ...catalog.photos[id]!, uploaderHash };
+  store.seed(R2_KEYS.catalog, encodeJson(catalog));
+}
+
+const isTrashed = (id: string) => catalogInStore().photos[id]!.trashedAt !== null;
+
+function previewOf(ids: string[]) {
+  return { selection: { kind: 'ids', photoIds: ids } };
+}
+
+/** Move photographs to the trash through the admin link. */
+async function adminTrash(...ids: string[]): Promise<void> {
+  const admin = handlerFor('admin');
+  const preview = await admin(gated('admin', 'POST', '/trash/preview', previewOf(ids)));
+  const confirm = await admin(
+    gated('admin', 'POST', '/trash/confirm', await preview.json()),
+  );
+  expect((await confirm.json()).count).toBe(ids.length);
+}
+
+/**
+ * The same request sent to a path that does not exist, through the same
+ * handler with the same headers: what every refusal must be identical to.
+ */
+async function refusedLikeAnUnknownPath(
+  path: string,
+  body: unknown,
+  uploaderToken: string | null = FIXTURE_UPLOADER_TOKEN,
+) {
+  const handler = handlerFor('display');
+  const refused = await snapshot(
+    await handler(gated('display', 'POST', path, body, uploaderToken)),
+  );
+  const unknown = await snapshot(
+    await handler(gated('display', 'POST', '/no-such-route', body, uploaderToken)),
+  );
+  expect(refused).toEqual(unknown);
+  expect(refused.status).toBe(404);
+}
+
+describe('a commit', () => {
+  const NEW_ID = 'c'.repeat(32);
+  const body = {
+    photoId: NEW_ID,
+    contentHash: 'e'.repeat(64),
+    originalFilename: 'new.jpg',
+    sourceMimeType: 'image/jpeg',
+    timestampSource: 'none',
+    batchSeq: 1,
+    selectionIndex: 0,
+    derivatives: Object.fromEntries(
+      RENDITIONS.map((rendition) => [rendition, { width: 10, height: 10, bytes: 10 }]),
+    ),
+  };
+
+  beforeEach(() => {
+    for (const rendition of RENDITIONS) {
+      store.seed(photoObjectKey(NEW_ID, rendition), new Uint8Array([1]));
+    }
+  });
+
+  it('through the family link without a token is refused, and stores nothing', async () => {
+    const response = await handlerFor('display')(
+      gated('display', 'POST', '/commit', body, null),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'An uploader token is required.' });
+    expect(catalogInStore().photos[NEW_ID]).toBeUndefined();
+  });
+
+  it('through the family link records the hash of its token, and nothing else does', async () => {
+    const response = await handlerFor('display')(
+      gated('display', 'POST', '/commit', body),
+    );
+    expect(response.status).toBe(200);
+    const reply = await response.text();
+
+    expect(catalogInStore().photos[NEW_ID]!.uploaderHash).toBe(FIXTURE_UPLOADER_HASH);
+    // Not the reply every page may see, and not the audit log kept forever.
+    expect(reply).not.toContain(FIXTURE_UPLOADER_HASH);
+    const listed = await store.list(R2_KEYS.auditPrefix);
+    expect(listed).toHaveLength(1);
+    const event = JSON.stringify(store.readJson(listed[0]!.key));
+    expect(event).not.toContain(FIXTURE_UPLOADER_HASH);
+    expect(event).not.toContain(FIXTURE_UPLOADER_TOKEN);
+  });
+
+  it('through the admin link records no hash, whatever header arrives', async () => {
+    const response = await handlerFor('admin')(gated('admin', 'POST', '/commit', body));
+    expect(response.status).toBe(200);
+    expect(catalogInStore().photos[NEW_ID]!.uploaderHash).toBeNull();
+  });
+});
+
+describe("in display mode, the family's trash", () => {
+  describe('preview', () => {
+    it.each([
+      ['added from another browser', OWNED_ID, 'other'],
+      ['added by nobody', LIVE_ID, 'token'],
+      ['asked for with no token', OWNED_ID, 'none'],
+      ['asked for with a malformed token', OWNED_ID, 'malformed'],
+    ] as const)('of a photograph %s is the plain 404', async (_name, id, presented) => {
+      if (presented === 'other') setUploaderHash(id, 'f'.repeat(64));
+      const token =
+        presented === 'none'
+          ? null
+          : presented === 'malformed'
+            ? FIXTURE_UPLOADER_TOKEN.toUpperCase()
+            : FIXTURE_UPLOADER_TOKEN;
+
+      await refusedLikeAnUnknownPath('/trash/preview', previewOf([id]), token);
+    });
+
+    it.each([
+      ['day', { kind: 'day', year: 2026, month: 7, day: 4 }],
+      ['month', { kind: 'month', year: 2026, month: 7 }],
+      ['year', { kind: 'year', year: 2026 }],
+    ])(
+      'of a %s is the plain 404, even when this browser added all of it',
+      async (_kind, selection) => {
+        // July 4th is the fixture uploader's scratch day, every photograph owned.
+        await refusedLikeAnUnknownPath('/trash/preview', { selection });
+      },
+    );
+
+    it('is cut to the photographs this browser added', async () => {
+      const response = await handlerFor('display')(
+        gated('display', 'POST', '/trash/preview', previewOf([OWNED_ID, LIVE_ID])),
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ photoIds: [OWNED_ID], count: 1 });
+    });
+  });
+
+  describe('confirm', () => {
+    async function preview(ids: string[]) {
+      const response = await handlerFor('display')(
+        gated('display', 'POST', '/trash/preview', previewOf(ids)),
+      );
+      expect(response.status).toBe(200);
+      return response.json();
+    }
+
+    it('trashes an owned photograph', async () => {
+      const token = await preview([OWNED_ID]);
+      const response = await handlerFor('display')(
+        gated('display', 'POST', '/trash/confirm', token),
+      );
+      expect(await response.json()).toEqual({ trashed: [OWNED_ID], count: 1 });
+      expect(isTrashed(OWNED_ID)).toBe(true);
+    });
+
+    it('trashes nothing once the photograph has stopped being owned', async () => {
+      const token = await preview([OWNED_ID]);
+      setUploaderHash(OWNED_ID, 'f'.repeat(64));
+
+      const response = await handlerFor('display')(
+        gated('display', 'POST', '/trash/confirm', token),
+      );
+      expect(await response.json()).toEqual({ trashed: [], count: 0 });
+      expect(isTrashed(OWNED_ID)).toBe(false);
+    });
+
+    it('re-checks ownership when a conflicting write forces a retry', async () => {
+      const token = await preview([OWNED_ID]);
+      // The first attempt read an owned photograph; the write it then tries
+      // loses to one that changes that, and the retry must see the change.
+      store.onBeforeConditionalWrite = () => {
+        store.onBeforeConditionalWrite = null;
+        setUploaderHash(OWNED_ID, 'f'.repeat(64));
+      };
+
+      const response = await handlerFor('display')(
+        gated('display', 'POST', '/trash/confirm', token),
+      );
+      expect(await response.json()).toEqual({ trashed: [], count: 0 });
+      expect(isTrashed(OWNED_ID)).toBe(false);
+    });
+
+    it('without a token is the plain 404', async () => {
+      const token = await preview([OWNED_ID]);
+      await refusedLikeAnUnknownPath('/trash/confirm', token, null);
+      expect(isTrashed(OWNED_ID)).toBe(false);
+    });
+  });
+
+  describe('restore', () => {
+    it('of a photograph this browser did not add is the plain 404', async () => {
+      await adminTrash(LIVE_ID);
+      await refusedLikeAnUnknownPath('/restore', { photoIds: [LIVE_ID] });
+      expect(isTrashed(LIVE_ID)).toBe(true);
+    });
+
+    it('without a token is the plain 404', async () => {
+      await refusedLikeAnUnknownPath('/restore', { photoIds: [TRASHED_ID] }, null);
+      expect(isTrashed(TRASHED_ID)).toBe(true);
+    });
+
+    it('puts back an owned photograph, including one the administrator trashed', async () => {
+      await adminTrash(OWNED_ID, LIVE_ID);
+
+      const response = await handlerFor('display')(
+        gated('display', 'POST', '/restore', { photoIds: [OWNED_ID, LIVE_ID] }),
+      );
+      expect(await response.json()).toEqual({ restored: [OWNED_ID], count: 1 });
+      expect(isTrashed(OWNED_ID)).toBe(false);
+      expect(isTrashed(LIVE_ID)).toBe(true);
+    });
+  });
+
+  describe('listing and count', () => {
+    beforeEach(async () => {
+      // Something in the trash this browser did not add.
+      await adminTrash(LIVE_ID);
+    });
+
+    async function listed(mode: AccessMode, token: string | null) {
+      const handler = handlerFor(mode);
+      const listing = await handler(gated(mode, 'GET', '/trash', undefined, token));
+      const count = await handler(gated(mode, 'GET', '/trash/count', undefined, token));
+      const { items } = (await listing.json()) as {
+        items: { photo: { id: string } }[];
+      };
+      return {
+        ids: items.map((item) => item.photo.id).sort(),
+        count: ((await count.json()) as { count: number }).count,
+      };
+    }
+
+    it('include only the photographs this browser added', async () => {
+      expect(await listed('display', FIXTURE_UPLOADER_TOKEN)).toEqual({
+        ids: [TRASHED_ID, OTHER_TRASHED_ID].sort(),
+        count: 2,
+      });
+    });
+
+    it('are empty without a token, rather than refused', async () => {
+      expect(await listed('display', null)).toEqual({ ids: [], count: 0 });
+    });
+  });
+});
+
+describe('in admin mode, nothing about the trash changed', () => {
+  it('previews any photograph and any selection kind', async () => {
+    const admin = handlerFor('admin');
+    const byId = await admin(
+      gated('admin', 'POST', '/trash/preview', previewOf([LIVE_ID])),
+    );
+    expect(await byId.json()).toMatchObject({ photoIds: [LIVE_ID] });
+
+    const byDay = await admin(
+      gated('admin', 'POST', '/trash/preview', {
+        selection: { kind: 'day', year: 2026, month: 7, day: 4 },
+      }),
+    );
+    expect(await byDay.json()).toMatchObject({ count: 3 });
+  });
+
+  it('trashes and restores a photograph another browser added', async () => {
+    setUploaderHash(OWNED_ID, 'f'.repeat(64));
+    await adminTrash(OWNED_ID, LIVE_ID);
+
+    const response = await handlerFor('admin')(
+      gated('admin', 'POST', '/restore', { photoIds: [OWNED_ID, LIVE_ID] }),
+    );
+    expect(await response.json()).toEqual({ restored: [OWNED_ID, LIVE_ID], count: 2 });
+  });
+
+  it('lists and counts every trashed photograph, with or without a token', async () => {
+    await adminTrash(LIVE_ID);
+    for (const token of [FIXTURE_UPLOADER_TOKEN, null]) {
+      const admin = handlerFor('admin');
+      const count = await admin(
+        gated('admin', 'GET', '/trash/count', undefined, token),
+      );
+      expect(await count.json()).toEqual({ count: 3 });
+      const listing = await admin(gated('admin', 'GET', '/trash', undefined, token));
+      expect(((await listing.json()) as { items: unknown[] }).items).toHaveLength(3);
+    }
   });
 });

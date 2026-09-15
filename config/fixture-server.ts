@@ -21,8 +21,12 @@ import {
   toPublicPhoto,
 } from '../src/shared/display-api.ts';
 import { getLivePhoto, livePhotos, trashedPhotos } from '../src/shared/catalog.ts';
-import type { Catalog } from '../src/shared/catalog.ts';
-import { loadCatalog, mutateCatalog } from '../src/shared/catalog-repository.ts';
+import type { Catalog, PhotoRecord } from '../src/shared/catalog.ts';
+import {
+  abortMutation,
+  loadCatalog,
+  mutateCatalog,
+} from '../src/shared/catalog-repository.ts';
 import {
   applyCaptions,
   beginBatch,
@@ -77,6 +81,12 @@ import {
 } from '../src/shared/submissions.ts';
 import type { Submission } from '../src/shared/submissions.ts';
 import { downloadFilenameFor } from '../src/shared/filename.ts';
+import {
+  UPLOADER_HEADER,
+  hashUploaderToken,
+  isOwnedBy,
+  isUploaderToken,
+} from '../src/shared/uploader.ts';
 import { baseSecurityHeaders } from '../src/shared/headers.ts';
 
 const store = new InMemoryObjectStore();
@@ -683,17 +693,35 @@ async function handleInbox(
  * against a route production refuses, and no fewer, which is the bug
  * `read-routes.ts` records. `tests/unit/fixture-server.test.ts` holds it to
  * that list in both directions.
+ *
+ * It applies the same display-mode ownership rule too (family-own-trash.md
+ * 6.5): the family's trash, count, preview, confirm, and restore reach only
+ * photographs whose uploader hash matches the request's token, and a family
+ * commit without a token is refused. A dev server that let the family trash
+ * anything would hide exactly the bug that rule exists to prevent.
  */
 async function handleCuration(
   route: string,
   method: string,
   body: Body,
   res: ServerResponse,
+  mode: 'display' | 'admin',
+  uploaderToken: string | null,
 ): Promise<boolean> {
+  const uploaderHash =
+    mode === 'display' && isUploaderToken(uploaderToken)
+      ? await hashUploaderToken(uploaderToken)
+      : null;
+  /** A display-mode request with no valid token reaches nothing. */
+  const tokenless = mode === 'display' && uploaderHash === null;
+  const reaches = (photo: PhotoRecord | undefined): boolean =>
+    photo !== undefined && (mode === 'admin' || isOwnedBy(photo, uploaderHash));
+
   if (method === 'GET') {
     if (route === '/trash') {
       const catalog = await currentCatalog();
       const items = trashedPhotos(catalog)
+        .filter(reaches)
         .map((photo) => ({
           photo: toPublicPhoto(photo),
           trashedAt: photo.trashedAt,
@@ -712,7 +740,9 @@ async function handleCuration(
     }
 
     if (route === '/trash/count') {
-      sendJson(res, 200, { count: trashedPhotos(await currentCatalog()).length });
+      sendJson(res, 200, {
+        count: trashedPhotos(await currentCatalog()).filter(reaches).length,
+      });
       return true;
     }
 
@@ -762,6 +792,10 @@ async function handleCuration(
     }
 
     case '/commit': {
+      if (tokenless) {
+        sendBadRequest(res, 'An uploader token is required.');
+        return true;
+      }
       const auditId = generateAuditId();
       const at = now();
 
@@ -797,6 +831,7 @@ async function handleCuration(
             timestampSource: body['timestampSource'] as never,
             caption: (body['caption'] as string | null) ?? null,
             submittedBy,
+            uploaderHash,
             batchSeq: Number(body['batchSeq']),
             selectionIndex: Number(body['selectionIndex']),
             derivatives: body['derivatives'] as never,
@@ -836,8 +871,19 @@ async function handleCuration(
     }
 
     case '/trash/preview': {
+      const selection = body['selection'] as SelectionQuery;
+      if (tokenless || (mode === 'display' && selection?.kind !== 'ids')) {
+        sendNotFound(res);
+        return true;
+      }
       const catalog = await currentCatalog();
-      const photoIds = resolveSelection(catalog, body['selection'] as SelectionQuery);
+      const photoIds = resolveSelection(catalog, selection).filter((id) =>
+        reaches(catalog.photos[id]),
+      );
+      if (mode === 'display' && photoIds.length === 0) {
+        sendNotFound(res);
+        return true;
+      }
       sendJson(res, 200, {
         photoIds,
         count: photoIds.length,
@@ -850,19 +896,38 @@ async function handleCuration(
     }
 
     case '/trash/confirm': {
+      if (tokenless) {
+        sendNotFound(res);
+        return true;
+      }
       const ids = (body['photoIds'] as string[]) ?? [];
       const outcome = await mutateCatalog(store, context, (catalog) =>
-        trashPhotos(catalog, ids, now(), generateAuditId()),
+        trashPhotos(
+          catalog,
+          ids.filter((id) => reaches(catalog.photos[id])),
+          now(),
+          generateAuditId(),
+        ),
       );
       sendJson(res, 200, { trashed: outcome.affected, count: outcome.affected.length });
       return true;
     }
 
     case '/restore': {
+      if (tokenless) {
+        sendNotFound(res);
+        return true;
+      }
       const ids = (body['photoIds'] as string[]) ?? [];
-      const outcome = await mutateCatalog(store, context, (catalog) =>
-        restorePhotos(catalog, ids, now(), generateAuditId()),
-      );
+      const outcome = await mutateCatalog(store, context, (catalog) => {
+        const permitted = ids.filter((id) => reaches(catalog.photos[id]));
+        if (ids.length > 0 && permitted.length === 0) return abortMutation(null);
+        return restorePhotos(catalog, permitted, now(), generateAuditId());
+      });
+      if (outcome === null) {
+        sendNotFound(res);
+        return true;
+      }
       sendJson(res, 200, {
         restored: outcome.affected,
         count: outcome.affected.length,
@@ -988,7 +1053,8 @@ async function handleAdmin(
     }
   }
 
-  if (await handleCuration(route, method, body, res)) return true;
+  // The admin link ignores an uploader token, as the real Function does.
+  if (await handleCuration(route, method, body, res, 'admin', null)) return true;
 
   // More permissive than production, deliberately and only for the admin: an
   // unrecognized admin GET falls through to the display projections.
@@ -1039,6 +1105,7 @@ async function handle(
   const api = /^\/([^/]+)\/api(\/.*)?$/.exec(path);
   if (!api) return false;
 
+  const uploader = req.headers[UPLOADER_HEADER];
   return dispatchApi(
     api[1]!,
     api[2] ?? '/',
@@ -1046,6 +1113,7 @@ async function handle(
     (await readBody(req)) as Body,
     url,
     res,
+    typeof uploader === 'string' ? uploader : null,
   );
 }
 
@@ -1058,6 +1126,9 @@ async function handle(
  * link (family-tier.md #1): it answers the curation routes and the reads, and
  * never calls `handleAdmin` for anything, so an admin-only route under it is
  * the plain 404 here as it is in production.
+ *
+ * `uploaderToken` is the request's `x-photo-uploader` header, which the gate
+ * passes through unchanged in production.
  */
 export async function dispatchApi(
   base: string,
@@ -1066,6 +1137,7 @@ export async function dispatchApi(
   body: Body,
   url: URL,
   res: ServerResponse,
+  uploaderToken: string | null,
 ): Promise<boolean> {
   const isAdmin = base === (process.env.ADMIN_PATH || 'dev-admin-path');
 
@@ -1075,7 +1147,9 @@ export async function dispatchApi(
     return true;
   }
 
-  if (await handleCuration(route, method, body, res)) return true;
+  if (await handleCuration(route, method, body, res, 'display', uploaderToken)) {
+    return true;
+  }
   if (method === 'GET' && (await handleDisplay(route, res))) return true;
 
   sendNotFound(res);

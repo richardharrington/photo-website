@@ -88,6 +88,10 @@ Display mode may mutate: it reaches the curation routes in
 `netlify/functions/lib/curation-routes.ts` and nothing admin-only. The route
 lists in that module and in `admin.ts` are the tier; a test asserts them.
 
+In display mode a trash or restore reaches only photographs whose
+`uploaderHash` matches the request's `x-photo-uploader` token
+(`src/shared/uploader.ts`); anything else is the plain 404.
+
 `netlify/edge-functions/gate.ts` runs before everything and is the only thing
 that assigns an access mode. It forwards `x-photo-access-mode` plus
 `x-photo-gate-secret` (`INTERNAL_GATE_SECRET`); the Functions re-verify both in
