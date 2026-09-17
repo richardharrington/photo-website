@@ -64,7 +64,10 @@ no-index directives. The Worker may use its default `workers.dev` URL; no custom
 domain is required. To answer "is this photo trashed?" it reads
 `catalog/current.json` and caches it for about 60 seconds, so it does not pay a
 catalog read per image request; a trashed photo's URLs may therefore serve for
-up to about a minute, which the design accepts.
+up to about a minute, which the design accepts. The cache is trusted only when
+it has a photo: a photo it lacks makes the Worker read the catalog again (at
+most once a second) before refusing, so a photograph committed a moment ago
+is served at once (decisions.md #99).
 
 ## Repository structure
 

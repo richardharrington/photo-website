@@ -103,7 +103,60 @@ function notFound(): Response {
 // Catalog cache
 // ---------------------------------------------------------------------------
 
-let cachedCatalog: { catalog: Catalog; loadedAtMs: number } | null = null;
+/**
+ * A catalog read, finished or in flight.
+ *
+ * `startedAtMs` is the clock, for the cache window and the re-read interval.
+ * `startedAfter` is the request counter below, which is what says whether the
+ * read began after a given request arrived — the Workers clock stands still
+ * between I/O, so two timestamps cannot tell that apart.
+ */
+interface CatalogRead {
+  /** Which read this is; the later of two overlapping reads wins. */
+  order: number;
+  startedAtMs: number;
+  startedAfter: number;
+  catalog: Promise<Catalog>;
+}
+
+/** The newest read that finished. */
+let cachedRead: (CatalogRead & { loaded: Catalog }) | null = null;
+/** The newest read, which may still be in flight. */
+let latestRead: CatalogRead | null = null;
+/** Counts requests as they arrive; see `CatalogRead.startedAfter`. */
+let arrivals = 0;
+let reads = 0;
+
+/**
+ * The shortest time between two re-reads caused by a photo the cache does not
+ * have. Anyone can ask for a random photo ID, so a miss must not buy a catalog
+ * read every time.
+ */
+const MISS_REREAD_INTERVAL_MS = 1000;
+
+function startRead(env: Env, nowMs: number): CatalogRead {
+  const store = new R2BindingStore(env.PHOTOS);
+  const read: CatalogRead = {
+    order: ++reads,
+    startedAtMs: nowMs,
+    startedAfter: arrivals,
+    catalog: loadCatalog(store, () => new Date(nowMs).toISOString()).then(
+      ({ catalog }) => {
+        // Two reads can overlap; the older one must not replace the newer.
+        if (!cachedRead || cachedRead.order < read.order) {
+          cachedRead = { ...read, loaded: catalog };
+        }
+        return catalog;
+      },
+    ),
+  };
+  latestRead = read;
+  // A failed read must not be waited on by the next request forever.
+  read.catalog.catch(() => {
+    if (latestRead === read) latestRead = null;
+  });
+  return read;
+}
 
 /**
  * The catalog, cached for about a minute.
@@ -112,24 +165,49 @@ let cachedCatalog: { catalog: Catalog; loadedAtMs: number } | null = null;
  * cost is that a trashed photo's URLs may keep working for up to that minute —
  * accepted by the design, since images already viewed sit in browser caches
  * anyway and every recipient is trusted (decisions.md #9).
+ *
+ * The cache is believed when it has a photograph, never when it does not: a
+ * miss is asked again with `readCatalogSince`, because a photograph committed
+ * after the cached read is exactly what the library shows the moment an upload
+ * finishes (decisions.md #99).
  */
 async function readCatalog(env: Env, nowMs: number): Promise<Catalog> {
   const ttlMs =
     Number(env.CATALOG_CACHE_SECONDS ?? WORKER_CATALOG_CACHE_SECONDS) * 1000;
 
-  if (cachedCatalog && nowMs - cachedCatalog.loadedAtMs < ttlMs) {
-    return cachedCatalog.catalog;
+  if (cachedRead && nowMs - cachedRead.startedAtMs < ttlMs) {
+    return cachedRead.loaded;
   }
+  if (latestRead && nowMs - latestRead.startedAtMs < ttlMs) {
+    return latestRead.catalog;
+  }
+  return startRead(env, nowMs).catalog;
+}
 
-  const store = new R2BindingStore(env.PHOTOS);
-  const { catalog } = await loadCatalog(store, () => new Date(nowMs).toISOString());
-  cachedCatalog = { catalog, loadedAtMs: nowMs };
-  return catalog;
+/**
+ * A catalog read that began after the request numbered `arrival` did, so
+ * anything committed before that request was sent is in it.
+ *
+ * Concurrent misses share one read — the library asks for a whole sitting's
+ * thumbnails at once — and a new read waits until the interval since the last
+ * one has passed, rather than refusing: a refusal here is a broken image.
+ */
+async function readCatalogSince(env: Env, arrival: number): Promise<Catalog> {
+  for (;;) {
+    if (cachedRead && cachedRead.startedAfter >= arrival) return cachedRead.loaded;
+    if (latestRead && latestRead.startedAfter >= arrival) return latestRead.catalog;
+
+    const lastStartMs = latestRead?.startedAtMs ?? cachedRead?.startedAtMs ?? -Infinity;
+    const waitMs = lastStartMs + MISS_REREAD_INTERVAL_MS - Date.now();
+    if (waitMs <= 0) return startRead(env, Date.now()).catalog;
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
 }
 
 /** Test seam: drops the cache so a test does not have to wait out the TTL. */
 export function resetCatalogCache(): void {
-  cachedCatalog = null;
+  cachedRead = null;
+  latestRead = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,13 +256,15 @@ async function handleCapability(
   photoId: string,
   rendition: string,
   nowMs: number,
+  arrival: number,
 ): Promise<Response> {
   // `full` is excluded here on purpose: the full-resolution JPEG is reachable
   // only through a signed download URL, never by knowing the photo ID.
   if (!isDisplayRendition(rendition) || !isRendition(rendition)) return notFound();
 
-  const catalog = await readCatalog(env, nowMs);
-  const photo = getLivePhoto(catalog, photoId);
+  const photo =
+    getLivePhoto(await readCatalog(env, nowMs), photoId) ??
+    getLivePhoto(await readCatalogSince(env, arrival), photoId);
   if (!photo) return notFound();
 
   return serveObject(env, photo, rendition, {
@@ -206,6 +286,7 @@ async function handleSigned(
   photoId: string,
   rendition: string,
   nowMs: number,
+  arrival: number,
 ): Promise<Response> {
   if (!isRendition(rendition)) return notFound();
 
@@ -232,8 +313,11 @@ async function handleSigned(
   );
   if (!verified.ok) return notFound();
 
-  const catalog = await readCatalog(env, nowMs);
-  const photo = catalog.photos[photoId];
+  // Signed only for a photograph the catalog had when the grant was made, so
+  // a miss here is almost always a cache older than the photograph.
+  const photo =
+    (await readCatalog(env, nowMs)).photos[photoId] ??
+    (await readCatalogSince(env, arrival)).photos[photoId];
   if (!photo) return notFound();
 
   if (photo.trashedAt !== null && rendition === 'full') {
@@ -415,6 +499,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const nowMs = Date.now();
+    const arrival = ++arrivals;
 
     // Before the method check below, and only for this one path: everything
     // else this Worker does is a GET or a HEAD.
@@ -429,14 +514,14 @@ export default {
     if (capability) {
       const [, photoId, rendition] = capability as unknown as string[];
       if (!isValidPhotoId(photoId!)) return notFound();
-      return handleCapability(env, photoId!, rendition!, nowMs);
+      return handleCapability(env, photoId!, rendition!, nowMs, arrival);
     }
 
     const signed = SIGNED_ROUTE.exec(url.pathname);
     if (signed) {
       const [, photoId, rendition] = signed as unknown as string[];
       if (!isValidPhotoId(photoId!)) return notFound();
-      return handleSigned(env, url, photoId!, rendition!, nowMs);
+      return handleSigned(env, url, photoId!, rendition!, nowMs, arrival);
     }
 
     return notFound();

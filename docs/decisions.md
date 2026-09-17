@@ -1768,3 +1768,28 @@ its ordering, and its URLs are unchanged.
     and a line under it would make it smaller, the opposite of the point. At
     40rem and above nothing changes either; the corner layout's margins have
     room for them.
+
+## New photographs load at once, not a minute later — 2026-09-16
+
+99. **The Worker believes its cached catalog only when the photograph is in
+    it.** The Worker caches the catalog for about a minute (#9), and a
+    photograph committed after that read was the plain 404 until the copy
+    turned over. That is the ordinary case, not a corner: when an upload
+    settles the library reloads and asks for the new thumbnails at once, so
+    some of a fresh sitting showed as broken images in both apps until the
+    page was refreshed. A miss on either the capability or the signed route
+    now waits for a catalog read that began after the request arrived, and
+    refuses only if the photograph is not in that either.
+
+    Misses that arrive together share one read, and a miss never starts a
+    read less than a second after the last one; it waits instead, because a
+    refusal here is a broken image. A random photo ID therefore buys at most
+    one catalog read a second and a delayed 404 — still the plain 404, and
+    the delay is the same for an unknown ID as for a trashed one. Whether a
+    read began after a request is decided by a request counter rather than
+    the clock, which in a Worker stands still between I/O. A trashed photo's
+    URLs still work for up to the minute #9 accepts; a restored one is back
+    at once. Rejected: a shorter cache window, which only narrows the gap
+    and pays a catalog read for every photograph viewed; and having the
+    browser retry a failed thumbnail, which puts a server's staleness in
+    every client.

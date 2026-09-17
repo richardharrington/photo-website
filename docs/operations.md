@@ -1180,8 +1180,8 @@ Photos.
 3. Only then replace `catalog/current.json`, as a conditional write against
    its current ETag. If that write conflicts, someone edited during the
    restore — reload and redo the merge rather than forcing it.
-4. Confirm the Worker serves a few restored photos. It caches the catalog for
-   about a minute, so allow for that.
+4. Confirm the Worker serves a few restored photos. It re-reads the catalog
+   for a photo its cached copy lacks, so they should load at once.
 
 To recover a single photo, take its record from a snapshot and its objects
 from the mirror; the record's `derivatives` descriptors say what should be

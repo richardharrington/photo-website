@@ -269,3 +269,106 @@ describe('catalog caching', () => {
     ).toBeGreaterThan(1);
   });
 });
+
+describe('a photograph newer than the cached catalog', () => {
+  const NEW = 'a'.repeat(32);
+
+  function catalogReads(store: InMemoryObjectStore): number {
+    return store.calls.filter((c) => c === `get ${R2_KEYS.catalog}`).length;
+  }
+
+  /** Commit `NEW` behind the Worker's back, as the admin API does. */
+  function commitNew(store: InMemoryObjectStore): void {
+    const catalog = fixtureCatalog();
+    catalog.photos[NEW] = { ...catalog.photos[LIVE]!, id: NEW };
+    store.seed(R2_KEYS.catalog, encodeJson(catalog));
+    for (const rendition of ['full', 'thumb'] as const) {
+      store.seed(
+        photoObjectKey(NEW, rendition),
+        new TextEncoder().encode(`${NEW}:${rendition}`),
+      );
+    }
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout'] });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('is served at once, not a minute later', async () => {
+    // The library reloads when an upload settles and asks for the new
+    // thumbnails straight away; a cache read a moment earlier must not turn
+    // them into broken images.
+    const { env, store } = makeEnv();
+    await worker.fetch(get(`/p/${LIVE}/thumb`), env);
+    commitNew(store);
+    vi.advanceTimersByTime(5000);
+
+    const response = await worker.fetch(get(`/p/${NEW}/thumb`), env);
+    expect(response.status).toBe(200);
+  });
+
+  it('is served even when the cache was read a moment before it landed', async () => {
+    const { env, store } = makeEnv();
+    await worker.fetch(get(`/p/${LIVE}/thumb`), env);
+    commitNew(store);
+
+    const pending = worker.fetch(get(`/p/${NEW}/thumb`), env);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect((await pending).status).toBe(200);
+  });
+
+  it('can be downloaded through a signed URL at once', async () => {
+    const { env, store } = makeEnv();
+    await worker.fetch(get(`/p/${LIVE}/thumb`), env);
+    commitNew(store);
+    vi.advanceTimersByTime(5000);
+
+    const grant = {
+      photoId: NEW,
+      rendition: 'full',
+      expiresAt: Math.floor(Date.now() / 1000) + 300,
+    };
+    const path = assetGrantPath(grant, await signAssetGrant(KEY, grant));
+    const response = await worker.fetch(get(path), env);
+    expect(response.status).toBe(200);
+  });
+
+  it('shares one re-read among the misses that arrive together', async () => {
+    const { env, store } = makeEnv();
+    await worker.fetch(get(`/p/${LIVE}/thumb`), env);
+    commitNew(store);
+    vi.advanceTimersByTime(5000);
+
+    const responses = await Promise.all(
+      [NEW, NEW, UNKNOWN, UNKNOWN].map((id) =>
+        worker.fetch(get(`/p/${id}/thumb`), env),
+      ),
+    );
+    expect(responses.map((r) => r.status)).toEqual([200, 200, 404, 404]);
+    expect(catalogReads(store)).toBe(2);
+  });
+
+  it('does not let unknown IDs buy more than one catalog read a second', async () => {
+    const { env, store } = makeEnv();
+    await worker.fetch(get(`/p/${LIVE}/thumb`), env);
+
+    for (let i = 0; i < 5; i += 1) {
+      const pending = worker.fetch(get(`/p/${UNKNOWN}/thumb`), env);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect((await pending).status).toBe(404);
+    }
+    // The first read, then one per elapsed second.
+    expect(catalogReads(store)).toBeLessThanOrEqual(6);
+    expect(catalogReads(store)).toBeGreaterThan(1);
+  });
+
+  it('still refuses a trashed photo, with the plain 404', async () => {
+    const { env } = makeEnv();
+    const pending = worker.fetch(get(`/p/${TRASHED}/thumb`), env);
+    await vi.advanceTimersByTimeAsync(1000);
+    const response = await pending;
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe('Not Found');
+  });
+});
