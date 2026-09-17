@@ -447,7 +447,7 @@ test.describe('the admin photo view', () => {
     await expect(page.locator('.lightbox__caption')).toHaveText('First rocket up.');
     await expect(page.locator('.lightbox__date')).toHaveText(`${dayHeading}, 2026`);
     await expect(page.getByRole('dialog').getByRole('textbox')).toHaveCount(0);
-    for (const name of ['Download', 'Edit', 'Delete', 'Photo info']) {
+    for (const name of ['Download original size', 'Edit', 'Delete', 'Photo info']) {
       await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
     }
 
@@ -461,7 +461,9 @@ test.describe('the admin photo view', () => {
     for (const name of ['Delete', 'Photo info']) {
       await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
     }
-    await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Download original size' }),
+    ).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(
       0,
     );
@@ -801,7 +803,9 @@ test.describe('adding photographs', () => {
     // Editing is all it offers: there are no stored bytes to download and no
     // catalog record to delete. Edit is there in the admin too, where nothing
     // counts as added from this browser.
-    await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Download original size' }),
+    ).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(
       0,
     );
@@ -884,7 +888,9 @@ test.describe('the trash', () => {
     );
 
     await expect(page.getByRole('button', { name: 'Photo info' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Download original size' }),
+    ).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(
       0,
     );
@@ -957,7 +963,9 @@ test.describe('the recent view in the admin', () => {
     await expect(page.locator('.layout__nav [aria-current="page"]')).toHaveText(
       'Recently added',
     );
-    await expect(page.getByRole('link', { name: 'All photos' })).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: 'All photos by date taken' }),
+    ).toBeVisible();
     await expect(page.getByRole('link', { name: /^Trash/ })).toBeVisible();
 
     // The drop target is chrome, not part of a listing, so it stays.
@@ -970,7 +978,9 @@ test.describe('the recent view in the admin', () => {
   }) => {
     await page.goto(`${BASE}/trash`);
     await expect(page.locator('.layout__nav [aria-current="page"]')).toHaveCount(0);
-    await expect(page.getByRole('link', { name: 'All photos' })).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: 'All photos by date taken' }),
+    ).toBeVisible();
     await expect(page.getByRole('link', { name: /Recently added/ })).toBeVisible();
   });
 

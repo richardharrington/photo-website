@@ -117,7 +117,7 @@ describe('the lightbox', () => {
 
     expect(form()).toBeNull();
     expect(button('Edit')).not.toBeNull();
-    expect(button('Download')).not.toBeNull();
+    expect(button('Download original size')).not.toBeNull();
     expect(button('Delete')).not.toBeNull();
     expect(button('Photo info')).not.toBeNull();
     expect(button('Restore')).toBeNull();
@@ -129,7 +129,7 @@ describe('the lightbox', () => {
 
     expect(button('Restore')).not.toBeNull();
     expect(form()).toBeNull();
-    expect(button('Download')).toBeNull();
+    expect(button('Download original size')).toBeNull();
     expect(button('Delete')).toBeNull();
     expect(filenameCorner()).toBeNull();
   });
@@ -139,7 +139,7 @@ describe('the lightbox', () => {
 
     expect(form()).toBeNull();
     expect(button('Edit')).not.toBeNull();
-    expect(button('Download')).not.toBeNull();
+    expect(button('Download original size')).not.toBeNull();
     expect(button('Delete')).not.toBeNull();
     expect(filenameCorner()?.textContent).toBe('IMG_0001.HEIC');
     expect(button('Restore')).toBeNull();
@@ -226,7 +226,7 @@ describe('Delete, by who added the photograph', () => {
     const curation = lightboxUnder(FAMILY_LIBRARY, false);
 
     expect(button('Delete')).toBeNull();
-    expect(button('Download')).not.toBeNull();
+    expect(button('Download original size')).not.toBeNull();
     expect(button('Photo info')).not.toBeNull();
     fireEvent.keyDown(window, { key: 'Delete' });
     fireEvent.keyDown(window, { key: 'Backspace' });

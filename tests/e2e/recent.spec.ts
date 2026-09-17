@@ -28,7 +28,7 @@ test.describe('the recent view', () => {
 
     // On the library, "All photos" is plain text and the other is a link.
     await expect(page.locator('.layout__nav [aria-current="page"]')).toHaveText(
-      'All photos',
+      'All photos by date taken',
     );
 
     await page.getByRole('link', { name: /Recently added/ }).click();
@@ -37,7 +37,9 @@ test.describe('the recent view', () => {
     await expect(page.locator('.layout__nav [aria-current="page"]')).toHaveText(
       'Recently added',
     );
-    await expect(page.getByRole('link', { name: 'All photos' })).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: 'All photos by date taken' }),
+    ).toBeVisible();
 
     // Every live photograph, in one sitting: the fixture shares one createdAt.
     await expect(page.locator('.recent__group')).toHaveCount(1);
@@ -106,7 +108,7 @@ test.describe('the recent view', () => {
     await expect(page.locator('.recent__group')).toHaveCount(1);
 
     // Cleared by the visit, and it stays cleared back on the library.
-    await page.getByRole('link', { name: 'All photos' }).click();
+    await page.getByRole('link', { name: 'All photos by date taken' }).click();
     await expect(page.locator('.view-toggle__notice')).toHaveCount(0);
 
     // And across a reload, because it is remembered in this browser.

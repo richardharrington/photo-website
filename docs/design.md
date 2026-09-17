@@ -297,8 +297,8 @@ is described under
   month headings pin to the top of the viewport while scrolling; a month slides
   up behind its year rather than over it.
 - There are **two views of the library**, and a toggle beside the site title
-  moves between them: **All photos**, the page just described, and **Recently
-  added** at `/recent`. The current view is plain text; the other is a link.
+  moves between them: **All photos by date taken**, the page just described,
+  and **Recently added** at `/recent`. The current view is plain text; the other is a link.
   Capture date is right for finding a photograph and useless for noticing one —
   a box of scanned 1978 prints is new, and on the timeline it sits at the
   bottom of the page under a 1978 heading. The Recently added view is the only
@@ -353,7 +353,7 @@ is described under
   email (decisions.md #91).
 - A plain click or tap on a photograph opens it to read. The photo view shows
   its date (or "Undated"), its caption clamped to a few lines with **More**
-  when it runs longer, and **Download**, **Edit**, **Delete**, and **Photo
+  when it runs longer, and **Download original size**, **Edit**, **Delete**, and **Photo
   info**. **Edit** and **Delete** appear only on a photograph added from this
   browser; on any other photograph there is neither, disabled or otherwise,
   and the Delete key does nothing. Photo info on every photograph says where

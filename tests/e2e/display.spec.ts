@@ -364,7 +364,7 @@ test.describe('the photo view', () => {
   test('offers a download without saying what size', async ({ page }) => {
     await page.goto(`${BASE}/photo/${FIXTURE_PHOTO_IDS['market']}`);
     await expect(
-      page.getByRole('button', { name: 'Download', exact: true }),
+      page.getByRole('button', { name: 'Download original size', exact: true }),
     ).toBeVisible();
   });
 
@@ -378,7 +378,7 @@ test.describe('the photo view', () => {
     const caption = await box(page.locator('.lightbox__caption'));
     const date = await box(page.locator('.lightbox__date'));
     const download = await box(
-      page.getByRole('button', { name: 'Download', exact: true }),
+      page.getByRole('button', { name: 'Download original size', exact: true }),
     );
     const info = await box(page.getByRole('button', { name: 'Photo info' }));
 
@@ -456,7 +456,9 @@ test.describe('the photo view', () => {
     expect(info.x).toBeGreaterThan(remove.x);
     // Left-aligned with the form, under Save and Cancel.
     expect(Math.abs(remove.x - form.x)).toBeLessThan(2);
-    await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Download original size' }),
+    ).toHaveCount(0);
 
     // And the whole stack sits clear of the picture.
     expect(
@@ -760,7 +762,7 @@ test.describe('the family can curate', () => {
 
     // In the view the reader is on, and in the one they left, with no reload.
     await expect(listed(photo.id)).toBeVisible({ timeout: 15_000 });
-    await page.getByRole('link', { name: 'All photos' }).click();
+    await page.getByRole('link', { name: 'All photos by date taken' }).click();
     await expect(listed(photo.id)).toBeVisible();
   });
 
@@ -798,7 +800,9 @@ test.describe('the family can curate', () => {
     const id = FIXTURE_PHOTO_IDS['market']!;
     await page.goto(`${base}/photo/${id}`);
 
-    await expect(page.getByRole('button', { name: 'Download' })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Download original size' }),
+    ).toBeVisible();
     await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(
       0,
     );
@@ -1050,7 +1054,9 @@ test.describe('the family can curate', () => {
       await expect(
         page.getByRole('button', { name: 'Delete', exact: true }),
       ).toHaveCount(0);
-      await expect(page.getByRole('button', { name: 'Download' })).toHaveCount(0);
+      await expect(
+        page.getByRole('button', { name: 'Download original size' }),
+      ).toHaveCount(0);
       // Restore, and Delete permanently, which the last test in this group uses.
       await expect(
         page.getByRole('button', { name: 'Delete permanently' }),
@@ -1062,7 +1068,7 @@ test.describe('the family can curate', () => {
       await expect(trashLink).toHaveText('Trash (2)');
 
       // Back in the library without a reload: the header's link, not a goto.
-      await page.getByRole('link', { name: 'All photos' }).click();
+      await page.getByRole('link', { name: 'All photos by date taken' }).click();
       await expect(page).toHaveURL(`${base}/`);
       await expect(page.locator(`#photo-${id}`)).toBeVisible();
     } finally {
@@ -1096,7 +1102,7 @@ test.describe('the family can curate', () => {
     // Undo from here: gone from the listing and back in the library, no reload.
     await undo.click();
     await expect(trashed).toHaveCount(0);
-    await page.getByRole('link', { name: 'All photos' }).click();
+    await page.getByRole('link', { name: 'All photos by date taken' }).click();
     await expect(page.locator(`#photo-${id}`)).toBeVisible();
   });
 
@@ -1105,7 +1111,9 @@ test.describe('the family can curate', () => {
     await page.goto(`${base}/photo/${FIXTURE_PHOTO_IDS['beach-early']}`);
 
     await expect(page.getByRole('dialog')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Download' })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Download original size' }),
+    ).toBeVisible();
     await expect(page.getByRole('button', { name: 'Delete', exact: true })).toHaveCount(
       0,
     );

@@ -25,7 +25,7 @@ interface ViewToggleProps {
  * says *that* something is new and nothing about *what* (decisions.md #65).
  *
  * It sits after the Recently added element and reads as a parenthetical on it
- * — All photos · Recently added · (including new ones you haven't seen) — so
+ * — All photos by date taken · Recently added · (including new ones you haven't seen) — so
  * a screen reader meets the link first and then what qualifies it, which is
  * the order the sentence is written in. It is not itself a link: it is beside
  * the one that acts on it, and a control that duplicates its neighbour is one
@@ -37,10 +37,10 @@ export function ViewToggle({ current, unseen }: ViewToggleProps) {
     <>
       {current === 'library' ? (
         <span className="view-toggle__current" aria-current="page">
-          All photos
+          All photos by date taken
         </span>
       ) : (
-        <Link to={routes.home()}>All photos</Link>
+        <Link to={routes.home()}>All photos by date taken</Link>
       )}
 
       {current === 'recent' ? (

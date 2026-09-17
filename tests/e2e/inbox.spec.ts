@@ -398,7 +398,7 @@ test('adds the ticked photo with the edited caption, and empties the inbox', asy
   // And it is already in the library this page holds: the header's link to
   // All photos shows it without a reload.
   const landed = (await (await page.request.get(`${API}/timeline`)).json()).recent[0];
-  await page.getByRole('link', { name: 'All photos' }).click();
+  await page.getByRole('link', { name: 'All photos by date taken' }).click();
   await expect(page.locator(`#photo-${landed.photoIds[0]}`)).toBeVisible();
 
   // In the library, indistinguishable from a dropped file — and carrying the

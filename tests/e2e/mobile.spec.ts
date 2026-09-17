@@ -80,7 +80,7 @@ test('the photo view puts its controls below the photo, not over it', async ({
   // Download and Photo info sit side by side in a footer row under the arrows
   // rather than floating over a photo that spans the whole width of the screen.
   const download = (await page
-    .getByRole('button', { name: 'Download', exact: true })
+    .getByRole('button', { name: 'Download original size', exact: true })
     .boundingBox())!;
   const info = (await page.getByRole('button', { name: 'Photo info' }).boundingBox())!;
 

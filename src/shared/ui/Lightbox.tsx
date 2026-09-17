@@ -780,7 +780,7 @@ export function Lightbox({
                 selection. The edit view has no Download either. */}
             {editing || (curation && !curation.can.download) ? null : (
               <button type="button" onClick={onDownload} disabled={downloading}>
-                {downloading ? 'Preparing download…' : 'Download'}
+                {downloading ? 'Preparing download…' : 'Download original size'}
               </button>
             )}
             {editable && !editing ? (

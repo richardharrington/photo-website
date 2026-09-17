@@ -200,7 +200,7 @@ describe('the read view', () => {
     mount(FAMILY_LIBRARY, { addedHere: true });
 
     expect(form()).toBeNull();
-    for (const name of ['Download', 'Edit', 'Delete', 'Photo info']) {
+    for (const name of ['Download original size', 'Edit', 'Delete', 'Photo info']) {
       expect(button(name), name).not.toBeNull();
     }
     expect(dateLine()?.textContent).toBe(formatCaptureDate('2026-07-04'));
@@ -209,7 +209,7 @@ describe('the read view', () => {
     openEdit();
 
     expect(form()).not.toBeNull();
-    expect(button('Download')).toBeNull();
+    expect(button('Download original size')).toBeNull();
     expect(button('Edit')).toBeNull();
     expect(button('Delete')).not.toBeNull();
     expect(button('Photo info')).not.toBeNull();
@@ -221,7 +221,7 @@ describe('the read view', () => {
   it("under the family's library, on any other photograph: Download and Photo info, and nothing to edit", () => {
     mount(FAMILY_LIBRARY, { addedHere: false });
 
-    expect(button('Download')).not.toBeNull();
+    expect(button('Download original size')).not.toBeNull();
     expect(button('Photo info')).not.toBeNull();
     expect(button('Edit')).toBeNull();
     expect(button('Delete')).toBeNull();
@@ -245,7 +245,7 @@ describe('the read view', () => {
 
     expect(button('Edit')).not.toBeNull();
     expect(button('Photo info')).not.toBeNull();
-    expect(button('Download')).toBeNull();
+    expect(button('Download original size')).toBeNull();
     expect(button('Delete')).toBeNull();
     expect(form()).toBeNull();
   });
